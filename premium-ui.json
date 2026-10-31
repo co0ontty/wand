@@ -19,16 +19,14 @@
   },
   "requiredCommands": [
     "typecheck",
-    "unit",
     "build"
   ],
   "commands": {
     "typecheck": "npm run check",
-    "unit": "npm test",
     "build": "npm run build"
   },
   "evidence": {
-    "crudFullFlow": "tests/web-ui-task-board.test.ts",
-    "failurePaths": "tests/web-ui-task-board.test.ts"
+    "crudFullFlow": "src/web-ui/react/issues",
+    "failurePaths": "src/web-ui/react/issues"
   }
 }

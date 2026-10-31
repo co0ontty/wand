@@ -55,6 +55,10 @@ function taskNamingSessions(storage: WandStorage, card: WandTask): SessionSnapsh
   const needsMessageFallback: string[] = [];
   const addSlim = (session: SessionSnapshot | null | undefined): void => {
     if (!session) return;
+    // An explicit verification round describes the check, not a new delivery goal.
+    // Classify by its durable dispatch purpose, never by words in the title/prompt.
+    if (session.automationId?.startsWith("wand-task-comment:")
+      && storage.isTaskReviewComment(session.automationId.slice("wand-task-comment:".length))) return;
     add(session);
     // boardTitleFromSession 只在 title/description 都缺时才翻 messages 找首条用户输入。
     if (!isBlankTerminal(session) && !session.title?.trim() && !session.description?.trim()) {

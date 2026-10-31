@@ -270,16 +270,18 @@ export class SessionRegistry {
     return this.updateStored(id, (snapshot) => ({ ...snapshot, title, description, summary: description }));
   }
 
-  /**
-   * 归档 / 取消归档一个会话：只写标记，不杀进程、不删历史；真正的清理留给保留期扫描。
-   * 会话可能只存在于 storage（重启后未加载），因此 storage-only 也要能改。
-   */
   /** 停掉空闲 PTY 壳。保留期只对「进程还在、但没有正在处理的回合」调用。 */
   stop(id: string): SessionSnapshot | null {
     if (this.ownerOf(id) !== "pty") return this.get(id);
     return this.processes.stop(id);
   }
 
+  /**
+   * 归档 / 取消归档一个会话：不杀进程。归档后这次对话不再续接，
+   * 立刻删掉 CLI 原生历史，避免 ~/.pi、~/.codex 这类目录继续堆积；
+   * 取消归档时把原生 id 移出隐藏名单，已有的 CLI 历史可以继续恢复。
+   * 会话可能只存在于 storage（重启后未加载），因此 storage-only 也要能改。
+   */
   setArchived(id: string, archived: boolean): SessionSnapshot | null {
     const current = this.getLatest(id);
     if (current && !!current.archived === archived && (!archived || current.archivedAt)) return current;
@@ -287,13 +289,62 @@ export class SessionRegistry {
       throw Object.assign(new Error("会话仍在执行或等待处理，完成后才能归档。"), { statusCode: 409 });
     }
     const owner = this.ownerOf(id);
-    if (owner === "structured") return this.structured.setSessionArchived(id, archived);
-    if (owner === "pty") return this.processes.setSessionArchived(id, archived);
-    return this.updateStored(id, (snapshot) => ({
-      ...snapshot,
-      archived,
-      archivedAt: archived ? new Date().toISOString() : null,
-    }));
+    const updated = owner === "structured"
+      ? this.structured.setSessionArchived(id, archived)
+      : owner === "pty"
+        ? this.processes.setSessionArchived(id, archived)
+        : this.updateStored(id, (snapshot) => ({
+          ...snapshot,
+          archived,
+          archivedAt: archived ? new Date().toISOString() : null,
+        }));
+    if (updated) this.syncArchivedProviderHistory(updated);
+    return updated;
+  }
+
+  /**
+   * 归档与 CLI 原生历史的对应关系。别的未归档会话还在用同一个原生 id 时不动。
+   * 删文件失败只记日志：归档标记已经写上，不能因为清理失败把请求打回去。
+   */
+  private syncArchivedProviderHistory(snapshot: SessionSnapshot): void {
+    if (!snapshot.archived) {
+      const providerSessionId = snapshot.claudeSessionId?.trim();
+      if (!providerSessionId) return;
+      const provider = sessionProvider(snapshot);
+      const shared = this.activeNativeOwner(snapshot.id, provider, providerSessionId);
+      if (!shared) removeHiddenSessionIds(this.storage, [providerSessionId]);
+      return;
+    }
+    this.releaseArchivedProviderHistory([snapshot.id]);
+  }
+
+  /**
+   * 清掉这些已归档会话独占的 CLI 原生历史，并记入隐藏名单。
+   * 同一个原生 id 仍被未归档会话使用时跳过。重复调用只是再删一次已不存在的文件。
+   */
+  releaseArchivedProviderHistory(sessionIds: readonly string[]): void {
+    const wanted = new Set(sessionIds);
+    for (const snapshot of this.listSlim()) {
+      if (!wanted.has(snapshot.id) || !snapshot.archived) continue;
+      const providerSessionId = snapshot.claudeSessionId?.trim();
+      if (!providerSessionId) continue;
+      const provider = sessionProvider(snapshot);
+      if (this.activeNativeOwner(snapshot.id, provider, providerSessionId)) continue;
+      addHiddenSessionIds(this.storage, [providerSessionId]);
+      try {
+        deleteProviderNativeHistory(this.processes, provider, providerSessionId, snapshot.cwd);
+      } catch {
+        logInfo("[SessionCleanup] Archived CLI session cleanup could not complete; artifacts were preserved.");
+      }
+    }
+  }
+
+  /** 另一个未归档会话是否还拿着同一个 CLI 原生 id。 */
+  private activeNativeOwner(sessionId: string, provider: string, providerSessionId: string): boolean {
+    return this.listSlim().some((other) => other.id !== sessionId
+      && !other.archived
+      && other.claudeSessionId?.trim() === providerSessionId
+      && sessionProvider(other) === provider);
   }
 
   updateWorktreeState(

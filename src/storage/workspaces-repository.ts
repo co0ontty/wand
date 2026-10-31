@@ -299,6 +299,19 @@ export class WorkspaceRepository {
       ? this.s.ensureDefaultWandMilestone().id : id;
   }
 
+  /** A user-named session container; deliberately has no task-board card. */
+  createWorkspaceSection(input: { workspaceId: string; name: string; cwd?: string; sessionId?: string }): WorkspaceTask {
+    return this.s.transaction(() => {
+      if (!this.getWorkspace(input.workspaceId)) throw new Error("分区所属工作区不存在。");
+      const name = input.name.trim();
+      if (!name || name.length > 80) throw new Error("请输入 1–80 字的分区名称。");
+      const id = this.insertWorkspaceTask({ ...input, name });
+      this.db.prepare("UPDATE workspace_tasks SET container_kind = 'section' WHERE id = ?").run(id);
+      if (input.sessionId) this.s.moveSessionToWorkspaceTask(input.sessionId, id);
+      return this.getWorkspaceTask(id)!;
+    });
+  }
+
   createWorkspaceTask(input: {
     workspaceId: string; name: string; worktree?: WorkspaceTaskWorktree | null;
     cwd?: string | null; status?: WorkspaceTaskStatus; milestoneId?: string | null;
@@ -327,7 +340,13 @@ export class WorkspaceRepository {
   }): void {
     this.s.transaction(() => {
       const card = this.s.getWandTaskByWorkspaceTaskId(id);
-      if (!card) throw new Error("未找到该任务。");
+      if (!card) {
+        const container = this.getWorkspaceTask(id);
+        if (container?.kind !== "section") throw new Error("未找到该任务。");
+        if (patch.name !== undefined) this.db.prepare("UPDATE workspace_tasks SET name = ? WHERE id = ?").run(patch.name, id);
+        if (patch.status !== undefined) this.db.prepare("UPDATE workspace_tasks SET status = ? WHERE id = ?").run(patch.status, id);
+        return;
+      }
       if (patch.worktree !== undefined) {
         this.db.prepare("UPDATE workspace_tasks SET worktree_json = ? WHERE id = ?")
           .run(patch.worktree ? JSON.stringify(patch.worktree) : null, id);
@@ -350,6 +369,9 @@ export class WorkspaceRepository {
 
   archiveWorkspaceTask(id: string): WandTask | null {
     const card = this.s.getWandTaskByWorkspaceTaskId(id);
+    if (!card && this.getWorkspaceTask(id)?.kind === "section") {
+      throw new Error("分区不需要归档，请将会话移回工作区后删除空分区。");
+    }
     return card ? this.s.updateWandTask(card.id, { status: "archived" }) : null;
   }
 

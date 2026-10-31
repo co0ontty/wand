@@ -9,6 +9,7 @@ import { usePortalContainer } from "../ui/portal-context";
 import { createPortal } from "react-dom";
 import { taskBoardRepository } from "./task-board-repository";
 import { TaskTextArea } from "./task-form";
+import { installChatComposerStyles } from "../chat-composer-styles";
 import { acceptCommentDraft, commentDeliveryUncertain, commentDraft, commentMentionHeld, commentMentionQuery, commentReferenceQuery, commentRequestIdentity, commentRequestRejected, editCommentDraft, insertCommentMention, insertCommentReference, parseTaskReferenceIds, settleCommentRequest, type CommentDraft } from "./task-comment-composer";
 
 type MentionEmployee = { id: string; name: string; archivedAt?: string | null };
@@ -22,8 +23,9 @@ function focusCommentCaret(node: HTMLTextAreaElement | null | undefined, caret: 
   node.setSelectionRange(pos, pos);
 }
 
-export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [], sessions = [], onOpenSession, onOpenTask }: { taskId: string; updatedAt: string;
+export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution", employees = [], childTasks = [], sessions = [], onOpenSession, onOpenTask }: { taskId: string; updatedAt: string; dispatchPurpose?: "execution" | "review";
   employees?: MentionEmployee[]; childTasks?: WandTaskListed[]; sessions?: IssueSessionSummary[]; onOpenSession?: (id: string) => void; onOpenTask?: (id: string) => void }): React.ReactElement {
+  React.useLayoutEffect(() => { installChatComposerStyles(); }, []);
   const [result, setResult] = React.useState<{ taskId: string; comments: WandTaskComment[]; totalCount: number; nextCursor: string | null; failed: boolean; loading: boolean }>({ taskId, comments: [], totalCount: 0, nextCursor: null, failed: false, loading: true });
   const [attempt, retry] = React.useReducer(value => value + 1, 0);
   const [draft, setDraft] = React.useState(() => commentDraft(taskId));
@@ -164,9 +166,9 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
         if (!controller.signal.aborted && request === generation) setResult(current => {
           const exactById = new Map(statusPages.flatMap(statusPage => statusPage.comments.map(comment => [comment.id, comment] as const)));
           const freshDispatches = new Map(page.comments.filter(comment => comment.taskId === taskId && comment.dispatch).map(comment => [comment.id, comment.dispatch] as const));
-          const existingWithStatus = existing.map(comment => exactById.has(comment.id) ? { ...comment, dispatch: exactById.get(comment.id)?.dispatch ?? null } : comment);
+          const existingWithStatus = existing.map(comment => exactById.has(comment.id) ? { ...comment, dispatch: exactById.get(comment.id)?.dispatch ?? null, reviewWritebackPending: exactById.get(comment.id)?.reviewWritebackPending ?? comment.reviewWritebackPending } : comment);
           const refreshedPage = page.comments.filter(comment => comment.taskId === taskId).map(comment => freshDispatches.has(comment.id) && exactById.has(comment.id)
-            ? { ...comment, dispatch: exactById.get(comment.id)?.dispatch ?? comment.dispatch } : comment);
+            ? { ...comment, dispatch: exactById.get(comment.id)?.dispatch ?? comment.dispatch, reviewWritebackPending: exactById.get(comment.id)?.reviewWritebackPending ?? comment.reviewWritebackPending } : comment);
           const merged = new Map([...existingWithStatus, ...refreshedPage].map(comment => [comment.id, comment]));
           setSourceComments(currentSources => {
             const next = { ...currentSources };
@@ -254,9 +256,9 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
     const submitted = { ...draft, employeeId };
     let identity: Awaited<ReturnType<typeof commentRequestIdentity>> | undefined;
     try {
-      identity = await commentRequestIdentity(taskId, submitted);
+      identity = await commentRequestIdentity(taskId, submitted, submitted.employeeId ? dispatchPurpose : "execution");
       const response = await taskBoardRepository.postComment(taskId, { requestId: identity.requestId, body: submitted.body.trim(),
-        employeeId: submitted.employeeId || null, sourceCommentId: submitted.sourceCommentId });
+        employeeId: submitted.employeeId || null, sourceCommentId: submitted.sourceCommentId, ...(submitted.employeeId ? { purpose: identity.purpose } : {}) });
       settleCommentRequest(identity, response.comment);
       if (mounted.current) setStreamExpanded(current => ({ ...current, [response.comment.id]: true }));
       const uncertain = commentDeliveryUncertain(response.comment);
@@ -342,6 +344,7 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
           onClick={() => chooseReference(task)}
         ><span className="task-comment-reference-id">#{task.identifier}</span><span className="task-comment-reference-title">{task.title}</span></button>)}
       </div>, portal) : null}
+      <div className="wand-composer-surface task-comment-input-surface">
       <TaskTextArea ref={input} value={draft.body} rows={3} maxLength={16000} aria-label="任务评论输入"
         aria-expanded={menuOpen || referenceMenuOpen} aria-controls={menuOpen ? "task-comment-mention" : referenceMenuOpen ? "task-comment-reference" : undefined}
         aria-activedescendant={menuOpen && matches[highlight] ? `task-comment-mention-option-${matches[highlight]!.id}`
@@ -372,7 +375,8 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
           if (event.key === "Escape") { edit({ sourceCommentId: null }); setReplyLabel(""); }
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void submit(); }
         }}/>
-      <Flex wrap gap="small" align="center">
+      <Flex gap="small" align="center" className="task-comment-toolbar">
+        <Typography.Text type="secondary" className="task-comment-toolbar-hint">⌘ / Ctrl + Enter</Typography.Text>
         <WandButton ref={submitButton} kind="primary" size="small" style={{ width: 128, height: 32, flexShrink: 0 }} data-comment-submit-phase={submitPhase} aria-label={submitLabels[submitPhase]}
           disabled={busy || !draft.body.trim()} onClick={() => void submit()}>
           <span style={{ display: "grid" }} aria-live="polite">
@@ -381,6 +385,9 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
                 transition: "opacity var(--motion-fast) var(--ease-in-out-smooth)" }}>{label}</span>)}
           </span>
         </WandButton>
+      </Flex>
+      </div>
+      <Flex gap="small" align="center">
         <Typography.Text type="secondary" role="status">{message || (dispatching
           ? `将派发给 @${bound?.name}${referencedIdentifiers.length ? `，目标 ${referencedIdentifiers.map(id => `#${id}`).join("、")}` : ""}。只派发这一次选中的人。`
           : referencedIdentifiers.length ? `本轮引用 ${referencedIdentifiers.map(id => `#${id}`).join("、")}；正文里没有选中的 @员工时，不会启动执行。`

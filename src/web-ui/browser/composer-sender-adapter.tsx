@@ -5,10 +5,10 @@ import type { ResizeInput, SenderProjection } from "../react/composer-sender/hos
 import { WandUiProvider } from "../react/theme";
 import { installStyleSheet } from "../react/styles";
 import { composer, state } from "./state.js";
-import { ComposerIdentity, ComposerUsage } from "../react/composer-sender/identity.js";
+import { ComposerUsage } from "../react/composer-sender/identity.js";
+import { ComposerEmployeeButton } from "../react/composer-sender/employee.js";
+import { employeeProfile } from "../react/agents/employee-profile-state.js";
 import { computeRunningSignal } from "../session-activity.js";
-import { computeRunningPhase } from "../running-activity.js";
-import { composerAvatarActivity } from "../composer-avatar-activity.js";
 import { latestChatUsage } from "../chat-message-meta.js";
 import { renderStructuredStatusBar } from "./utils.js";
 interface Mount { root: Root; input: HTMLTextAreaElement; chrome: HTMLElement; }
@@ -69,14 +69,17 @@ export function syncComposerCompanion(): void {
   if (avatarHost) {
     const root = avatarRoots.get(avatarHost) ?? createRoot(avatarHost);
     avatarRoots.set(avatarHost, root);
-    // Set the text lane before Sender measures the restored draft's height.
-    flushSync(() => root.render(<>
-      {session?.employeeId ? <ComposerIdentity fileActivity={composerAvatarActivity(activity, session.messages)} thinking={computeRunningPhase(activity) === "executing"} employee={{
-        id: session.employeeId, name: session.employeeName || "员工", avatar: session.employeeAvatar,
-      }}/> : null}
-      <ComposerUsage employeeName={session?.employeeId ? session.employeeName || "员工" : undefined} usage={latestChatUsage(session?.messages ?? [])} activity={activity} legacyStatus={session?.sessionKind === "structured"}/>
-    </>));
+    flushSync(() => root.render(<ComposerUsage employeeName={session?.employeeId ? session.employeeName || "员工" : undefined}
+      usage={latestChatUsage(session?.messages ?? [])} activity={activity} legacyStatus={session?.sessionKind === "structured"}/>));
     renderStructuredStatusBar(null, session);
+  }
+  const employeeHost = document.querySelector<HTMLElement>("[data-composer-employee-host]");
+  if (employeeHost) {
+    const root = avatarRoots.get(employeeHost) ?? createRoot(employeeHost);
+    avatarRoots.set(employeeHost, root);
+    const employee = session?.employeeId ? { id: session.employeeId, name: session.employeeName || "员工", avatar: session.employeeAvatar } : null;
+    flushSync(() => root.render(<WandUiProvider>{employee ? <ComposerEmployeeButton employee={employee}
+      onClick={event => employeeProfile.open(employee, event.currentTarget)}/> : null}</WandUiProvider>));
   }
 }
 

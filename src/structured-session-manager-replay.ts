@@ -79,6 +79,7 @@ export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor 
     sessionId: session.claudeSessionId,
     model: session.selectedModel ?? session.structuredState?.model,
     ...(runner === "opencode-cli-run" ? { usage: undefined } : {}),
+
   };
   const processor: ReplayProcessor = {
     state,
@@ -393,6 +394,31 @@ export function cancelPendingResourceSelection(messages: ConversationTurn[] | un
   return [...messages.slice(0, -1), { ...last, completedAt: isoNow(), resourceSelection: {
     ...last.resourceSelection, status: "cancelled", label: "本轮自动选择已取消",
   } }];
+}
+
+/** Replace one Pi segment after a native steering input; earlier turns stay untouched. */
+export function upsertPiAssistantSegment(
+  messages: ConversationTurn[] | undefined,
+  turn: ConversationTurn,
+  inputMessageId: string,
+  complete = false,
+): ConversationTurn[] {
+  const msgs = [...(messages ?? [])];
+  let at = -1;
+  for (let index = msgs.length - 1; index >= 0; index--) {
+    if (msgs[index].role === "user" && msgs[index].messageId === inputMessageId) { at = index; break; }
+  }
+  if (at < 0) return upsertAssistantMessage(msgs, turn, complete, false);
+  const previous = msgs[at + 1]?.role === "assistant" && !msgs[at + 1].notice ? msgs[at + 1] : undefined;
+  const next: ConversationTurn = { ...turn, createdAt: previous?.createdAt ?? turn.createdAt ?? isoNow(),
+    content: stampNewToolUseTimes(turn.content, previous?.content, isoNow(), true),
+    ...(turn.resourceSelection ? {} : previous?.resourceSelection ? { resourceSelection: previous.resourceSelection } : {}),
+  };
+  if (complete) next.completedAt = previous?.completedAt ?? isoNow();
+  else if (previous?.completedAt) next.completedAt = previous.completedAt;
+  if (previous) msgs[at + 1] = next;
+  else msgs.splice(at + 1, 0, next);
+  return msgs;
 }
 
 export function upsertAssistantMessage(

@@ -8,7 +8,7 @@ Wand 为自己创建的临时文件记录用途和进程租约，正常完成即
 
 - 服务数据目录的 `cache/temporary/`：测试与上传暂存的一次性工作目录。
 - 系统临时目录的用户私有 `wand-transient-<uid>/`：一次性运行的临时策略与中间文件。
-- Unix `/tmp/wand-transient-<uid>/`（macOS 的真实路径为 `/private/tmp/`）：`npm test` 的临时工作目录。测试子进程的 TMPDIR/TMP/TEMP 指向本次目录，即使测试漏写了单个 fixture 的清理，整轮正常结束或失败后仍能回收。短路径避免 Unix socket 长度超限。
+- Unix `/tmp/wand-transient-<uid>/`（macOS 的真实路径为 `/private/tmp/`）用于短生命周期临时文件。短路径避免 Unix socket 长度超限。
 - 上传：每个用户项目的 `.wand-uploads/`。新上传文件的归属、实际路径及文件身份写入服务数据库，服务重启后仍能检查；只对有记录的文件回收，不搜索用户磁盘猜测无用文件。
 - 未完成上传先写入带进程租约的 `upload-stage` 暂存目录；完整接收并通过配额后才以排他创建写入最终位置，成功/失败或连接关闭后回收暂存。进程强杀留下的接收暂存按七天崩溃规则自动回收。
 - 系统运行诊断：macOS/file redirection 的 `web.log`、`web-error.log`、`terminald.log`、`terminald-error.log`，以及会话的 `structured-stdout.log`、`structured-stderr.log`、`structured-spawns.jsonl`。每份当前日志最多 **10 MiB**，最多保留 **3 份**轮转归档；归档超过 **14 天**且无占用时后台回收。单次超大诊断块只保留末尾10MiB，完整业务消息仍归会话存储。

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { WandButton } from "../ui/button.js";
+import { WandIcon } from "../ui/icons.js";
 
 /** Keep the same input node and draft owner when opening a larger editing area. */
 export function useEditorExpansion(owner: string, input: () => HTMLTextAreaElement | null | undefined) {
@@ -20,7 +21,10 @@ export function useEditorExpansion(owner: string, input: () => HTMLTextAreaEleme
       }
     });
   };
-  return { expanded, control: <WandButton size="small" kind="ghost" className="composer-expand-editor" aria-expanded={expanded} onClick={toggle}>
-    {expanded ? "收起编辑" : "展开编辑"}
+  return { expanded, control: <WandButton size="small" kind="ghost" className="composer-expand-editor" aria-expanded={expanded}
+    aria-label={expanded ? "收起编辑" : "展开编辑"} title={expanded ? "收起编辑" : "展开编辑"} onClick={toggle}>
+    <span className="composer-editor-morph" data-expanded={expanded}>
+      <WandIcon name="splitHorizontal" size={16}/><WandIcon name="chevronDown" size={16}/>
+    </span>
   </WandButton> };
 }

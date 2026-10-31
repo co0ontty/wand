@@ -2,7 +2,7 @@
 
 ## Kept guarantees
 
-The default `CI / verify` check runs on macOS 26, checks all three TypeScript projects and the browser bundle, generates cross-platform brand icons, and runs the unit/business partition with two workers. Browser interaction matrices are a separate, explicit scope: manually dispatch CI with `ui_regression=true` to run them on the same runner. `node scripts/run-ci-tests.js --suite=unit|ui|all` selects the scope; no argument retains the full-suite diagnostic behavior. Every file remains classified exactly once, and a failure in the selected scope still fails that command. Mixed files remain intact rather than being removed by source keywords. See [testing policy](testing-policy.md): tests protect behavior, not historical implementation choices.
+The default `CI / verify` check runs on macOS 26, checks all three TypeScript projects and the browser bundle, and generates cross-platform brand icons. The former automated test suite and its unit/browser partitions have been removed; CI no longer runs them.
 
 Stable and beta npm releases keep the shared `npm-publish` lock, pinned Render binary verification, explicit build, `--ignore-scripts`, and their `latest`/`beta` channels. `scripts/publish-npm.js` confirms both the version and intended dist-tag from one anonymous registry response. Requests have distinct query keys and no-cache headers so a polling cycle does not keep reusing the same representation. This mitigates a suspected stale metadata response; the historical logs alone do not establish the cache layer responsible.
 

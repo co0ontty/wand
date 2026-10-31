@@ -20,16 +20,7 @@
 
 检查时主仓 HEAD 为 `ec13fef`，`package.json` 版本为 `4.89.5-debug.t10101604`。工作树并非该提交的纯净版本：199 个 M、2 个 D、68 个未跟踪条目，Android/iOS 子模块也有既有改动；macOS 当时干净。以下以**检查时工作树源码**为依据，未覆盖、提交或清理既有工作。并行工作可能继续改变基线。
 
-已运行：
-
-```bash
-node --test --import tsx \
-  tests/structured-client-protocol.test.ts \
-  tests/chat-renderer-unification.test.ts \
-  tests/long-session-transport.test.ts
-```
-
-结果 **14/14 通过**。日志留在 `output/generative-ui-feasibility/baseline-tests.log`。这些测试只证明现有相关基础回归通过，**不证明 Generative UI 已实现或完成端到端验收**。本轮未做真实浏览器/原生设备验收、全量 check/test/build 或真实模型生成成功率测量。
+该次历史检查曾运行相关基础回归，但当前仓库已不再保留这套测试。结果不能证明 Generative UI 已实现或完成端到端验收；真实浏览器、原生设备验收和真实模型生成成功率测量仍须单独进行。
 
 ## 2. 附件与项目实际情况的对照
 

@@ -6,6 +6,7 @@ import { TEMP_ROOT_MARKER, configTemporaryRoot, readTemporaryLease, systemTempor
 import { assertPlainTempPath } from "./managed-temp.js";
 import { DIAGNOSTIC_LOG_RETENTION_DAYS, DIAGNOSTIC_RECEIPT_SUFFIX, diagnosticReceiptMatches, isDiagnosticArchive } from "./diagnostic-logs.js";
 import type { UploadRepository, ManagedUpload } from "./storage/uploads-repository.js";
+import type { PtyTmuxGcReport } from "./pty-tmux-backend.js";
 
 export const STORAGE_CLEANUP_RETENTION_DAYS = 7;
 const DAY = 86_400_000;
@@ -21,7 +22,7 @@ export interface CleanupReport {
   allocatedBytes: number;
   skipped: number;
   issues: string[];
-  byKind: Partial<Record<TempKind | "upload" | "diagnostic-log" | "distribution-package" | "native-run" | "migration-snapshot", number>>;
+  byKind: Partial<Record<TempKind | "upload" | "diagnostic-log" | "distribution-package" | "native-run" | "migration-snapshot" | "pty-tmux", number>>;
 }
 
 /** pi-native 回收结果（与 PiTmuxHost.collectGarbage 的返回一致）。 */
@@ -63,6 +64,10 @@ interface CleanupOptions {
    * storage-schema 里修剪一次，这里只是把历史遗留的一起收掉。
    */
   pruneMigrationSnapshots?: () => { deleted: string[]; freedBytes: number };
+  /**
+   * 回收 pty-tmux 下废弃的会话记录与 /tmp 遗留的失效 socket。
+   */
+  collectPtyTmuxArtifacts?: () => PtyTmuxGcReport | null;
 }
 
 async function openPaths(): Promise<string[]> {
@@ -239,6 +244,19 @@ export class StorageCleanup {
         }
       } catch { report.issues.push("Migration snapshot cleanup failed; snapshots preserved."); }
     }
+    if (this.options.collectPtyTmuxArtifacts) {
+      try {
+        const ptyReport = this.options.collectPtyTmuxArtifacts();
+        const removed = (ptyReport?.removedRecords ?? 0) + (ptyReport?.removedSockets ?? 0);
+        if (ptyReport && removed > 0) {
+          report.removed += removed;
+          report.logicalBytes += ptyReport.freedBytes;
+          report.byKind["pty-tmux"] = removed;
+          detail.push(`PTY tmux 产物 ${removed} 项（${(ptyReport.freedBytes / 1024 / 1024).toFixed(1)} MB）`
+            + `：记录 ${ptyReport.removedRecords} 条 / socket ${ptyReport.removedSockets} 个`);
+        }
+      } catch { report.issues.push("PTY tmux artifact cleanup failed; artifacts preserved."); }
+    }
     // 后台删除必须留痕迹：这些路径不是用户主动触发，没有日志就无法事后追溯删了什么。
     if (detail.length > 0) process.stdout.write(`[storage-cleanup] 已回收 ${detail.join("；")}\n`);
     for (const issue of report.issues) process.stdout.write(`[storage-cleanup] ${issue}\n`);
@@ -326,7 +344,7 @@ export class StorageCleanup {
   }
 }
 
-export function createStorageCleanup(configDir: string, options: Pick<CleanupOptions, "uploads" | "uploadsActive" | "onUploadRemoved" | "pruneDistributionArtifacts" | "collectNativeArtifacts" | "pruneMigrationSnapshots"> = {}): StorageCleanup {
+export function createStorageCleanup(configDir: string, options: Pick<CleanupOptions, "uploads" | "uploadsActive" | "onUploadRemoved" | "pruneDistributionArtifacts" | "collectNativeArtifacts" | "pruneMigrationSnapshots" | "collectPtyTmuxArtifacts"> = {}): StorageCleanup {
   const root = configTemporaryRoot(configDir);
   return new StorageCleanup({ roots: [root, systemTemporaryRoot(), testTemporaryRoot()], configDirectory: path.dirname(path.dirname(root)), ...options });
 }

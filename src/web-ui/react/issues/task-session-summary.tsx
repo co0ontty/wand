@@ -9,7 +9,7 @@ export function TaskSessionSummary({ task, onOpenSession, onNewParallel }: {
   task: WandTaskListed; onOpenSession?: (id: string) => void; onNewParallel(): void;
 }): React.ReactElement {
   return <Flex vertical gap="small" aria-label="多会话交付汇总">
-    <Typography.Text strong>{taskAcceptanceLabel(task.acceptance)}</Typography.Text>
+    <Typography.Text strong>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text>
     {task.acceptance?.blocker && <Typography.Text type="warning">待处理原因：{task.acceptance.blocker}</Typography.Text>}
     <Typography.Text>汇总负责人：{task.assignedExecutor?.name || "尚未指定"} · 由负责人核对各会话产物后，在交付与验收中统一记录证据。</Typography.Text>
     <Typography.Text type="secondary">继续已有会话保留原上下文；新建并行会话是独立执行。业务子任务须有独立交付标准，模型内部子 Agent 不计入业务子任务。</Typography.Text>

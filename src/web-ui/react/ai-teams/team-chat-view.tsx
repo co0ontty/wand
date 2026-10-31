@@ -33,11 +33,15 @@ import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatar
 import { encodePlushAvatar, encodePlushCatAvatar, encodePlushDogAvatar, isPlushCatAvatar, isPlushDogAvatar, parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar, resolveEmployeeAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
 import { StaticPlushAvatar } from "../avatars/plush-avatar.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
+import { ComposerEmployeeButton } from "../composer-sender/employee.js";
+import { employeeProfile } from "../agents/employee-profile-state.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, conversationScrollRestore, joinsConversationBubble, CONVERSATION_HISTORY_PAGE_TURNS, CONVERSATION_INITIAL_TURNS, chatHistoryRootMargin } from "../conversations/presentation";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { teamChatComposer } from "./composer-bridge";
+import { pasteFilesInto } from "../composer-paste";
 import { composerRuntimePreference } from "../conversations/composer-presentation";
 import { useWandModelCatalog } from "../use-model-catalog";
+import { installChatComposerStyles } from "../chat-composer-styles";
 import { aiTeamsRepository } from "./repository";
 import { currentUserAuthor, selfAuthorFor, useUserProfile } from "../user-profile-repository";
 import { deliveryResultText, deliverySummaryText, TeamDeliveryDetails } from "./team-delivery";
@@ -1839,6 +1843,8 @@ export interface TeamChatViewProps {
 export function TeamChatView({ detail, onChange, onOpenSession, details, staleRun = false }: TeamChatViewProps): React.ReactElement {
   const { run, chatTurns, steps } = detail;
   const modelCatalog = useWandModelCatalog();
+  // 团队消息编辑器与其它入口共用同一套输入面板样式（边框、圆角、分隔线与方形发送）。
+  React.useLayoutEffect(() => { installChatComposerStyles(); }, []);
   const runtimePreference = composerRuntimePreference(run.team.members.find(member => member.isLeader)?.agent, modelCatalog);
   // 拉一次当前资料，让本地临时行与已落库回合用同一个署名。
   useUserProfile();
@@ -2467,7 +2473,7 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
       {hint ? <Typography.Text type="secondary" className="task-board-team-chat-hint">{hint}</Typography.Text> : null}
       <RunningStatusBar activity={runActivity} runMode />
       <Flex vertical gap={8} className="input-composer-row">
-        <Flex vertical gap={8} className={`input-composer${draft.trim() ? " has-text" : ""}${pending === "send" ? " in-flight" : ""}${draggingFiles ? " drag-over" : ""}`}
+        <Flex vertical gap={8} className={`input-composer wand-composer-surface${draft.trim() ? " has-text" : ""}${pending === "send" ? " in-flight" : ""}${draggingFiles ? " drag-over" : ""}`}
           role="group" aria-label="消息编辑器">
           {attachments.length ? <ComposerAttachmentList
             items={attachments.map((item, index) => ({
@@ -2478,11 +2484,7 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
             }))}
             onRemove={(index) => teamChatComposer.edit(chatSessionId, { removeAttachment: index })}
           /> : null}
-          <Flex vertical className="team-chat-compose-main" style={{ width: "100%", minWidth: 0, position: "relative", marginBlockStart: 32 }}>
-            <Flex gap={8} align="center" aria-label="本轮负责人的首选配置" style={{ position: "absolute", insetBlockStart: -32, insetInlineEnd: 0, maxWidth: "100%", minWidth: 0, fontSize: "var(--font-size-xs)" }}>
-              <Typography.Text type="secondary" ellipsis={{ tooltip: true }} style={{ flex: 1, minWidth: 0 }}>首选模型：{runtimePreference.model}</Typography.Text>
-              <Typography.Text type="secondary" style={{ flex: "none" }}>思考：{runtimePreference.thinking}</Typography.Text>
-            </Flex>
+          <Flex vertical className="team-chat-compose-main" style={{ width: "100%", minWidth: 0 }}>
             {/*
               输入框用通用发送器：值仍来自团队 composer bridge（它才是草稿 owner），
               自动换行由 autoSize 负责，本页不再手工量高度。
@@ -2492,7 +2494,7 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
               className="team-chat-sender"
               value={draft}
               placeholder={CHAT_INPUT_PLACEHOLDER}
-              autoSize={{ minRows: 1, maxRows: 8 }}
+              autoSize={{ minRows: 1, maxRows: 10 }}
               submitType="enter"
               loading={pending === "send"}
               onCancel={() => void stop()}
@@ -2512,12 +2514,8 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
                 void send();
                 return false;
               }}
-              onPaste={(event) => {
-                if (!event.clipboardData.files.length) return;
-                event.preventDefault();
-                addFiles(event.clipboardData.files);
-              }}
-              footer={<Flex align="center" justify="space-between" gap={8}>
+              onPaste={pasteFilesInto(addFiles)}
+              footer={<Flex align="center" justify="space-between" gap={8} className="conversation-action-row">
             <Flex align="center" gap={8} style={{ minWidth: 0, flex: 1 }} className="composer-actions-left" role="group" aria-label="添加内容">
               <WandDropdownMenu open={attachmentMenuOpen} onOpenChange={setAttachmentMenuOpen}>
                 <WandDropdownMenuTrigger render={<WandIconButton
@@ -2558,6 +2556,10 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
               </Flex>
             </Flex>
             <Flex align="center" gap={8} className="composer-actions-right" role="group" aria-label="发送与停止">
+              {run.team.members.find(member => member.isLeader)?.employeeId ? <ComposerEmployeeButton
+                employee={{ id: run.team.members.find(member => member.isLeader)!.employeeId!, name: run.team.members.find(member => member.isLeader)!.name, avatar: run.team.members.find(member => member.isLeader)!.avatar }}
+                onClick={event => { const leader = run.team.members.find(member => member.isLeader)!; employeeProfile.open({ id: leader.employeeId!, name: leader.name, avatar: leader.avatar }, event.currentTarget); }}/> : null}
+              <span className="team-chat-runtime" title={`首选模型：${runtimePreference.model}；思考深度：${runtimePreference.thinking}`}><span>{runtimePreference.model}</span><span>{runtimePreference.thinking}</span></span>
               {composerMode === "send-and-stop" ? <Button
                 className="team-chat-stop-action"
                 shape="circle"

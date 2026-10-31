@@ -54,7 +54,6 @@ launchctl kickstart "gui/$(id -u)/com.wand.build-cache-cleanup"
 ## 验证
 
 ```bash
-node --test --import tsx tests/clean-build-cache.test.ts tests/auto-clean-build-cache.test.ts
 ```
 
 覆盖：预览不删除、归档识别与产品保留、递归新文件/标识保留、锁占用、活动/检测失败跳过、删除前重新检查、跟踪/嵌套Git/符号链接拒绝、稀疏文件统计、LaunchAgent安装/回滚/停用及XML路径转义。真实定时链路另通过launchd状态和日志核对；不需要安装或启动移动设备。

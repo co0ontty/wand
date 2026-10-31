@@ -24,6 +24,11 @@ export interface RetentionDeps {
   sessions: SessionRegistry;
   /** 每次扫描读取。传入函数才能在设置保存后立刻用新窗口，而不是启动时的快照。 */
   taskRetention?: TaskRetentionSettings | (() => TaskRetentionSettings | undefined);
+  /**
+   * 归档或删除之后清掉不再属于任何未归档会话的 CLI 原生历史。
+   * 覆盖升级前就已归档、当时还没写清理的存量；本轮刚归档的 id 由调用方排除。
+   */
+  releaseArchivedProviderHistory?: (sessionIds: readonly string[]) => void;
 }
 
 export interface RetentionResult {
@@ -142,6 +147,14 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
   }
 
   sweepTeamRuns(deps, protection, taskWindows, snapshots, purgedSessionIds, archivedSessionIds, now, result);
+  // 本轮刚归档的会话已经由 setArchived 清过 CLI 历史。这里只补更早的存量，
+  // 避免和本轮写入抢同一批文件。
+  const staleArchived = snapshots
+    .filter((session) => session.archived && !archivedSessionIds.has(session.id) && !purgedSessionIds.has(session.id))
+    .map((session) => session.id);
+  if (staleArchived.length > 0) {
+    try { deps.releaseArchivedProviderHistory?.(staleArchived); } catch { /* 清理失败不回滚归档 */ }
+  }
   return result;
 }
 

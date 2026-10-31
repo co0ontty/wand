@@ -4,10 +4,12 @@ Wand 有两条独立执行路径：
 
 | 路径 | 执行与依赖 |
 | --- | --- |
-| Pi CLI | 运行 PATH 实际选中的 `pi --mode json --print`，会话桥使用这个 CLI 自己的内置 MCP/CodeMode/provider。 |
+| Pi CLI | 运行 PATH 实际选中的 Pi；默认使用 tmux 原生 TUI 和同进程事件桥，关闭原生桥时使用 `pi --mode json --print`。会话桥使用该 CLI 自己的内置 MCP/CodeMode/provider。 |
 | Wand Agent | Wand 进程内的 Core harness，使用 Wand 包内固定版本的 Pi SDK。 |
 
 服务启动不预热 SDK。新建/切换到 Wand Agent 或执行其候选时才按需加载；Pi CLI 的启动、设置面板和资源发现不依赖 Wand SDK 的公共入口或 ModelRuntime。
+
+原生 Pi 的执行中输入通过官方 `turn_end` boundary drafts 与私有文件邮箱衔接；Wand 持久化交接身份、Pi 原生上下文 commit 回执和分段记录。没有把 CLI 改成 SDK 或 RPC，也不使用扩展 `sendUserMessage()` 的 void 返回冒充接收回执。新桥支持安全边界插话，旧桥/JSON print 路径保持整轮后发送。细节见 [Pi 对话队列](pi-conversation-queue.md)。
 
 ## CLI 的资源与扩展
 
@@ -30,7 +32,6 @@ Pi CLI 官方内部也使用 Pi 的共享实现；隔离的是 **Wand 对其内�
 ## 验证
 
 ```bash
-node --test --import tsx tests/pi-cli-isolation.test.ts tests/pi-resource-selection.test.ts tests/pi-sdk-dependencies.test.ts tests/core-harness.test.ts tests/openrouter-free-cli.test.ts
 ```
 
 - `pi-cli-isolation`：真实服务器在 SDK 入口被阻断时启动，CLI 创建/设置/资源发现正常；显式 SDK 返回错误，不留下半个会话。另一新进程证明只有显式 SDK 选择才首次导入它，且无全局预热也能创建 SDK 会话。

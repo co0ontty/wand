@@ -30,7 +30,6 @@ notification contract is unchanged.
 
 ## Verification
 
-`tests/claude-background-wait.test.ts` drives the production runner and session
 manager with an isolated controllable exec host. It covers environment scoping,
 multiple parent results while children run, actual process completion,
 system-killed children with exit 0, and explicit stop. It invokes no real model.

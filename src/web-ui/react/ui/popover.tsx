@@ -20,16 +20,17 @@ export interface WandPopoverProps {
   popupOwner?: string;
   contentRole?: AriaRole;
   onOpenChange?(open: boolean): void;
+  onAfterOpenChange?: PopoverProps["afterOpenChange"];
 }
 export function WandPopover({ trigger, triggerActions = "click", children, ariaLabel, align = "center", side = "bottom", sideOffset = 8,
-  className, open, contentId, contentRole, popupOwner = contentId ?? ariaLabel, onOpenChange }: WandPopoverProps) {
+  className, open, contentId, contentRole, popupOwner = contentId ?? ariaLabel, onOpenChange, onAfterOpenChange }: WandPopoverProps) {
   const portal = usePortalContainer();
   const triggerRef = React.useRef<React.ComponentRef<typeof Popover>>(null);
   const [internalOpen, setInternalOpen] = React.useState(false);
   const shown = open ?? internalOpen;
   const change = (next: boolean): void => { setInternalOpen(next); onOpenChange?.(next); };
   usePopupDismiss(shown, () => { change(false); triggerRef.current?.nativeElement?.focus({ preventScroll: true }); });
-  return <WandUiBoundary><Popover ref={triggerRef} open={shown} onOpenChange={change} trigger={triggerActions} arrow={false}
+  return <WandUiBoundary><Popover ref={triggerRef} open={shown} onOpenChange={change} afterOpenChange={onAfterOpenChange} trigger={triggerActions} arrow={false}
     placement={popupPlacement(side, align)} destroyOnHidden getPopupContainer={() => portal ?? document.body}
     align={{ offset: popupOffset(side, sideOffset) }}
     classNames={{ root: classNames("wand-ui-popover-content", className) }}

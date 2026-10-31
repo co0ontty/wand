@@ -452,6 +452,10 @@ import { setupVisualViewportHandlers } from "./viewport";
           }
           sendOrStart();
         });
+        document.getElementById("composer-attach-file")?.addEventListener("click", function() {
+          closePlusPopover();
+          document.getElementById("file-upload-input")?.click();
+        });
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (inputBox) {
           // A render/login transition may replace a composing textarea without

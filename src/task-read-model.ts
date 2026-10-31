@@ -3,7 +3,7 @@ import { isArchiveBlocked } from "./archive-policy.js";
 import { AI_TEAM_ACTIVE_RUN_STATUSES } from "./ai-team-types.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
-import type { WandTask } from "./task-types.js";
+import { taskHumanAccepted, type WandTask } from "./task-types.js";
 import type { SessionSnapshot } from "./types.js";
 
 /** Request-scoped projection, never an authority for mutations or a cross-request cache. */
@@ -61,7 +61,7 @@ export class TaskReadModel {
   }
 
   canArchive(task: WandTask): boolean {
-    return task.status !== "doing" && !this.taskSessions(task).some(isArchiveBlocked)
+    return taskHumanAccepted(task) && !(this.queuedCommentCounts.get(task.id) ?? 0) && !this.taskSessions(task).some(isArchiveBlocked)
       && !this.activeTeamTasks.has(task.id) && !(task.workspaceTaskId && this.activeTeamTasks.has(task.workspaceTaskId));
   }
 

@@ -29,12 +29,14 @@ export class DaemonAdmission {
     }
   }
 
+  // Forward the complete call signature so optional replay cursors cannot be
+  // silently dropped when a host gains another argument.
   terminal(host: TerminalHost): TerminalHost {
     return {
       persistent: host.persistent,
-      attach: (id, seq) => host.attach(id, seq),
-      createOrAttach: (request, seq) => this.run(() => host.createOrAttach(request, seq)),
-      forget: (id) => host.forget(id),
+      attach: (...args) => host.attach(...args),
+      createOrAttach: (...args) => this.run(() => host.createOrAttach(...args)),
+      forget: (...args) => host.forget(...args),
       flush: () => host.flush?.(),
       disconnect: () => host.disconnect(),
     };
@@ -44,12 +46,14 @@ export class DaemonAdmission {
     return {
       persistent: host.persistent,
       piNativeTui: host.piNativeTui,
+      ...(host.offerPiInput ? { offerPiInput: host.offerPiInput.bind(host) } : {}),
+      ...(host.resolvePiInput ? { resolvePiInput: host.resolvePiInput.bind(host) } : {}),
       ...(host.collectGarbage ? { collectGarbage: host.collectGarbage.bind(host) } : {}),
-      spawnStructured: (request) => this.run(() => host.spawnStructured(request)),
+      spawnStructured: (...args) => this.run(() => host.spawnStructured(...args)),
       listRuns: () => host.listRuns(),
-      attachRun: (id) => host.attachRun(id),
-      adoptRun: (id) => host.adoptRun(id),
-      forgetRun: (id) => host.forgetRun(id),
+      attachRun: (...args) => host.attachRun(...args),
+      adoptRun: (...args) => host.adoptRun(...args),
+      forgetRun: (...args) => host.forgetRun(...args),
     };
   }
 }
@@ -64,6 +68,8 @@ export interface DaemonInspection {
 
 export interface DaemonMaintenanceTarget {
   name: string;
+  /** Replacement affects only this daemon's authenticated inventory. */
+  independent?: boolean;
   inspect(includeInventory?: boolean): Promise<DaemonInspection>;
   /** Must recheck identity and use graceful shutdown, never a force-kill. */
   restart(expected: DaemonInspection): Promise<void>;
@@ -92,6 +98,7 @@ export class DaemonMaintenance {
   private flight: Promise<void> | null = null;
   private stopped = false;
   private idleSince: number | null = null;
+  private readonly independentIdle = new Map<DaemonMaintenanceTarget, { identity: string; since: number }>();
   private failures = 0;
   private forcing: Promise<DaemonMaintenanceStatus> | null = null;
 
@@ -193,7 +200,37 @@ export class DaemonMaintenance {
     // Reading full replay inventories while a known session is busy only adds
     // load. Versions still refresh so the waiting notice remains accurate.
     const includeInventory = !o.busy();
-    const inspected = await Promise.allSettled(o.targets.map((target) => target.inspect(includeInventory)));
+    const inspected = await Promise.allSettled(o.targets.map((target) => target.inspect(target.independent || includeInventory)));
+    // A Render with no executions of its own can update while tmux/Core runs
+    // continue. Still serialize against new starts and authenticate it again.
+    for (const [index, target] of o.targets.entries()) {
+      if (!target.independent) continue;
+      const result = inspected[index];
+      if (result.status !== "fulfilled" || !result.value.pending || result.value.running !== 0) {
+        this.independentIdle.delete(target);
+        continue;
+      }
+      const now = (o.now ?? Date.now)();
+      let quiet = this.independentIdle.get(target);
+      if (quiet?.identity !== result.value.identity) {
+        quiet = { identity: result.value.identity, since: now };
+        this.independentIdle.set(target, quiet);
+      }
+      if (now - quiet.since < (o.quietMs ?? 10_000)) continue;
+      try {
+        await o.admission.exclusive(async () => {
+          if (this.stopped || !o.available()) return;
+          const fresh = await target.inspect();
+          if (this.stopped || !o.available() || fresh.identity !== quiet.identity || !fresh.pending || fresh.running !== 0) return;
+          this.state = { pending: true, phase: "updating" };
+          await target.restart(fresh);
+          const after = await target.inspect();
+          if (after.pending) throw new Error(`${target.name} replacement is not ready yet`);
+          inspected[index] = { status: "fulfilled", value: after };
+        });
+      } catch (reason) { inspected[index] = { status: "rejected", reason }; }
+      finally { this.independentIdle.delete(target); }
+    }
     if (inspected.some((result) => result.status === "fulfilled" && result.value.pending)) {
       this.state = { pending: true, phase: "waiting" };
     }
@@ -204,7 +241,8 @@ export class DaemonMaintenance {
     const pending = snapshots.some((snapshot) => snapshot.pending);
     this.state = { pending, phase: pending ? "waiting" : "idle" };
     if (!pending) this.failures = 0;
-    if (!pending || o.busy() || snapshots.some((snapshot) => snapshot.running !== 0)) {
+    const shared = snapshots.filter((_, index) => !o.targets[index].independent);
+    if (!shared.some(snapshot => snapshot.pending) || o.busy() || shared.some((snapshot) => snapshot.running !== 0)) {
       this.idleSince = null;
       return;
     }
@@ -219,15 +257,16 @@ export class DaemonMaintenance {
         // Close the check/start race, including unowned daemon runs and shells
         // that are idle in the UI but still have a live PTY process.
         const fresh = await Promise.all(o.targets.map((target) => target.inspect()));
-        if (this.stopped || !o.available() || o.busy() || fresh.some((snapshot) => snapshot.running !== 0)) return;
+        if (this.stopped || !o.available() || o.busy() || fresh.some((snapshot, index) => !o.targets[index].independent && snapshot.running !== 0)) return;
         this.state = { pending: true, phase: "updating" };
         for (let i = 0; i < fresh.length; i++) {
           if (this.stopped || !o.available() || o.busy()) return;
-          if (fresh[i].pending) await o.targets[i].restart(fresh[i]);
+          if (!o.targets[i].independent && fresh[i].pending) await o.targets[i].restart(fresh[i]);
         }
         const after = await Promise.all(o.targets.map((target) => target.inspect()));
-        if (after.some((snapshot) => snapshot.pending)) throw new Error("Daemon replacement is not ready yet");
-        this.state = { pending: false, phase: "idle" };
+        if (after.some((snapshot, index) => !o.targets[index].independent && snapshot.pending)) throw new Error("Daemon replacement is not ready yet");
+        const remaining = after.some(snapshot => snapshot.pending);
+        this.state = { pending: remaining, phase: remaining ? "waiting" : "idle" };
         this.failures = 0;
       } finally {
         this.idleSince = null;

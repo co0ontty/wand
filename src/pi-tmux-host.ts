@@ -7,10 +7,11 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { buildChildEnv } from "./env-utils.js";
+import { buildChildEnv, systemEnvValue } from "./env-utils.js";
 import { shellQuote } from "./shell-quote.js";
 import { logInfo } from "./runtime-log.js";
 import { signalNumberFromName } from "./signal-utils.js";
+import { offerNativeInput, resolveNativeInput, type PiInputHandoff, type PiInputResolution } from "./pi-native-input.js";
 import { createUtf8TextDecoder, type StructuredExecHost, type StructuredExecProcess, type StructuredSpawnRequest, type StructuredRunState, type StructuredStreamEvent, type StructuredExitEvent } from "./structured-exec-host.js";
 
 const execute = promisify(execFile);
@@ -19,8 +20,8 @@ const READ_BYTES = 64 * 1024;
 const TICK_BYTES = 256 * 1024;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 interface NativeJob {
-  runId: string; requestId: string; incarnationId: string; tmux: string;
-  events: string; stderr: string; state: string; ready: string; ack: string;
+  runId: string; requestId: string; incarnationId: string; tmux: string; pane?: string;
+  events: string; stderr: string; state: string; ready: string; ack: string; input?: string;
 }
 interface WorkerState { status: "starting" | "running" | "exited"; pid: number; workerPid?: number; exitCode: number | null; signal: string | null; spawnError?: string; }
 function atomic(file: string, value: unknown): void {
@@ -134,7 +135,9 @@ export class PiTmuxHost implements StructuredExecHost {
     }
   }
   private async tmux(args: string[]): Promise<string> {
-    const result = await execute("tmux", args, { env: buildChildEnv(false), timeout: 10000, maxBuffer: 1024 * 1024 });
+    const result = await execute("tmux", ["-L", "default", ...args], {
+      env: buildChildEnv(false, { TMUX_TMPDIR: systemEnvValue("TMUX_TMPDIR") }), timeout: 10000, maxBuffer: 1024 * 1024,
+    });
     return result.stdout;
   }
   state(job: NativeJob): WorkerState {
@@ -208,10 +211,11 @@ export class PiTmuxHost implements StructuredExecHost {
     const sid = request.runId.replace(/^structured:/, "").replace(/[^a-zA-Z0-9-]/g, "-");
     const job: NativeJob = { runId: request.runId, requestId: request.requestId ?? incarnationId, incarnationId,
       tmux: this.prefix + sid + "-" + incarnationId.slice(0, 8), events: path.join(dir, "events.jsonl"), stderr: path.join(dir, "stderr.log"),
-      state: path.join(dir, "state.json"), ready: path.join(dir, "ready.json"), ack: path.join(dir, "ack") };
+      state: path.join(dir, "state.json"), ready: path.join(dir, "ready.json"), ack: path.join(dir, "ack"), input: path.join(dir, "input") };
+    mkdirSync(job.input!, { mode: 0o700 });
     for (const file of [job.events, job.stderr]) writeFileSync(file, "", { mode: 0o600 });
     atomic(job.state, { status: "starting", pid: -1, exitCode: null, signal: null });
-    const paths = path.join(dir, "paths.json"); atomic(paths, { events: job.events, ready: job.ready });
+    const paths = path.join(dir, "paths.json"); atomic(paths, { events: job.events, ready: job.ready, input: job.input, initialMessageId: request.nativeInputMessageId });
     const launchDir = mkdtempSync(path.join(os.tmpdir(), "wand-pi-launch-")); const socket = path.join(launchDir, "start.sock");
     let handedOff = false;
     let launchReady = false;
@@ -234,15 +238,16 @@ export class PiTmuxHost implements StructuredExecHost {
     const command = `exec ${shellQuote(process.execPath)} ${shellQuote(runtimeModule("pi-tmux-worker"))} ${shellQuote(socket)} 2>>${shellQuote(path.join(dir, "worker-startup.log"))}`;
     try {
       let exists = false;
-      try { await this.tmux(["has-session", "-t", job.tmux]); exists = true; } catch { /* a new owned session */ }
+      try { await this.tmux(["has-session", "-t", `=${job.tmux}`]); exists = true; } catch { /* a new owned session */ }
       if (exists) {
         throw new Error("tmux 名称已被其他会话使用，未接管或停止它。");
       } else {
-        await this.tmux(["new-session", "-d", "-s", job.tmux, "-x", "120", "-y", "36", "-c", request.cwd, command]);
+        job.pane = (await this.tmux(["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", job.tmux, "-x", "120", "-y", "36", "-c", request.cwd, command])).trim();
+        if (!/^%\d+$/.test(job.pane)) throw new Error("Pi tmux pane identity is unavailable");
         await this.tmux(["set-option", "-t", job.tmux, "@wand-native-owner", request.runId]);
-        await this.tmux(["set-window-option", "-t", `${job.tmux}:0`, "remain-on-exit", "off"]);
+        await this.tmux(["set-window-option", "-t", job.pane, "remain-on-exit", "off"]);
       }
-      const workerPid = Number((await this.tmux(["list-panes", "-t", `${job.tmux}:0.0`, "-F", "#{pane_pid}"])).trim());
+      const workerPid = Number((await this.tmux(["display-message", "-p", "-t", job.pane!, "#{pane_pid}"])).trim());
       atomic(job.state, { status: "starting", pid: workerPid, workerPid, exitCode: null, signal: null });
       if (request.launchSignal?.aborted) throw new Error("Pi 原生启动已取消，未发送输入。");
       atomic(path.join(slot, "current.json"), job); this.owners.set(request.runId, "native");
@@ -268,6 +273,36 @@ export class PiTmuxHost implements StructuredExecHost {
       closeReceiver();
       server.close(); rmSync(launchDir, { recursive: true, force: true });
     }
+  }
+  offerPiInput(runId: string, boundaryId: string, take: (identity: PiInputHandoff) => string | null): boolean {
+    const job = this.job(runId);
+    if (!job?.input || existsSync(job.ack) || this.state(job).status !== "running") return false;
+    return offerNativeInput(job.input, boundaryId, job.incarnationId, take);
+  }
+  resolvePiInput(runId: string, handoff: PiInputHandoff): PiInputResolution {
+    const job = this.job(runId);
+    if (!job?.input || job.incarnationId !== handoff.incarnationId) return { state: "unknown" };
+    const exited = this.state(job).status === "exited";
+    const resolution = resolveNativeInput(job.input, handoff, exited);
+    if (resolution.state !== "unknown" || !exited) return resolution;
+    // The CLI may exit after committing its boundary but before the next event.
+    // Resolve only an exact native entry id from that execution's private session.
+    const ready = readJson<{ sessionFile?: string }>(job.ready);
+    if (!ready?.sessionFile) return resolution;
+    try {
+      const stat = lstatSync(ready.sessionFile);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > REPLAY_BYTES * 8) return resolution;
+      const records = readFileSync(ready.sessionFile, "utf8").split("\n");
+      for (const line of records) {
+        if (!line.trim()) continue;
+        const entry = JSON.parse(line) as { type?: string; customType?: string; details?: { inputId?: string }; content?: string };
+        if (entry.type === "custom_message" && entry.customType === "wand-user-input"
+          && entry.details?.inputId === handoff.id && typeof entry.content === "string") {
+          return { state: "committed", offer: { ...handoff, text: entry.content } };
+        }
+      }
+    } catch { /* Missing or invalid native history remains unknown, never a replay permission. */ }
+    return resolution;
   }
   async attachRun(runId: string, checkpoint?: import("./pi-cli-checkpoint.js").PiCliCheckpoint): Promise<StructuredRunState | null> {
     const job = this.job(runId);
@@ -306,15 +341,18 @@ export class PiTmuxHost implements StructuredExecHost {
     const stopping = (async () => {
       let tag: string;
       try {
-        const name = (await this.tmux(["display-message", "-p", "-t", job.tmux, "#{session_name}"])).trim();
-        if (name !== job.tmux) throw new Error("Pi tmux 精确目标不匹配，拒绝停止。");
+        const panes = (await this.tmux(["list-panes", "-t", `=${job.tmux}`, "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}"])).trim().split("\n");
+        const identity = job.pane ? panes.find(line => line.split("\t")[1] === job.pane) : panes[0];
+        if (!identity || identity.split("\t")[0] !== job.tmux) throw new Error("Pi tmux 精确目标不匹配，拒绝停止。");
+        const workerPid = this.state(job).workerPid;
+        if (workerPid && Number(identity.split("\t")[2]) !== workerPid) throw new Error("Pi tmux pane generation changed");
         tag = (await this.tmux(["show-options", "-v", "-t", job.tmux, "@wand-native-owner"])).trim();
       } catch (error) {
         if (this.state(job).status === "exited") return;
         throw error;
       }
       if (tag !== job.runId) throw new Error("Pi tmux 所有权不匹配，拒绝停止。");
-      await this.tmux(["kill-session", "-t", job.tmux]);
+      await this.tmux(["kill-session", "-t", `=${job.tmux}`]);
     })();
     this.terminations.set(job.incarnationId, stopping);
     void stopping.catch(() => this.terminations.delete(job.incarnationId));
@@ -344,19 +382,24 @@ export class PiTmuxHost implements StructuredExecHost {
    * 而 forgetRun 只写 ack 标记、从不删目录，所以会按回合数无限堆积。
    *
    * 只回收三类确定无主的东西：
-   * - slot 已 ack 且 runId 不再属于任何存活会话：整个 slot 无主；
+   * - slot 已 ack 且 runId 不在 activeSessionIds 里：整个 slot 无主；
    * - slot 无主的，整槽删除；
    * - slot 仍有主的，只删非 current.json 引用、已 ack 且进程已退出、超保留期的 turn。
    *
-   * 保留 current.json 指向的 turn：`listRuns` / `adoptRun` 仍靠它的 events.jsonl
-   * 重放恢复；未 ack 的 slot 可能是尚未收尾的回合，一律不动。
+   * activeSessionIds 只含未归档会话。归档后不再续接这些 turn，已 ack 且进程退出
+   * 就可以整槽删除，不再额外等保留期；取消归档从会话自己的消息快照恢复。
+   * 保留未归档会话 current.json 指向的 turn：`listRuns` / `adoptRun` 仍靠它的
+   * events.jsonl 重放恢复；未 ack 的 slot 可能是尚未收尾的回合，一律不动。
    */
   collectGarbage(options: {
-    /** 仍在数据库里的会话 id；不在其中的 slot 视为无主。 */
+    /** 未归档会话 id；不在其中的 slot（已删除或已归档）视为无主。 */
     liveSessionIds: ReadonlySet<string>;
+    /** 与 liveSessionIds 同义。传入时优先于旧字段，避免把归档会话算成仍在使用。 */
+    activeSessionIds?: ReadonlySet<string>;
     retentionMs: number;
     now?: number;
   }): PiNativeGcReport {
+    const activeSessionIds = options.activeSessionIds ?? options.liveSessionIds;
     const report: PiNativeGcReport = { removedSlots: 0, removedTurns: 0, freedBytes: 0 };
     const now = options.now ?? Date.now();
     let entries;
@@ -368,11 +411,12 @@ export class PiTmuxHost implements StructuredExecHost {
       if (!job) continue;
       const acked = existsSync(job.ack);
       const sessionId = job.runId.replace(/^structured:/, "");
-      const orphan = !options.liveSessionIds.has(sessionId);
+      const orphan = !activeSessionIds.has(sessionId);
       if (orphan) {
         // 无主 slot 也得等 ack 完成：未 ack 说明回合可能还在收尾。
+        // 已删除和已归档都不再续接，进程退出后不再额外等保留期。
         if (!acked) continue;
-        if (!this.slotIsIdle(slot, job, now, options.retentionMs)) continue;
+        if (!this.slotIsIdle(slot, job, now, 0)) continue;
         report.freedBytes += directoryBytes(slot);
         if (removeTree(slot)) report.removedSlots += 1;
         else report.freedBytes -= directoryBytes(slot);
@@ -407,7 +451,7 @@ export class PiTmuxHost implements StructuredExecHost {
     try { return JSON.parse(readFileSync(path.join(slot, "current.json"), "utf8")) as NativeJob; } catch { return null; }
   }
 
-  /** 无主 slot 是否已整体静默：所有 turn 都不再是运行中，且最新写入超过保留期。 */
+  /** 无主 slot 是否已整体静默：所有 turn 都不再是运行中。retentionMs 为 0 时不等待。 */
   private slotIsIdle(slot: string, job: NativeJob, now: number, retentionMs: number): boolean {
     const current = path.dirname(job.events);
     const state = readJson<WorkerState>(job.state);

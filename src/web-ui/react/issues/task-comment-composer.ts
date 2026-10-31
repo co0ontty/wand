@@ -63,11 +63,14 @@ export function acceptCommentDraft(taskId: string, submitted: CommentDraft): Com
   return editCommentDraft(taskId, { body: "", employeeId: "", sourceCommentId: null });
 }
 /** Store only a content digest and request ID, never the submitted instruction. Unknown delivery is safe across refresh. */
-export async function commentRequestIdentity(taskId: string, draft: CommentDraft): Promise<{ requestId: string; forget(): void }> {
+export async function commentRequestIdentity(taskId: string, draft: CommentDraft, purpose: "execution" | "review" = "execution"): Promise<{ requestId: string; purpose: "execution" | "review"; forget(): void }> {
   const digest = await sha256Hex(JSON.stringify([draft.body.trim(), draft.employeeId, draft.sourceCommentId]));
   const key = `wand:task-comment-request:${taskId}:${digest}`;
   // Fail closed if persistent identity cannot be saved: starting anyway would break restart idempotency.
-  const requestId = localStorage.getItem(key) ?? createRequestId();
-  localStorage.setItem(key, requestId);
-  return { requestId, forget: () => localStorage.removeItem(key) };
+  const saved = localStorage.getItem(key);
+  const requestId = saved ?? createRequestId();
+  const savedPurpose = localStorage.getItem(key + ":purpose");
+  const intentPurpose = savedPurpose === "review" ? "review" : savedPurpose === "execution" || saved ? "execution" : purpose;
+  localStorage.setItem(key, requestId); localStorage.setItem(key + ":purpose", intentPurpose);
+  return { requestId, purpose: intentPurpose, forget: () => { localStorage.removeItem(key); localStorage.removeItem(key + ":purpose"); } };
 }

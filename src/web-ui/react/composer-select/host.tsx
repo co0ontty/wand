@@ -3,6 +3,8 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { composerSelectController } from "./controller";
 import { WandSelect } from "../ui/select";
+import { ProviderLogo } from "../provider-logo";
+import { agentToolOption } from "../../provider-identity";
 
 export function ComposerSelectHost() {
   const snapshot = useSyncExternalStore(
@@ -18,8 +20,9 @@ export function ComposerSelectHost() {
       ariaLabel={mount.ariaLabel}
       popupOwner={mount.scope === "dropdown" ? "composer-plus-popover" : "composer-main"}
       placeholder={mount.placeholder}
-      displayValue={mount.displayValue}
-      displayTitle={mount.displayTitle}
+      displayValue={mount.scope === "runtime" && mount.control === "tool" ? "" : mount.displayValue}
+      startSlot={mount.scope === "runtime" && mount.control === "tool" ? <ProviderLogo provider={agentToolOption(mount.value)?.provider} className="composer-tool-logo"/> : undefined}
+      displayTitle={mount.scope === "runtime" && mount.control === "tool" ? mount.displayTitle || mount.options.find(option => option.value === mount.value)?.label : mount.displayTitle}
       disabled={mount.disabled}
       triggerKind={mount.scope === "runtime" ? "ghost" : undefined}
       searchable={mount.control === "model"}

@@ -31,6 +31,11 @@ export function installSubtaskStyles(): void {
     }
     .chat-subtasks-panel { position:absolute; z-index:2; inset:42px 0 0 auto; width:var(--chat-subtask-width); box-sizing:border-box; display:flex; flex-direction:column; min-height:0; background:var(--bg-surface); border-left:1px solid var(--border-subtle); transform:translateX(100%); visibility:hidden; transition:transform var(--motion-normal) var(--ease-out-expo),visibility var(--motion-normal); }
     #chat-output[data-subtasks-open="true"] .chat-subtasks-panel { transform:translateX(0); visibility:visible; }
+    .composer-agent-panel { display:flex; flex-direction:column; width:min(520px,calc(100vw - 32px)); max-height:60dvh; min-height:0; color:var(--text-primary); background:var(--bg-surface); }
+    .composer-agent-panel > header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--border-subtle); }
+    .composer-agent-panel > .ant-collapse { padding:0 12px; flex:none; }
+    .composer-agent-panel .chat-subtasks-list { max-height:140px; }
+    .composer-agent-panel .chat-subtasks-scroll { padding:12px; max-height:40dvh; }
     .chat-subtasks-panel > header { display:flex; flex:none; align-items:center; justify-content:space-between; min-height:52px; box-sizing:border-box; padding:8px 20px; font-size:14px; }
     .chat-subtasks-panel-count { font-size:12px; font-weight:400; color:var(--text-secondary); margin-left:6px; font-variant-numeric:tabular-nums; }
     .chat-subtasks-panel > .ant-collapse { flex:none; padding:0 24px 12px; border-bottom:1px solid var(--border-subtle); }

@@ -3,7 +3,7 @@ import { TaskReadModel } from "./task-read-model.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import type { TaskActionItem, TaskActionsSnapshot } from "./task-action-types.js";
-import type { WandTask } from "./task-types.js";
+import { taskAiVerified, taskHumanAccepted, type WandTask } from "./task-types.js";
 
 const MAX_SESSIONS = 256;
 const MAX_ITEMS = 512;
@@ -26,10 +26,10 @@ export function readTaskActions(storage: WandStorage, registry?: SessionRegistry
       kind, reason: reason.slice(0, 4000), source });
   };
   for (const task of tasks) {
-    if (!task.acceptance?.acceptedAt) {
+    if (!taskHumanAccepted(task)) {
       if (task.acceptance?.blocker.trim()) add(task, "blocker", task.id, task.acceptance.blocker);
-      else if (task.status === "done") add(task, "review", task.id, task.acceptance?.evidence.trim()
-        ? "交付已汇总，请查看证据并明确验收。" : "任务已提交确认，尚缺交付证据；请先查看并补齐。");
+      else if (task.status === "ready" && taskAiVerified(task)) add(task, "review", task.id, "AI 已通过当前交付验收，请查看证据并确认归档。");
+      else if (task.status === "done") add(task, "blocker", task.id, "历史验收记录待核对，不能直接认定 AI 或人工已通过。");
     }
     for (const slim of model.taskSessions(task)) {
       if (slim.archived || ["failed", "stopped", "exited"].includes(slim.status)) continue;

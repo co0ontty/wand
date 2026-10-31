@@ -57,20 +57,16 @@ export function installConversationHomeStyles(): void {
 .conversation-root .conversation-reply-footer .ant-btn { color:var(--accent); font-weight:600; }
 .conversation-continue-arrow { transform:rotate(90deg); }
 .conversation-root .conversation-composer { padding:8px var(--conversation-inset) max(12px,var(--wand-safe-bottom,0px)); background:transparent; }
-.conversation-root .conversation-input-wrap { margin-block-start:42px; }
-/* 执行配置摘要占一行固定高度：详情/模型目录到达前先用同样高度的占位，
-   否则它出现时会把输入框和发送按钮上下各顶一次。 */
-.conversation-root .conversation-runtime-summary-slot { height:24px; margin-block-start:-56px; display:flex; align-items:center; justify-content:flex-end; }
-.conversation-root .conversation-sender.ant-sender { border:0; border-radius:16px; background:var(--bg-surface); padding:16px 16px 10px; box-shadow:0 4px 20px color-mix(in srgb,var(--text-primary) 8%,transparent); }
-.conversation-root .conversation-sender.ant-sender:focus-within { box-shadow:0 4px 20px color-mix(in srgb,var(--text-primary) 8%,transparent),0 0 0 2px var(--border-focus); }
-.conversation-root .conversation-sender.ant-sender:has(textarea:focus)::before { content:none; }
-.conversation-root .conversation-companion.ant-btn { position:absolute; inset-inline-start:-12px; inset-block-start:-62px; width:80px; height:62px; padding:0; border:0; background:transparent; z-index:1; }
-.conversation-root .conversation-companion .composer-floating-avatar { inset:0; width:80px; height:80px; pointer-events:none; }
-.conversation-root .conversation-input-wrap > .composer-usage-line { inset-inline:76px 0; inset-block-start:-30px; overflow:visible; }
-.conversation-root .conversation-input-hint { display:block; padding:6px 8px 0; font-size:11px; }
+.conversation-root .conversation-input-wrap { margin-block-start:0; }
+.conversation-runtime-summary[hidden] { display:none; }
+.conversation-directory-trigger.ant-btn { flex:0 1 160px; min-width:0; height:24px; min-height:24px; padding-inline:4px; font-size:var(--font-size-xs); color:var(--text-secondary); }
+.conversation-directory-trigger > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.conversation-directory-trigger svg { flex:none; }
+.conversation-directory-picker { width:min(340px,calc(100vw - 48px)); max-height:60dvh; overflow:auto; }
+.conversation-directory-picker .ant-typography { font-size:var(--font-size-xs); }
 .conversation-root .conversation-action-row { gap:8px; }
-.conversation-root .conversation-action-row > .ant-flex { min-width:0; flex-wrap:wrap; }
-.conversation-root .conversation-submit-labelled.ant-btn { width:auto; min-width:32px; padding-inline:12px; gap:6px; }
+.conversation-root .conversation-action-row > .ant-flex { min-width:0; flex-wrap:nowrap; }
+.conversation-root .conversation-submit-labelled.ant-btn { width:var(--composer-control-height); min-width:var(--composer-control-height); padding:0; gap:0; }
 /* 所有可能文案叠在同一格：按钮宽度取最长标签，加载/发送/停止状态切换不再改变几何。 */
 .conversation-submit-labels { display:inline-grid; }
 .conversation-submit-label { grid-area:1 / 1; font-size:12px; }
@@ -91,6 +87,7 @@ export function installConversationHomeStyles(): void {
   .conversation-root .conversation-submit-label { display:none; }
   .conversation-root .conversation-submit-labelled.ant-btn { padding-inline:0; width:var(--composer-control-height); }
   .conversation-root .conversation-input-hint { display:none; }
+  .conversation-directory-trigger.ant-btn { flex:0 1 auto; max-width:160px; }
 }
 `);
 }

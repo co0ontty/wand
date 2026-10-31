@@ -1,3 +1,4 @@
+import { newSessionController } from "../new-session/controller";
 import * as React from "react";
 import { CopyPageLink } from "../ui/copy-page-link";
 import { Sender } from "@ant-design/x";
@@ -8,8 +9,8 @@ import { conversationLeaderMention, conversationMentionToken } from "../../../co
 import type { Workspace } from "../../../types.js";
 import { useSiliconEmployees } from "../agents/employee-repository";
 import { EmployeeAvatar } from "../agents/employee-avatar";
-import { ComposerIdentity, ComposerUsage } from "../composer-sender/identity.js";
-import { computeRunningPhase } from "../../running-activity.js";
+import { ComposerUsage } from "../composer-sender/identity.js";
+import { ComposerEmployeeButton } from "../composer-sender/employee.js";
 import { useComposerUsage } from "./composer-usage.js";
 import { ConversationGroupAvatar } from "./avatar";
 import { ConversationMessages, formatConversationAttachments } from "../ai-teams/lazy";
@@ -23,8 +24,10 @@ import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { WandButton, WandIcon, WandIconButton, WandInput, WandSelect, WandPopover } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_RESULT_SENTENCE_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { ConversationApprovalButton, ConversationMorphIcon, ConversationPanel, ConversationSubmitButton, type ConversationSubmitPhase } from "./controls";
+import { pasteFilesInto } from "../composer-paste";
 import { employeeProfile } from "../agents/employee-profile-state";
 import { ConversationDirectory } from "./directory";
+import { ConversationComposerDirectory } from "./composer-directory";
 import { conversationScrollRecord, conversationScrollRestore, storedConversationScroll } from "./presentation";
 import { ConversationTaskPanel } from "./task-panel";
 import { ConversationTaskPreview } from "./task-preview";
@@ -41,7 +44,6 @@ import { installChatComposerStyles } from "../chat-composer-styles";
 import { composerRuntimePreference, directWorkPreference, latestDirectWork } from "./composer-presentation";
 import { ConversationExecutionSelectors, conversationPreferenceAgent } from "./execution-preference";
 import type { ConversationExecutionPreference } from "../../../conversation-execution-preference.js";
-import { agentToolDisplayName } from "../../provider-identity.js";
 import { useEditorExpansion } from "../composer-sender/editor-expansion.js";
 import { useWandModelCatalog } from "../use-model-catalog";
 import { MinimalComposerEntry, useMinimalComposer } from "../composer-sender/minimal.js";
@@ -230,8 +232,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const activity = useConversationActivity({ detail: selected, active: visible && !ui.directory, target, onRefresh: load });
   React.useEffect(() => {
     if (!visible || ui.directory || loading || id) return;
-    const fallback = employees.find(e => e.id === DEFAULT_EMPLOYEE_ID && !e.archivedAt && e.agents.length);
-    if (fallback) conversationUi.select(`dm_${fallback.id}`);
+    conversationUi.suspend();
+    newSessionController.open();
   }, [visible, ui.directory, loading, employees, id]);
   React.useEffect(() => {
     if (!visible || ui.directory) return;
@@ -306,10 +308,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     if (task) { setProjectId(task.workspaceId ?? ""); if (!draft.text.trim()) teamChatComposer.edit(draftKey, { text: task.description || task.title }); }
     setTaskOptionsOpen(true); setLayer("task");
   };
-  const addFiles = (files: FileList): void => {
+  const addFiles = (files: readonly File[]): void => {
     if (!selected || selected.unavailableReason || selected.dissolvedAt) return;
     if (draft.attachments.length + files.length > 5) { setFeedback("最多添加 5 个附件。"); return; }
-    for (const file of Array.from(files)) teamChatComposer.edit(draftKey, { addAttachment: {
+    for (const file of files) teamChatComposer.edit(draftKey, { addAttachment: {
       file, name: file.name, size: file.size, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
     } });
   };
@@ -406,7 +408,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     input: () => composerSurface.current?.querySelector("textarea"), surface: () => composerSurface.current,
     phase: feedbackAction ? "idle" : phase, pending: !!draft.text || !!draft.attachments.length,
     locked: !!draft.recovery || layer === "task",
-    popupOwners: ["conversation-task-panel", "本次新工作的执行配置", "本页执行工具", "本页模型", "本页思考深度"],
+    popupOwners: ["conversation-task-panel", "本次新工作的执行配置", "本页执行工具", "本页模型", "本页思考深度", "本次消息运行目录"],
   });
   const inputPlaceholder = selected?.external ? "发送到钉钉群（普通消息不启动员工）…" : layer === "task" ? "描述任务要求…" : selected?.kind === "dm" ? "描述一项新工作…" : "输入消息…";
   // 详情未到时 selected 仍是 null，但会话 id 前缀已经决定了这是私聊还是群聊。
@@ -443,7 +445,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
                 teamChatComposer.edit(draftKey, { text: `${conversationMentionToken(m, selected.team!.members)} ${mentionedLeader?.body ?? draft.text}` });
                 setMembers(false); setInvite(false); sender.current?.focus({ cursor: "end" });
               }}>@负责本轮</WandButton>
-              {m.employeeId ? <WandButton onClick={() => select(`dm_${m.employeeId}`)}>和此员工私聊</WandButton> : null}</Flex>
+              {m.employeeId ? <WandButton onClick={() => newSessionController.open({ initialEmployeeId: m.employeeId! })}>新建会话</WandButton> : null}</Flex>
             {activeRun ? <Typography.Text type="secondary">本轮执行名单 {activeRun.run.team.members.some(old => old.id === m.id) ? "包含此成员" : "不包含此成员，新派工生效"}</Typography.Text> : null}
           </Flex>)}
           <Flex ref={inviteAnchor} style={{ position: "relative" }}><WandButton ref={inviteTrigger} aria-expanded={invite} onClick={() => setInvite(!invite)}>
@@ -521,20 +523,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           {feedback && feedback !== selected.unavailableReason ? <Typography.Text type="secondary" role="status">{feedback}</Typography.Text> : null}
         </div> : null}
         <div ref={composerSurface} className="conversation-input-wrap" data-editor-expanded={editor.expanded} data-composer-expanded={minimal.expanded}>
-        <div className="conversation-runtime-summary" hidden={!!selected?.external} aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"} data-pending={!selected || undefined}>
-          {selected ? (editablePreference && runtimeAgent ? <ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
-            disabled={busy || !!unknown || !!selected.unavailableReason} onChange={setConversationPreference}/> : <>
-            <Typography.Text type="secondary">{runtimeAgent ? agentToolDisplayName(runtimeAgent.provider, runtimeAgent.engine) : "工具未就绪"}</Typography.Text>
-            <Typography.Text type="secondary" ellipsis={{ tooltip: true }}>首选模型：{runtimePreference.model}</Typography.Text>
-            <Typography.Text type="secondary" className="conversation-thinking-summary">思考：{runtimePreference.thinking}</Typography.Text>
-          </>) : null}
-        </div>
-        {employee ? <WandIconButton className="conversation-companion" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><ComposerIdentity employee={employee} fileActivity={composerUsage.fileActivity} thinking={computeRunningPhase(composerUsage.activity) === "executing"}/></WandIconButton> : null}
-        <ComposerUsage showName={false} employeeName={employee?.name} usage={composerUsage.usage} activity={composerUsage.activity}/>
-        <Sender ref={sender} value={draft.text} className="conversation-sender" readOnly={!!selected?.unavailableReason || !selected} placeholder={inputPlaceholder} autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 4 }} suffix={false}
+        <Sender ref={sender} value={draft.text} className="conversation-sender" readOnly={!!selected?.unavailableReason || !selected} placeholder={inputPlaceholder} autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 10 }} suffix={false}
           header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((a, index) => ({ index, name: a.name, sizeLabel: `${a.size} B`, previewUrl: a.previewUrl ?? null }))}
             onRemove={index => teamChatComposer.edit(draftKey, { removeAttachment: index })}/> : null}
-          onPaste={e => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
+          onPaste={pasteFilesInto(addFiles)}
           onChange={text => teamChatComposer.edit(draftKey, { text })} onSubmit={() => void send()} submitType="enter"
           onKeyDown={e => { if (e.nativeEvent.isComposing || e.keyCode === 229) return false;
             if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); void send(); return false; } return undefined; }}
@@ -544,10 +536,12 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           <Flex align="center" gap={4}><WandIconButton ref={toolsTrigger} className="conversation-composer-control" aria-label={toolsOpen ? "关闭聊天操作" : layer === "task" ? "任务选项" : "更多聊天操作"}
             aria-expanded={toolsOpen} onClick={() => layer === "task" ? setTaskOptionsOpen(!taskOptionsOpen) : setLayer(layer === "closed" ? "menu" : "closed")}><ConversationMorphIcon from="plus" to="close" active={toolsOpen}/></WandIconButton>
             <WandIconButton className="conversation-composer-control composer-edit-action" aria-label="添加附件" disabled={!selected || !!selected.unavailableReason || !!selected.external} onClick={() => { if (layer === "task") setTaskOptionsOpen(false); else setLayer("closed"); inputFiles.current?.click(); }}><WandIcon name="paperclip" size={18}/></WandIconButton>
-            <span className="composer-edit-action">{editor.control}</span>
-            {selected?.kind === "dm" && employee && layer !== "task" ? <WandPopover side="top" ariaLabel="本次新工作的执行配置" trigger={<WandButton kind="ghost" size="small" className="conversation-config-trigger" title="每次发送创建独立工作；补充已有工作请使用回复中的「继续此工作」。">执行配置{chatCwd ? " · 临时目录" : ""}<WandIcon name="chevronDown" size={14}/></WandButton>}>
+            {selected?.kind === "dm" && employee && layer !== "task" ? <WandPopover side="top" ariaLabel="本次新工作的执行配置" trigger={<WandButton kind="ghost" size="small" className="conversation-config-trigger" aria-label="执行配置" title="执行配置"><WandIcon name="shield" size={14}/>权限<WandIcon name="chevronDown" size={11}/></WandButton>}>
               <div className="conversation-preference-details">
+                <div className="composer-editor-menu">{editor.control}</div>
                 {previousWork ? <WandButton size="small" kind="ghost" className="conversation-continue-work" aria-label={`继续工作：${previousWork.title}`} title={previousWork.title} onClick={() => onOpenSession(previousWork.sessionId)}><span className="conversation-continue-prefix">继续：</span><span className="conversation-continue-title">{previousWork.title}</span></WandButton> : null}
+                {editablePreference && runtimeAgent ? <div className="composer-menu-runtime"><ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
+                  disabled={busy || !!unknown || !!selected.unavailableReason} onChange={setConversationPreference}/></div> : null}
                 <Typography.Text strong>新工作 · {employee?.name ?? "正在读取员工"}</Typography.Text>
                 <Typography.Paragraph type="secondary">{directContextPending ? "正在读取执行配置…" : directWorkPreference(runtimeAgent)}</Typography.Paragraph>
           <Descriptions size="small" column={1} items={[
@@ -560,15 +554,21 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           <WandButton size="small" onClick={event => employeeProfile.open(employee, event.currentTarget)}>查看员工执行候选</WandButton>
               </div>
             </WandPopover> : null}</Flex>
+          <Flex align="center" gap={4} className="conversation-actions-right">
+          {employee ? <ComposerEmployeeButton employee={employee} onClick={event => employeeProfile.open(employee, event.currentTarget)}/> : null}
+          {selected && !selected.external && editablePreference && runtimeAgent ? <div className="conversation-runtime-summary" aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"}>
+            <ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
+              disabled={busy || !!unknown || !!selected.unavailableReason} onChange={setConversationPreference}/>
+          </div> : null}
           <MinimalComposerEntry text={draft.text} attachments={draft.attachments.length} placeholder={inputPlaceholder} disabled={!selected || !!selected.unavailableReason} onOpen={minimal.open}/>
-          <WandIconButton className="conversation-composer-control" style={{ visibility: minimal.expanded ? "visible" : "hidden" }} aria-label="收起输入框" onClick={minimal.close}><WandIcon name="chevronDown" size={16}/></WandIconButton>
-          <ConversationSubmitButton showLabel phase={feedbackAction === "approve" ? "idle" : phase} stops={stops} label={feedbackAction === "approve" ? "发送消息" : primaryLabel} disabled={busy || !!unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || !!selected.unavailableReason || (!stops && !draft.text.trim() && !draft.attachments.length)} onClick={() => void (stops ? act("stop") : send())}/>
+          <ConversationSubmitButton phase={feedbackAction === "approve" ? "idle" : phase} stops={stops} label={feedbackAction === "approve" ? "发送消息" : primaryLabel} disabled={busy || !!unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || !!selected.unavailableReason || (!stops && !draft.text.trim() && !draft.attachments.length)} onClick={() => void (stops ? act("stop") : send())}/>
+          </Flex>
           <ConversationPanel open={toolsOpen} owner="conversation-task-panel" focusKey={layer} anchorRef={toolsAnchor} triggerRef={toolsTrigger} direction="up" onClose={() => layer === "task" ? setTaskOptionsOpen(false) : setLayer("closed")}>
-            <div className="conversation-action-menu" hidden={layer !== "menu"}>{selected?.external ? <><Typography.Text type="secondary">此处文字发送到钉钉群，不派发内部团队任务；群接入与员工候选在连接器管理。</Typography.Text><WandButton onClick={() => { setLayer("closed"); settingsController.open("connectors"); }}>管理钉钉群接入</WandButton></> : null}{selected?.kind === "group" && !selected.external ? <WandButton disabled={!id || !!selected.unavailableReason} onClick={() => taskMode()}>派新任务</WandButton> : null}
+            <div className="conversation-action-menu" hidden={layer !== "menu"}><div className="composer-editor-menu">{editor.control}</div>{selected?.external ? <><Typography.Text type="secondary">此处文字发送到钉钉群，不派发内部团队任务；群接入与员工候选在连接器管理。</Typography.Text><WandButton onClick={() => { setLayer("closed"); settingsController.open("connectors"); }}>管理钉钉群接入</WandButton></> : null}{selected?.kind === "group" && !selected.external ? <WandButton disabled={!id || !!selected.unavailableReason} onClick={() => taskMode()}>派新任务</WandButton> : null}
               {selected?.kind === "dm" && previousWork ? <WandButton onClick={() => { setLayer("closed"); onOpenSession(previousWork.sessionId); }} title={previousWork.title}>继续上一项工作</WandButton> : null}
               {selected?.kind === "dm" && employee ? <WandButton onClick={event => { setLayer("closed"); employeeProfile.open(employee, event.currentTarget); }}>员工资料与默认执行配置</WandButton> : null}
               <WandButton disabled={!selected?.communicationSessionId} onClick={() => { setLayer("closed"); if (selected?.communicationSessionId) onOpenSession(selected.communicationSessionId); }}>{selected?.kind === "dm" ? "历史私聊执行窗口" : "会话工具 / 资源设置"}</WandButton>
-              {!selected?.external ? <><WandInput aria-label="临时聊天目录（本页共用）" placeholder="留空沿用员工或项目目录" value={chatCwd} onChange={e => setChatCwd(e.currentTarget.value)}/>
+              {selected?.kind === "group" && !selected.external ? <><WandInput aria-label="临时聊天目录（本页共用）" placeholder="留空沿用服务默认目录" value={chatCwd} onChange={e => setChatCwd(e.currentTarget.value)}/>
               <Typography.Text type="secondary">只用于本页之后发送的新工作；切换联系人仍保留，不改变已有工作目录或员工配置。</Typography.Text>
               {chatCwd ? <WandButton onClick={() => setChatCwd("")}>清除临时目录</WandButton> : null}</> : null}
             </div>
@@ -583,8 +583,13 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           </ConversationPanel>
         </Flex>}/>
         </div>
-        <Typography.Text type="secondary" className="conversation-input-hint">Enter 发送 · Shift+Enter 换行</Typography.Text>
-        <input ref={inputFiles} hidden type="file" multiple aria-label="选择附件" onChange={e => { if (e.currentTarget.files) addFiles(e.currentTarget.files); e.currentTarget.value = ""; }}/>
+        {/* 面板外只留真实上下文：用量/执行状态与目录，和新工作页同一行位置。 */}
+        <div className="wand-composer-context">
+          <ComposerUsage showName={false} employeeName={employee?.name} usage={composerUsage.usage} activity={composerUsage.activity}/>
+          {editablePreference ? <ConversationComposerDirectory key={id} value={chatCwd} defaultCwd={defaultCwd}
+            disabled={busy || !!unknown || !!selected?.unavailableReason} onChange={setChatCwd}/> : null}
+        </div>
+        <input ref={inputFiles} hidden type="file" multiple aria-label="选择附件" onChange={e => { if (e.currentTarget.files) addFiles(Array.from(e.currentTarget.files)); e.currentTarget.value = ""; }}/>
       </div>
     </Flex>
     {/* 通讯录是隐藏页：第一次打开前不挂载，也不读团队名单与归档员工；

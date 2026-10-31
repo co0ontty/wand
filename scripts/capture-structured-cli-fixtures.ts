@@ -18,7 +18,7 @@ if (!process.argv.includes("--record")) {
 }
 
 const PROMPT = "Reply exactly WAND_MIGRATION_FIXTURE_OK. Do not use tools.";
-const OUT = path.resolve("tests/fixtures/structured-cli-recordings");
+const OUT = path.resolve("output/structured-cli-recordings");
 const MAX_STREAM = 4 * 1024 * 1024;
 const ENUM_KEYS = new Set([
   "type", "subtype", "role", "status", "kind", "stopReason", "stop_reason", "phase",

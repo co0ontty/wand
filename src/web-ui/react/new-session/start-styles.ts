@@ -26,46 +26,40 @@ export function installNewWorkStyles(): void {
 .new-work-inline-arrow { color:var(--text-secondary); opacity:0.8; transition:color 0.15s ease, opacity 0.15s ease, transform 0.15s ease; flex-shrink:0; }
 .new-work-inline-trigger:hover:not(:disabled) .new-work-inline-arrow { color:var(--text-primary); opacity:1; }
 .new-work-page .new-work-composer { width:100%; max-width:800px; box-sizing:border-box; margin-inline:auto; padding:0 var(--wand-page-inset) max(12px,var(--wand-safe-bottom,0px)); flex-shrink:0; }
-.new-work-context-bar { display:flex; align-items:center; gap:4px; min-width:0; margin-inline:12px; padding:2px 8px 8px; border-radius:16px 16px 0 0; background:var(--bg-secondary); }
-.new-work-location { display:flex; align-items:center; min-width:0; flex:1; gap:4px; }
-.new-work-page .new-work-person.ant-btn { min-width:0; max-width:180px; height:32px; padding-inline:6px; gap:6px; font-size:12px; }
+/* 面板外的上下文行：目录、执行对象、权限与工作类型，和新建任务页同一行。 */
+.new-work-page .wand-composer-context { padding-inline:4px; }
+.new-work-page .new-work-person.ant-btn, .new-work-page .new-work-directory.ant-btn { min-width:0; max-width:240px; height:24px; min-height:24px; padding-inline:4px; gap:4px; font-size:var(--font-size-xs); color:var(--text-secondary); }
+.new-work-page .new-work-person.ant-btn:hover, .new-work-page .new-work-directory.ant-btn:hover { color:var(--text-primary); }
+.new-work-page .new-work-person.ant-btn { max-width:180px; }
 .new-work-person .wand-employee-avatar { transform:none; }
 .new-work-person-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.new-work-page .new-work-directory.ant-btn { min-width:0; max-width:240px; height:32px; padding-inline:6px; font-size:12px; color:var(--text-primary); }
 .new-work-directory.ant-btn > span:not(.wand-ui-icon) { overflow:hidden; text-overflow:ellipsis; }
+.new-work-page .new-work-kind-settings.ant-btn { width:24px; min-width:24px; height:24px; min-height:24px; color:var(--text-secondary); }
 .new-work-subject { width:min(560px,calc(100vw - 48px)); max-height:60dvh; overflow:auto; }
 .new-work-paths { width:min(440px,calc(100vw - 48px)); max-height:60dvh; overflow:auto; }
 .new-work-paths > .ant-btn { justify-content:flex-start; overflow:hidden; }
-.new-work-page .conversation-input-wrap,
-.new-work-page .conversation-input-wrap:has(.conversation-runtime-summary):not(:has(.composer-floating-avatar)) { margin-block-start:-1px; }
-.new-work-page .conversation-sender.ant-sender { border:1px solid var(--border-subtle); border-radius:24px; padding:14px 12px 8px; }
-.new-work-page .conversation-sender .ant-sender-input { min-height:48px; }
-.new-work-page .conversation-sender .ant-sender-footer { padding-top:8px; }
-.new-work-page .conversation-runtime-summary { position:static; width:auto; max-width:100%; height:auto; gap:2px; }
-.new-work-page .conversation-runtime-summary .conversation-runtime-select { height:32px; min-height:32px; font-size:12px; }
-.new-work-page .conversation-runtime-summary .conversation-tool-select { flex:0 1 96px; }
-.new-work-page .conversation-runtime-summary .conversation-model-select { flex:0 1 180px; }
-.new-work-page .conversation-runtime-summary .conversation-thinking-select { flex:0 1 108px; }
-.new-work-page .conversation-action-row { gap:4px; }
+/* 工具栏右侧的执行选择器与发送按钮：共用共享工具栏规则，这里只调字号。 */
+.new-work-page .conversation-runtime-summary .conversation-runtime-select { font-size:12px; }
 .new-work-page .new-work-actions { flex:none; }
 .new-work-page .new-work-send-actions { min-width:0; justify-content:flex-end; }
-.new-work-submit-status { padding:0 12px 8px; font-size:12px; }
+.new-work-submit-status { padding:0 4px 6px; font-size:12px; }
 .new-work-submit-status [role="status"] { min-height:1.5em; }
-.new-work-permission { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--text-secondary); white-space:nowrap; }
+.new-work-permission { display:inline-flex; align-items:center; gap:4px; font-size:var(--font-size-xs); color:var(--text-secondary); white-space:nowrap; }
 .new-work-permission[data-automatic="true"] { color:var(--warning); }
-.new-work-page .conversation-submit.ant-btn { border-radius:50%; }
+.composer-menu-runtime { display:grid; grid-template-columns:1fr; gap:4px; min-width:220px; }
+.composer-menu-runtime .conversation-tool-select { width:auto; }
+.composer-menu-runtime .conversation-tool-select > .wand-ui-select-value, .composer-menu-runtime .conversation-tool-select > .wand-ui-icon { display:initial; }
+@container(max-width:480px) { .new-work-permission { max-width:28px; justify-content:center; } .new-work-permission > span { display:none; } }
 @media(max-width:700px) {
   .new-work-context { gap:16px; }
-  .new-work-context-bar { margin-inline:8px; padding-inline:4px; }
   .new-work-page .new-work-person.ant-btn { max-width:140px; }
-  .new-work-page .conversation-action-row { flex-wrap:wrap; }
-  .new-work-page .new-work-send-actions { flex:1; }
-  .new-work-page .conversation-runtime-summary { flex-wrap:wrap; justify-content:flex-end; }
-  .new-work-page .conversation-runtime-summary .conversation-runtime-select { flex:0 1 auto; max-width:140px; }
+  .new-work-page .conversation-action-row { flex-wrap:nowrap; }
+  .new-work-page .new-work-send-actions { flex:0 1 auto; }
+  .new-work-page .conversation-runtime-summary { flex-wrap:nowrap; justify-content:flex-end; }
   .new-work-page .new-work-actions .composer-edit-action { display:none; }
 }
 @media(pointer:coarse) {
-  .new-work-page :is(.new-work-person,.new-work-directory,.conversation-runtime-summary .conversation-runtime-select) { min-height:44px; height:44px; }
+  .new-work-page :is(.new-work-person,.new-work-directory,.new-work-kind-settings,.conversation-runtime-summary .conversation-runtime-select) { min-height:44px; height:44px; }
 }
 `);
 }

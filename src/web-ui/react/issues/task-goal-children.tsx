@@ -1,3 +1,4 @@
+import { taskAiVerified, taskHumanAccepted, taskWorkflowStage } from "../../../task-types";
 import { TaskBoardAgentChips } from "./task-executor-chips";
 import * as React from "react";
 import { Collapse, Flex, Tag, Typography } from "antd";
@@ -15,10 +16,11 @@ export function TaskGoalChildren({ task, tasks, onOpen, path = [] }: {
   const [expanded, setExpanded] = React.useState(() => expandedGoals.get(task.id) ?? false);
   const children = tasks.filter(t => t.parentTaskId === task.id && !path.includes(t.id) && t.id !== task.id);
   if (!children.length) return null;
-  const review = children.filter(t => t.acceptance?.acceptedAt).length;
-  const awaiting = children.filter(t => t.status === "done" && !t.acceptance?.acceptedAt).length;
+  const review = children.filter(taskHumanAccepted).length;
+  const awaiting = children.filter(t => taskWorkflowStage(t.status) === "review").length;
+  const ready = children.filter(t => t.status === "ready" && taskAiVerified(t)).length;
   return <Collapse size="small" ghost activeKey={expanded ? [task.id] : []} onChange={keys => { const open = Array.isArray(keys) ? keys.length > 0 : Boolean(keys); expandedGoals.set(task.id, open); setExpanded(open); }} items={[{
-    key: task.id, label: `${children.length} 个子任务 · ${awaiting} 个等待验收 · ${review} 个已验收 · ${task.acceptance?.acceptedAt ? "主目标验收通过" : "主目标待整体验收"}`,
+    key: task.id, label: `${children.length} 个子任务 · ${awaiting} 个待 AI 验收 · ${ready} 个待归档 · ${review} 个人工已确认 · ${taskHumanAccepted(task) ? "主目标已确认" : "主目标待整体验收"}`,
     children: <Flex vertical gap="small" aria-label={`${task.title} 的子任务计划`}>
       {children.map(child => <div key={child.id}>
         <WandButton kind="ghost" onClick={() => onOpen(child.id)} style={{ height: "auto", whiteSpace: "normal", textAlign: "left" }}>
@@ -26,7 +28,7 @@ export function TaskGoalChildren({ task, tasks, onOpen, path = [] }: {
         </WandButton>
         <Flex gap={4} wrap aria-label={`${child.identifier} 的工作与验收状态`}>
           <Tag>工作：{taskWorkLabel(child)}</Tag>
-          <Tag color={child.acceptance?.acceptedAt ? "success" : child.status === "done" ? "processing" : undefined}>验收：{taskReviewLabel(child)}</Tag>
+          <Tag color={taskHumanAccepted(child) ? "success" : taskWorkflowStage(child.status) === "review" ? "processing" : undefined}>验收：{taskReviewLabel(child)}</Tag>
           {child.status === "archived" && <Tag>{issueTaskStatusLabel(child)}</Tag>}
           {child.dueDate && <Tag>截止 {child.dueDate}</Tag>}
           <Typography.Text type="secondary">{child.executionStatus === "queued" ? "已排队 · 等待员工空闲" : child.sessions.length ? `${child.sessions.length} 个执行会话` : "尚未派发"}</Typography.Text>

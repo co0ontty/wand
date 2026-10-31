@@ -4,7 +4,7 @@ import { WandButton } from "../ui/button.js";
 import { hasOpenOwnedPopupSurface, hasOpenPopupSurface } from "../ui/popup-lifecycle.js";
 
 /** Presentation only: the original editor, draft and delivery owner stay mounted. */
-export function useMinimalComposer({ owner, input, surface, phase, pending, locked, forceExpanded, onDismiss, popupOwners = [] }: {
+export function useMinimalComposer({ owner, input, surface, phase, pending, locked, forceExpanded, defaultExpanded = true, onDismiss, popupOwners = [] }: {
   owner: string;
   input(): HTMLTextAreaElement | null | undefined;
   surface(): HTMLElement | null | undefined;
@@ -12,17 +12,18 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
   pending: boolean;
   locked?: boolean;
   forceExpanded?: boolean;
+  defaultExpanded?: boolean;
   onDismiss?(reason: "outside" | "escape" | "back"): void;
   popupOwners?: readonly string[];
 }) {
-  const [editing, setEditing] = React.useState(false);
+  const [editing, setEditing] = React.useState(defaultExpanded);
   const [recovery, setRecovery] = React.useState(false);
   const latest = React.useRef({ input, surface, locked, phase, popupOwners, onDismiss, forceExpanded });
   latest.current = { input, surface, locked, phase, popupOwners, onDismiss, forceExpanded };
-  React.useLayoutEffect(() => { setEditing(false); setRecovery(false); }, [owner]);
+  React.useLayoutEffect(() => { setEditing(defaultExpanded); setRecovery(false); }, [owner]);
   React.useEffect(() => {
     if (phase === "failed" || phase === "unknown") { setRecovery(true); setEditing(true); }
-    if (phase === "sent" && !pending) { setRecovery(false); setEditing(false); input()?.blur(); }
+    if (phase === "sent" && !pending) setRecovery(false);
   }, [phase, pending]);
   const expanded = editing || recovery || !!locked || !!forceExpanded || phase === "sending";
   const expandedNow = React.useRef(expanded); expandedNow.current = expanded;
@@ -42,7 +43,6 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
       if (borrowers.size || current.locked || ["sending", "failed", "unknown"].includes(current.phase)) return;
       setEditing(false); element.blur(); current.onDismiss?.(reason);
     };
-    const explicitClose = (): void => dismiss("escape");
     const escape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || !expandedNow.current || event.defaultPrevented || event.isComposing || hasOpenPopupSurface()
         || !host.contains(document.activeElement)) return;
@@ -56,13 +56,12 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
     document.addEventListener("wand-composer-focus-borrow", borrow);
     element.addEventListener("focus", focus);
     element.addEventListener("input", edited);
-    element.addEventListener("wand-composer-close", explicitClose);
     document.addEventListener("keydown", escape, true);
     window.addEventListener("popstate", back);
     return () => {
       document.removeEventListener("wand-composer-focus-borrow", borrow);
       element.removeEventListener("focus", focus); element.removeEventListener("input", edited);
-      element.removeEventListener("wand-composer-close", explicitClose); document.removeEventListener("keydown", escape, true);
+      document.removeEventListener("keydown", escape, true);
       window.removeEventListener("popstate", back);
     };
   }, [owner]);
@@ -83,8 +82,7 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
         && document.activeElement === document.body) element.focus({ preventScroll: true });
     });
   };
-  const close = (): void => { input()?.dispatchEvent(new Event("wand-composer-close")); };
-  return { expanded, open, close };
+  return { expanded, open };
 }
 
 export function MinimalComposerEntry({ text, attachments, placeholder, disabled, onOpen }: {

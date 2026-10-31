@@ -10,5 +10,5 @@ export function daemonMaintenanceMessage(status: DaemonMaintenanceStatus): strin
   if (!status.pending) return "";
   if (status.phase === "updating") return "底层组件正在自动更新。无需操作。";
   if (status.phase === "retrying") return "底层组件更新尚未完成，系统会自动重试。无需操作。";
-  return "底层组件更新正在等待执行与队列结束，届时自动更新。无需操作。";
+  return "底层组件会在各自可安全切换时自动更新。无需操作。";
 }

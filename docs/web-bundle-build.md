@@ -7,12 +7,9 @@
 ```bash
 npm run check
 WAND_BUILD_CHANNEL=beta npm run build
-npm test
-WAND_SETTINGS_BROWSER=1 node --test --import tsx tests/antd-settings-browser.test.ts
-WAND_BROWSER_MODULES_TEST=1 node --test --import tsx tests/browser-module-splitting.test.ts
 ```
 
-模块浏览器测试使用 Playwright；若本机已有独立安装，通过 `WAND_PLAYWRIGHT_MODULE` 指定其入口，不要求为测试新增生产依赖。普通测试不调用真实付费模型。
+验证不调用真实付费模型。
 
 ## 模块寻址
 

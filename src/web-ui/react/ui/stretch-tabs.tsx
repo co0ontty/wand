@@ -48,7 +48,10 @@ export function WandStretchTabs({
     const list = listRef.current;
     if (!list) return;
     const next = measureTab(list, value);
-    if (!next) return;
+    if (!next) {
+      frameRef.current = null; settleRef.current = null; setBox(null);
+      return;
+    }
     const indicator = indicatorRef.current;
     // On rapid changes start from the visible frame, not the previous destination.
     const previous = indicator && frameRef.current

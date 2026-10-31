@@ -3,6 +3,7 @@ import type { KnowledgeDocument, KnowledgeLibrary, KnowledgeScope } from "../../
 export type { KnowledgeDocument, KnowledgeLibrary, KnowledgeScope } from "../../../knowledge-types.js";
 
 export interface KnowledgeOwners {
+  global?: { id: string; name: string };
   employees: Array<{ id: string; name: string }>;
   projects: Array<{ id: string; name: string; readOnly: boolean }>;
 }

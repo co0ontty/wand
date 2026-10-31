@@ -1,5 +1,6 @@
-import { knowledgeInstructions } from "./employee-knowledge.js";
+import { globalKnowledgeContext, knowledgeInstructions } from "./employee-knowledge.js";
 import { isOpenRouterFreeSelector } from "./openrouter-free-models.js";
+import { openCodeMajorVersion } from "./opencode-cli.js";
 import { isAutoAssignSelector, defaultModelGroupSelector, resolveModelGroupModels } from "./model-groups.js";
 import { resolveAutoAssign } from "./model-auto-assign.js";
 import type { DecisionResult } from "./decision-types.js";
@@ -938,6 +939,14 @@ export class ProcessManager extends EventEmitter {
     }) : [requested ?? ""];
     if (preferredModels.some(isOpenRouterFreeSelector)) throw new Error("免费模型分组仅支持 Pi 结构化对话。");
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
+    const openCodeEnv = groupProvider === "opencode" ? buildChildEnv(this.config.inheritEnv !== false) : undefined;
+    const openCodeV2 = !!openCodeEnv && await openCodeMajorVersion(openCodeEnv) >= 2;
+    let openCodeConfig: string | undefined;
+    if (openCodeV2 && preferredModels[0]) {
+      const configured = openCodeEnv!.OPENCODE_CONFIG_CONTENT ? JSON.parse(openCodeEnv!.OPENCODE_CONFIG_CONTENT) : {};
+      if (!configured || typeof configured !== "object" || Array.isArray(configured)) throw new Error("OpenCode 内联配置无效。");
+      openCodeConfig = JSON.stringify({ ...configured, model: preferredModels[0] });
+    }
 
     if (this.disposed || start.cancelled) throw new Error("终端启动已取消。");
     // When a session is being resumed under the same id, capture its prior
@@ -986,7 +995,10 @@ export class ProcessManager extends EventEmitter {
     // Resolve before touching a resume record/worktree; invalid groups must not disturb prior work.
     // PTY has no reliable pre-input acceptance fact: use the preferred member, never replay automatically.
     const initialThinkingEffort = normalizeThinkingEffort(opts?.thinkingEffort);
-    let processedCommand = this.processCommandForMode(command, effectiveMode, provider, preferredModels[0], initialThinkingEffort);
+    // v2's interactive CLI takes its model from config; --model belongs to `run` only.
+    let processedCommand = this.processCommandForMode(command, effectiveMode, provider,
+      openCodeV2 ? undefined : preferredModels[0], initialThinkingEffort);
+    if (openCodeV2 && !/--(?:standalone|server)(?:\s|=|$)/.test(processedCommand)) processedCommand += " --standalone";
     // 会话级系统提示：provider 有系统提示开关就走开关（PTY 与结构化行为一致），没有就并进首条输入。
     const systemPrompt = (opts?.systemPrompt ?? inheritedRole?.systemPrompt)?.trim() || undefined;
     let initialInputText = initialInput;
@@ -1095,7 +1107,7 @@ export class ProcessManager extends EventEmitter {
       // Derive authority only after the real session/project binding has been persisted.
       const access = provider ? this.storage.knowledgeSessionScope(id) : null;
       const knowledgeToken = access ? this.storage.issueKnowledgeAccess(id) : undefined;
-      const runtimePrompt = access ? [knowledgeInstructions(access),
+      const runtimePrompt = access ? [globalKnowledgeContext(this.storage), knowledgeInstructions(access),
         "本终端会话的知识工具只在有效执行期内可用；每次使用知识先 search/read，不把旧轮次快照当作当前状态。访问失效时新开一轮结构化执行或恢复会话，不绕过权限。"].join("\n\n") : undefined;
       const launchPrompt = [systemPrompt, runtimePrompt].filter(Boolean).join("\n\n") || undefined;
       initialInputText = initialInput && launchPrompt && !systemPromptFlag(provider)
@@ -1112,6 +1124,7 @@ export class ProcessManager extends EventEmitter {
         args: launchPlan.shellArgs,
         cwd: resolvedCwd,
         env: buildChildEnv(this.config.inheritEnv !== false, {
+          ...(openCodeConfig ? { OPENCODE_CONFIG_CONTENT: openCodeConfig } : {}),
           WAND_SESSION_ID: id,
           WAND_KNOWLEDGE_DB: knowledgeToken ? this.storage.databasePath() : undefined,
           WAND_KNOWLEDGE_TOKEN: knowledgeToken,

@@ -51,7 +51,7 @@ export function taskHasOpenDescendant(tasks: readonly Pick<TaskHierarchyNode, "i
     const child = pending.pop()!;
     if (seen.has(child.id)) continue;
     seen.add(child.id);
-    if (child.status !== "done" && child.status !== "archived") return true;
+    if (child.status !== "archived") return true;
     pending.push(...(children.get(child.id) ?? []));
   }
   return false;

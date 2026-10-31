@@ -124,13 +124,25 @@ function teamMarkersFor(
  * 没拖过（存储为空）时保持原有默认观感，不让改动影响没动过排序的人。
  */
 function sortTaskDirectoryGroups<
-  T extends { workspaceId: string; createdAt?: string; global?: boolean },
+  T extends {
+    workspaceId: string;
+    createdAt?: string;
+    latestActivityAt?: string;
+    global?: boolean;
+    tasks?: unknown[];
+    standaloneSessions?: unknown[];
+  },
 >(groups: T[], order: string[]): T[] {
   const position = new Map<string, number>();
   order.forEach((id, index) => position.set(id, index));
   const defaultSorted = [...groups].sort((left, right) => {
     const global = Number(Boolean(right.global)) - Number(Boolean(left.global));
     if (global) return global;
+    const leftHasContent = (left.tasks?.length ?? 0) > 0 || (left.standaloneSessions?.length ?? 0) > 0;
+    const rightHasContent = (right.tasks?.length ?? 0) > 0 || (right.standaloneSessions?.length ?? 0) > 0;
+    if (leftHasContent !== rightHasContent) return rightHasContent ? 1 : -1;
+    const activity = compareCreatedDesc(left.latestActivityAt ?? left.createdAt, right.latestActivityAt ?? right.createdAt);
+    if (activity) return activity;
     const created = compareCreatedDesc(left.createdAt, right.createdAt);
     if (created) return created;
     return String(left.workspaceId).localeCompare(String(right.workspaceId));
@@ -155,10 +167,11 @@ function compareCreatedDesc(left?: string | null, right?: string | null): number
   return b.localeCompare(a);
 }
 
-function rememberCreatedAt(target: { createdAt?: string }, iso?: string | null): void {
+function rememberCreatedAt(target: { createdAt?: string; latestActivityAt?: string }, iso?: string | null): void {
   const value = typeof iso === "string" ? iso.trim() : "";
   if (!value) return;
   if (!target.createdAt || value < target.createdAt) target.createdAt = value;
+  if (!target.latestActivityAt || value > target.latestActivityAt) target.latestActivityAt = value;
 }
 
 function parseDefaultProvider(value: unknown): WorkspaceDefaultProvider | undefined {
@@ -516,7 +529,7 @@ export function registerWorkspaceRoutes(
     for (const task of tasks) {
       if (cascade || task.worktree) cleanupWorktreeSync(task.worktree);
       const card = storage.getWandTaskByWorkspaceTaskId(task.id);
-      if (card) storage.updateWandTask(card.id, { status: "archived", workspaceTaskId: null });
+      if (card) storage.archiveTaskForWorkspaceRemoval(card.id);
     }
     storage.deleteWorkspace(existing.id, { cascade });
     res.json({ ok: true });
@@ -605,6 +618,37 @@ export function registerWorkspaceRoutes(
     res.json(result);
   }));
 
+  // Sections are layout containers, independent of task-board metadata.
+  app.post("/api/workspace-sections", (req, res) => {
+    try {
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      if (!name) throw badRequest("请输入分区名称。");
+      const cwd = resolveWorkspaceCwd(req.body?.cwd);
+      const workspaceId = typeof req.body?.workspaceId === "string" ? req.body.workspaceId : "";
+      const workspace = workspaceId ? storage.getWorkspace(workspaceId)
+        : storage.listWorkspaces().find(candidate => !isGlobalWorkspace(candidate)
+          && normalizeProjectCwd(candidate.cwd) === normalizeProjectCwd(cwd)) ?? storage.ensureGlobalWorkspace();
+      if (!workspace) throw badRequest("未找到工作区。");
+      if (!isGlobalWorkspace(workspace) && normalizeProjectCwd(workspace.cwd) !== normalizeProjectCwd(cwd)) {
+        throw badRequest("分区目录与工作区不一致。");
+      }
+      const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : undefined;
+      const section = storage.createWorkspaceSection({ workspaceId: workspace.id, name, cwd, sessionId });
+      if (sessionId) sessions?.refreshSessionWorkspace(sessionId);
+      res.status(201).json({ ...section, sessions: [], isolated: false });
+    } catch (error) { sendRouteError(res, error, "无法创建分区。"); }
+  });
+
+  app.post("/api/workspace-sections/unassign", (req, res) => {
+    try {
+      const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : "";
+      if (!storage.getSessionSlim(sessionId)) { res.status(404).json({ error: "未找到会话。" }); return; }
+      storage.moveSessionToWorkspaceTask(sessionId, null);
+      sessions?.refreshSessionWorkspace(sessionId);
+      res.json({ ok: true });
+    } catch (error) { sendRouteError(res, error, "无法移回工作区。"); }
+  });
+
   // 两个创建入口只在项目来源上不同；独立任务挂到隐藏全局空间。
   // 默认只创建逻辑分组，仅显式 worktree:true 才创建隔离目录。
   app.post(["/api/tasks", "/api/workspaces/:id/tasks"], asyncRoute(async (req, res) => {
@@ -651,7 +695,7 @@ export function registerWorkspaceRoutes(
     const snapshots = sessions?.listSlim();
     const revision = crypto.createHash("sha256").update(JSON.stringify({
       storage: storage.projectionRevision(),
-      projection: "workspace-work-sessions-v2-queued",
+      projection: "workspace-work-sessions-v3-task-status",
       query: { includeArchived, workspaceFilter, taskLimit, sessionLimit },
       runtime: snapshots,
     })).digest("base64url");
@@ -674,6 +718,7 @@ export function registerWorkspaceRoutes(
       workspaceName: string;
       workspaceCwd: string;
       createdAt?: string;
+      latestActivityAt?: string;
       synthetic?: boolean;
       global?: boolean;
       tasks: unknown[];
@@ -748,17 +793,19 @@ export function registerWorkspaceRoutes(
       target.tasks.push({
         ...task,
         boardTaskId: board?.id ?? null,
+        boardTaskStatus: board?.status ?? null,
         ...(board ? model.execution(board) : taskExecutionProjection(visibleSessions)),
         parentWorkspaceTaskId: parent?.workspaceTaskId ?? null,
 
-        canArchive: (() => { const card = model.cardsByContainer.get(task.id); return card ? model.canArchive(card) : true; })(),
+        canArchive: task.kind !== "section" && (() => { const card = model.cardsByContainer.get(task.id); return card ? model.canArchive(card) : true; })(),
         ...model.milestone(task.milestoneId),
         cwd: taskRuntimeCwd(task, workspace),
         isolated: task.worktree !== null,
         sessions,
         totalSessions: visibleSessions.length,
       });
-      if (target.synthetic) rememberCreatedAt(target, task.createdAt);
+      rememberCreatedAt(target, task.createdAt);
+      for (const session of visibleSessions) rememberCreatedAt(target, session.startedAt);
     };
     for (const workspace of visibleWorkspaces) {
       const base = groups.get(workspace.id);
@@ -846,7 +893,21 @@ export function registerWorkspaceRoutes(
       group.standaloneSessions.push(summarize(session, {
         workspaceName: group.workspaceName,
       }));
-      if (group.synthetic) rememberCreatedAt(group, session.startedAt);
+      rememberCreatedAt(group, session.startedAt);
+    }
+    // 目录内的任务与会话排序：新创建的必须在上面（严格按创建/启动时间倒序）。
+    for (const group of groups.values()) {
+      (group.tasks as Array<{ createdAt?: string; sessions?: Array<{ startedAt?: string }> }>).sort((left, right) =>
+        compareCreatedDesc(left.createdAt, right.createdAt)
+      );
+      for (const task of group.tasks as Array<{ sessions?: Array<{ startedAt?: string }> }>) {
+        if (Array.isArray(task.sessions)) {
+          task.sessions.sort((left, right) => compareCreatedDesc(left.startedAt, right.startedAt));
+        }
+      }
+      (group.standaloneSessions as Array<{ startedAt?: string }>).sort((left, right) =>
+        compareCreatedDesc(left.startedAt, right.startedAt)
+      );
     }
     const orderedGroups = [...groups.values()]
       .filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0);
@@ -1055,6 +1116,10 @@ export function registerWorkspaceRoutes(
       res.status(404).json({ error: "未找到该任务。" });
       return;
     }
+    if (existing.kind === "section") {
+      res.status(409).json({ error: "分区不需要归档，可删除分区并保留会话。" });
+      return;
+    }
     const card = storage.getWandTaskByWorkspaceTaskId(existing.id);
     if (card && !canArchiveTask(storage, sessions, card.id)) {
       res.status(409).json({ error: "任务尚未完成或仍有执行，完成后才能归档。" });
@@ -1081,9 +1146,9 @@ export function registerWorkspaceRoutes(
     }
     // 删除隔离任务必然会移除其 cwd，因此即使调用方没有显式传 cascade，
     // 也必须同步删除会话；非隔离任务仍保留旧的“默认解绑”API 语义。
-    const cascade = req.query.cascade === "1"
+    const cascade = existing.kind !== "section" && (req.query.cascade === "1"
       || req.query.cascade === "true"
-      || existing.worktree !== null;
+      || existing.worktree !== null);
     if (cascade) {
       deleteSessions(
         storage,
@@ -1093,7 +1158,9 @@ export function registerWorkspaceRoutes(
     }
     // 尽力清理 worktree 与分支；失败不阻塞删除任务行。
     if (cascade) cleanupWorktreeSync(existing.worktree);
+    const retained = !cascade ? storage.listSessionsByWorkspaceTaskSlim(existing.id).map(session => session.id) : [];
     storage.deleteWorkspaceTask(existing.id, { cascade });
+    for (const id of retained) sessions?.refreshSessionWorkspace(id);
     res.json({ ok: true });
   });
 

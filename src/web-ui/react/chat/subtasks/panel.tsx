@@ -1,6 +1,8 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Collapse } from "antd";
-import { WandButton, WandIconButton, WandIcon } from "../../ui/index.js";
+import { WandButton, WandIconButton, WandIcon, WandPopover } from "../../ui/index.js";
+import { ComposerWorkSummary } from "../../composer-work-panel.js";
 import { SUBTASK_DISCLOSURE_STYLES } from "./styles.js";
 
 export interface ChatSubtask {
@@ -17,14 +19,17 @@ export interface SubtaskPanelProps {
   prepareOpenChange(): void;
   onOpenChange(open: boolean): () => void;
   hasNestedPopup(): boolean;
+  /** Composer capsule row; the panel itself stays inside the chat reading area. */
+  triggerHost?: HTMLElement | null;
 }
 interface PanelMemory { scroll: Map<string, number> }
-export function SubtaskPanel({ tasks, registerOpen, prepareOpenChange, onOpenChange, hasNestedPopup }: SubtaskPanelProps): React.ReactElement {
+export function SubtaskPanel({ tasks, registerOpen, prepareOpenChange, onOpenChange, hasNestedPopup, triggerHost }: SubtaskPanelProps): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [selected, setSelected] = React.useState(tasks[0]?.id || "");
   const [listOpen, setListOpen] = React.useState(true);
   const [visited, setVisited] = React.useState<Set<string>>(new Set());
   const trigger = React.useRef<HTMLButtonElement>(null);
+  const capsuleTrigger = React.useRef<HTMLButtonElement>(null);
   const memory = React.useRef<PanelMemory>({ scroll: new Map() });
   const selectedId = tasks.some(task => task.id === selected) ? selected : tasks[0]?.id;
   const panelId = React.useId();
@@ -32,7 +37,8 @@ export function SubtaskPanel({ tasks, registerOpen, prepareOpenChange, onOpenCha
   const changeOpen = (next: boolean): void => {
     prepareOpenChange();
     setOpen(next);
-    if (!next) trigger.current?.focus({ preventScroll: true });
+    if (!next) (triggerHost ? capsuleTrigger : trigger).current?.focus({ preventScroll: true });
+    if (next) document.dispatchEvent(new CustomEvent("wand-composer-work-popup", { detail: "agent" }));
   };
   React.useLayoutEffect(() => {
     registerOpen(id => { if (id) select(id); else if (selectedId) select(selectedId); changeOpen(true); });
@@ -48,34 +54,50 @@ export function SubtaskPanel({ tasks, registerOpen, prepareOpenChange, onOpenCha
     document.addEventListener("keydown", close, true);
     return () => document.removeEventListener("keydown", close, true);
   }, [open]);
+  React.useEffect(() => {
+    const other = (event: Event): void => { if ((event as CustomEvent).detail !== "agent") setOpen(false); };
+    document.addEventListener("wand-composer-work-popup", other);
+    return () => document.removeEventListener("wand-composer-work-popup", other);
+  }, []);
   const counts = new Map<string, number>();
   tasks.forEach(task => counts.set(task.status, (counts.get(task.status) || 0) + 1));
   const summary = Array.from(counts, ([label, count]) => `${count}${label}`).join(" · ");
+  const latest = tasks.find(task => task.id === selectedId)?.latest || tasks[0]?.latest || "";
+  const capsule = <ComposerWorkSummary label="Agent" count={String(tasks.length)} preview={summary || latest}
+    icon="users" expanded={open} id="composer-agent-capsule" buttonRef={capsuleTrigger}/>;
+  const details = <>
+    <Collapse ghost bordered={false} styles={SUBTASK_DISCLOSURE_STYLES} activeKey={listOpen ? ["list"] : []} onChange={keys => setListOpen(keys.includes("list"))} items={[{
+      key: "list", label: "任务列表", forceRender: true,
+      children: <div className="chat-subtasks-list">{tasks.map(task => <WandButton key={task.id} kind="ghost" className="chat-subtasks-item"
+        aria-pressed={selectedId === task.id} onClick={() => select(task.id)}>
+        <span className="chat-subtasks-item-copy"><span>{task.title}</span><small>{task.status}</small></span>
+        <span className="chat-subtasks-item-check" aria-hidden="true"><WandIcon name="check" size={13}/></span>
+      </WandButton>)}</div>,
+    }]}/>
+    {tasks.filter(task => visited.has(task.id) || open && task.id === selectedId).map(task => <div key={task.id}
+      className="chat-subtasks-scroll" hidden={task.id !== selectedId} data-subtask-id={task.id}
+      ref={node => { if (node && node.scrollTop === 0) node.scrollTop = memory.current.scroll.get(task.id) || 0; }}
+      onScroll={event => memory.current.scroll.set(task.id, event.currentTarget.scrollTop)}>
+      <div className="chat-subtasks-current"><strong>{task.title}</strong><span>{task.status}</span></div>
+      {task.latest && <p className="chat-subtasks-latest">最新活动 · {task.latest}</p>}
+      {task.detail}
+    </div>)}
+  </>;
   return <>
-    <div className="chat-subtasks-toolbar" hidden={!tasks.length}>
+    {/* 胶囊详情经公共 Portal 打开，不重排消息列或移动发送按钮。 */}
+    {triggerHost && tasks.length ? createPortal(<WandPopover open={open} side="top" align="center" ariaLabel="Agent 详情" contentRole="dialog"
+      popupOwner="composer-agent" className="composer-work-popover" trigger={capsule} onOpenChange={next => { if (next && selectedId) select(selectedId); changeOpen(next); }}>
+      <section className="composer-agent-panel"><header><strong>Agent · {tasks.length}</strong><WandIconButton aria-label="关闭子任务详情" onClick={() => changeOpen(false)}><WandIcon name="close" size={16}/></WandIconButton></header>{details}</section>
+    </WandPopover>, triggerHost) : null}
+    <div className="chat-subtasks-toolbar" hidden={!tasks.length || !!triggerHost}>
       <WandButton ref={trigger} className="chat-subtasks-trigger" style={{ visibility: tasks.length ? "visible" : "hidden" }}
         aria-expanded={open} aria-controls={panelId} title={summary} onClick={() => { if (selectedId) select(selectedId); changeOpen(!open); }}>
         <WandIcon name="splitHorizontal" size={14}/><span>子任务 {tasks.length}</span><span className="chat-subtasks-counts">{summary}</span>
       </WandButton>
     </div>
-    <aside id={panelId} className="chat-subtasks-panel" aria-label="子任务详情" aria-hidden={!open} inert={!open}>
+    {!triggerHost ? <aside id={panelId} className="chat-subtasks-panel" aria-label="子任务详情" aria-hidden={!open} inert={!open}>
       <header><strong>子任务 <span className="chat-subtasks-panel-count">{tasks.length}</span></strong><WandIconButton aria-label="关闭子任务详情" onClick={() => changeOpen(false)}><WandIcon name="close" size={16}/></WandIconButton></header>
-      <Collapse ghost bordered={false} styles={SUBTASK_DISCLOSURE_STYLES} activeKey={listOpen ? ["list"] : []} onChange={keys => setListOpen(keys.includes("list"))} items={[{
-        key: "list", label: "任务列表", forceRender: true,
-        children: <div className="chat-subtasks-list">{tasks.map(task => <WandButton key={task.id} kind="ghost" className="chat-subtasks-item"
-          aria-pressed={selectedId === task.id} onClick={() => select(task.id)}>
-          <span className="chat-subtasks-item-copy"><span>{task.title}</span><small>{task.status}</small></span>
-          <span className="chat-subtasks-item-check" aria-hidden="true"><WandIcon name="check" size={13}/></span>
-        </WandButton>)}</div>,
-      }]}/>
-      {tasks.filter(task => visited.has(task.id) || open && task.id === selectedId).map(task => <div key={task.id}
-        className="chat-subtasks-scroll" hidden={task.id !== selectedId} data-subtask-id={task.id}
-        ref={node => { if (node && node.scrollTop === 0) node.scrollTop = memory.current.scroll.get(task.id) || 0; }}
-        onScroll={event => memory.current.scroll.set(task.id, event.currentTarget.scrollTop)}>
-        <div className="chat-subtasks-current"><strong>{task.title}</strong><span>{task.status}</span></div>
-        {task.latest && <p className="chat-subtasks-latest">最新活动 · {task.latest}</p>}
-        {task.detail}
-      </div>)}
-    </aside>
+      {details}
+    </aside> : null}
   </>;
 }

@@ -1,7 +1,6 @@
 import { Checkbox, Flex, Layout, Tag, Typography } from "antd";
 import { CopyPageLink } from "../ui/copy-page-link";
 import { WandUiBoundary } from "../theme";
-import { ImSidebarGroup } from "./im-sidebar-group";
 import { WandBrandMark } from "../ui/brand-mark";
 import { wandOverlay } from "../overlay-controller";
 import * as React from "react";
@@ -9,11 +8,11 @@ import { settingsController, settingsStore } from "../settings/controller";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { WAND_AGENT_LABEL, normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
-import { deferredComponent } from "../deferred-feature";
 import { openSessionWithOwningTask } from "../workspaces/session-open";
-import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { conversationUi, useConversationUi } from "../conversations/state";
-import { ConversationNavigation, ConversationSidebarList, ConversationSidebarTools } from "../conversations/sidebar";
+import { ConversationNavigation } from "../conversations/sidebar";
+import { SidebarFilterCapsules, UnifiedSidebarList, useUnifiedSidebar, type UnifiedSidebarEntry } from "../conversations/unified-sidebar";
+import { newSessionController } from "../new-session/controller";
 import { SidebarPresentationContext, useSidebarPresentation } from "../workspaces/sidebar-display-mode";
 import { sidebarSafeError } from "../workspaces/sidebar-safe-error";
 import { useUserProfile } from "../user-profile-repository";
@@ -36,7 +35,6 @@ import { knowledgeController, knowledgeStore } from "../knowledge/controller";
 import { HomeAttentionBadge } from "../attention/home-attention";
 import { useAiTeamAttentionCount } from "../ai-teams/repository";
 import { GROUP_CHAT_VISIBLE } from "../../group-chat-visibility.js";
-import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
 import { useSidebarDrawer } from "./use-sidebar-drawer";
 import { useSidebarGesture } from "./use-sidebar-gesture";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
@@ -45,7 +43,6 @@ import type {
   UiManageTarget,
   UiNativeHistoryProvider,
   UiSessionVm,
-  UiSidebarGroupVm,
 } from "./ui-store";
 
 export interface ShellSidebarEntryActions {
@@ -68,17 +65,6 @@ export interface ShellSidebarEntryActions {
 export const SHELL_WORKTREE_MERGE_LABEL = "合并到主分支…";
 export const SHELL_WORKTREE_CLEANUP_LABEL = "重试 worktree 清理";
 export const SHELL_SESSION_DELETE_LABEL = "删除会话";
-
-/** The workspace tree mounts only after the user switches projections; keep its
- * dialog/polling code out of the chat shell's first load. */
-const WorkspacesPanel = deferredComponent<NonNullable<React.ComponentProps<(typeof import("../workspaces/workspaces-panel"))["WorkspacesPanel"]>>>(
-  () => import("../workspaces/workspaces-panel").then(module => module.WorkspacesPanel),
-  { title: "工作区", renderPending: () => <div role="status" style={{ padding: 12, fontSize: 12, color: "var(--text-secondary)" }}>正在加载工作区…</div> },
-);
-
-/** 悬浮目录预览只在窄栏首次悬停时出现：它的实现（antd Card）按需下载，
- * 首屏 runtime 不再背着预览卡片。 */
-const SidebarPeekSurface = React.lazy(() => import("./sidebar-peek").then(module => ({ default: module.SidebarPeek })));
 
 export function getSidebarEntryTarget(entry: Readonly<UiSessionVm>): UiManageTarget {
   if (entry.source.endsWith("-history")) return entry.source as UiManageTarget;
@@ -545,68 +531,9 @@ function SidebarCompactToggle({
   );
 }
 
-function SessionGroup({
-  group,
-  manageMode,
-  dispatch,
-}: {
-  group: Readonly<UiSidebarGroupVm>;
-  manageMode: boolean;
-  dispatch(action: UiAction): void | Promise<unknown>;
-}) {
-  if (group.entries.length === 0) return null;
-  const entries = (
-    <section className={classNames(
-      "session-group",
-      group.kind === "automation" && "automation-session-list",
-      group.kind === "history" && "non-wand-session-list",
-    )}>
-      {group.entries.map((entry) => (
-        <SessionEntry key={`${entry.source}:${entry.id}`} entry={entry} manageMode={manageMode} dispatch={dispatch}/>
-      ))}
-    </section>
-  );
-  if (group.kind === "wand") return entries;
-
-  const automation = group.kind === "automation";
-  const setOpen = (expanded: boolean): void => {
-    if (!manageMode) void dispatch({
-      type: "layout.drawer.group.set",
-      group: automation ? "automation" : "history",
-      expanded,
-    });
-  };
-  return <div className={classNames(
-    automation ? "automation-session-group" : "non-wand-session-group",
-    manageMode && "manage-mode",
-  )}>
-    <ImSidebarGroup label={group.label} count={group.entries.length}
-      description={automation
-        ? "由自动化或启动任务创建，不参与普通 Wand 会话排序"
-        : "本机原生会话，不参与 Wand 会话排序"}
-      avatarNode={<WandIcon name={automation ? "zap" : "history"}/>}
-      expanded={manageMode || group.expanded}
-      onToggle={() => setOpen(!group.expanded)} onSetOpen={setOpen}>
-      {entries}
-    </ImSidebarGroup>
-  </div>;
-}
-
 export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const conversationState = useConversationUi();
-  // 首屏只挂载当前投影：对话列表和工作区树各自带着自己的请求、订阅与渲染。
-  // 另一侧等用户首次切换过去时才挂载，之后保持常驻；空闲预挂载会让隐藏列表
-  // 在首屏就拉对话/会话/员工并开始页面级轮询，即使它从没显示过。
-  const [mountedModes, setMountedModes] = React.useState<ReadonlySet<"chats" | "tasks">>(
-    () => new Set<"chats" | "tasks">([conversationState.mode]),
-  );
-  const activeModeMounted = mountedModes.has(conversationState.mode);
-  // 切换到的投影当帧挂载：layout effect 里的更新会在浏览器绘制前完成。
-  React.useLayoutEffect(() => {
-    if (activeModeMounted) return;
-    setMountedModes((previous) => new Set(previous).add(conversationState.mode));
-  }, [activeModeMounted, conversationState.mode]);
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const knowledge = React.useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.getSnapshot, knowledgeStore.getSnapshot);
@@ -617,7 +544,6 @@ export function ShellSidebar() {
   const [moreOpen, setMoreOpen] = React.useState(false);
   const accountTriggerRef = React.useRef<HTMLButtonElement>(null);
   const presentation = useSidebarPresentation();
-  const { query: searchQuery, setQuery: setSearchQuery } = presentation;
   // 报错清单默认收起：头部徽标只显示条数，点开才在下方就地展开。
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   // Secondary management surfaces borrow the list space without changing the user's pinned/collapsed preference.
@@ -625,14 +551,13 @@ export function ShellSidebar() {
     || taskBoard.open || knowledge.open || snapshot.layout.filePanelOpen);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
-    "sidebar sidebar-refined",
+    "sidebar sidebar-refined sidebar-unified",
     snapshot.layout.sessionsDrawerOpen && "open",
     !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored && "pinned",
     narrow && !contextRail && "collapsed",
     contextRail && "context-rail",
-    conversationState.mode === "chats" && !contextRail && "sidebar-home",
+
   );
-  const primaryAction = getShellSidebarPrimaryAction();
   const visible = snapshot.layout.sessionsDrawerOpen
     || (!snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored);
   const overlay = visible && (snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarPinned);
@@ -646,33 +571,25 @@ export function ShellSidebar() {
     onOpen: () => void dispatch({ type: "layout.drawer.open" }),
     onClose: () => void dispatch({ type: "layout.drawer.close" }),
   });
-  const bodyRef = React.useRef<HTMLDivElement>(null);
-  const peekSurfaceRef = React.useRef<HTMLDivElement>(null);
-  // 窄栏的悬浮目录树：只在有真实指针的设备上启用（触摸设备没有悬停语义）。
-  const hoverPointer = useHoverPointer();
-  const [peekDirectory, setPeekDirectory] = React.useState<{ id: string; name: string; top: number } | null>(null);
-  const selectPeekDirectory = React.useCallback((id: string, trigger: HTMLElement): void => {
-    const sidebarTop = drawerRef.current?.getBoundingClientRect().top ?? 0;
-    const top = Math.max(8, Math.min(
-      trigger.getBoundingClientRect().top - sidebarTop,
-      window.innerHeight - sidebarTop - 300,
-    ));
-    const name = trigger.dataset.sidebarDirectoryName ?? "目录";
-    setPeekDirectory((current) => current?.id === id && current.name === name && current.top === top
-      ? current : { id, name, top });
-  }, [drawerRef]);
-  const peek = useSidebarPeek(visible && !contextRail && narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory);
-  const scrollPositions = React.useRef<Record<string, number>>({ ...conversationState.scrolls });
-  React.useLayoutEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
-    const mode = `sidebar:${conversationState.mode}:${narrow ? "compact" : "full"}`;
-    body.scrollTop = scrollPositions.current[mode] ?? 0;
-    return () => { scrollPositions.current[mode] = body.scrollTop; conversationUi.scroll(mode, body.scrollTop); };
-  }, [narrow, conversationState.mode]);
+  const sessionTitles = Object.fromEntries(snapshot.sidebar.groups.flatMap(group => group.entries.map(entry => [entry.id, entry.title] as const)));
+  const model = useUnifiedSidebar(visible, sessionTitles);
   const dismissSidebarSurfaces = (): void => {
-    peek.close();
     if (overlay) void dispatch({ type: "layout.drawer.close" });
+  };
+  const createSession = (): void => {
+    const workspace = model.groups.find(group => `id:${group.workspaceId}` === model.facets.workspace && !group.synthetic && !group.global);
+    settingsController.close(); taskBoardController.close(); knowledgeController.close();
+    newSessionController.open(workspace ? { workspaceId: workspace.workspaceId, initialCwd: workspace.workspaceCwd } : undefined);
+    dismissSidebarSurfaces();
+  };
+  const openEntry = (entry: UnifiedSidebarEntry): void => {
+    settingsController.close(); taskBoardController.close(); knowledgeController.close();
+    dismissSidebarSurfaces();
+    if (entry.conversation) conversationUi.select(entry.conversation.id);
+    else {
+      conversationUi.suspend();
+      void openSessionWithOwningTask(entry.session.id, id => { void dispatch({ type: "session.select", id }); });
+    }
   };
   const navigate = (action: UiAction): void => {
     // 设置、创建表单和辅助面板只暂时覆盖当前页面，取消后仍留在原视图。
@@ -681,68 +598,13 @@ export function ShellSidebar() {
     dismissSidebarSurfaces();
     void dispatch(action);
   };
-  // 真正打开任务 / 会话时离开看板；树内创建表单复用临时弹层入口。
-  const navigateFromTree = (): void => {
-    settingsController.close();
-    taskBoardController.close();
-    knowledgeController.close();
-    conversationUi.suspend();
-    dismissSidebarSurfaces();
-  };
-  const dispatchEntryAction = (action: UiAction): void => {
-    if (action.type === "session.select" || action.type === "session.resume"
-      || action.type === "session.resumeHistory") {
-      navigate(action);
-      return;
-    }
-    void dispatch(action);
-  };
-  React.useEffect(() => {
-    setMoreOpen(false);
-  }, [visible, narrow, contextRail, conversationState.mode, conversationState.directory]);
-  // 收起抽屉时同步关闭通知浮层；压缩列表不影响导航入口。
-  React.useEffect(() => {
-    if (!visible) setAttentionOpen(false);
-  }, [visible]);
-  const extraGroups = snapshot.sidebar.groups
-    .filter((group) => group.kind === "history")
-    .map((group) => ({
-      ...group,
-      entries: searchQuery.trim()
-        ? group.entries.filter((entry) => sidebarSearchMatches(
-          searchQuery, entry.title, entry.description, entry.cwd, entry.provider,
-        ))
-        : group.entries,
-    }))
-    .map((group) => (
-      <SessionGroup key={group.kind} group={group} manageMode={false} dispatch={dispatchEntryAction}/>
-    ));
-  // 窄栏展示目录图标；悬浮树按当前目录过滤，不携带全局搜索和历史分组。
-  const taskTree = (compact: boolean, directoryId?: string): React.ReactNode => (
-    <WorkspacesPanel
-      key={directoryId ?? "sidebar-tree"}
-      compact={compact}
-      directoryId={directoryId}
-      peekDirectoryId={peek.open ? peekDirectory?.id : undefined}
-      onExpand={() => {
-        peek.close();
-        void dispatch({ type: "layout.drawer.collapse" });
-      }}
-      onNavigate={navigateFromTree}
-      onOpenDialog={dismissSidebarSurfaces}
-      searchQuery={searchQuery}
-      surfacesEnabled={directoryId ? visible && peek.open : visible && !narrow && !contextRail && conversationState.mode === "tasks"}
-      onSearchChange={setSearchQuery}
-      selectedSessionId={snapshot.selected?.id ?? null}
-      sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
-        group.entries.map((entry) => [entry.id, entry.title] as const)
-      )))}
-      sessionTitleGenerating={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
-        group.entries.map((entry) => [entry.id, entry.titleGenerating] as const)
-      )))}
-      extraGroups={extraGroups}
-    />
-  );
+  // Native CLI histories retain their resume/delete commands, flattened beside managed sessions.
+  const historyEntries = model.facets.runtime === "all" && model.facets.taskStage === "all" && model.facets.workspace === "all" && model.facets.archive === "all" && !model.facets.activityOnly
+    ? snapshot.sidebar.groups.filter(group => group.kind === "history").flatMap(group => group.entries)
+      .filter(entry => !model.entries.some(candidate => candidate.session.id === entry.id)
+        && sidebarSearchMatches(model.query, entry.title, entry.description, entry.cwd, entry.provider)) : [];
+  React.useEffect(() => { setMoreOpen(false); }, [visible, narrow, contextRail]);
+  React.useEffect(() => { if (!visible) setAttentionOpen(false); }, [visible]);
 
   return (
     <SidebarPresentationContext.Provider value={presentation}>
@@ -755,21 +617,21 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width={contextRail ? 56 : "min(344px, calc(100vw - 24px))"} collapsedWidth={112} collapsed={narrow && !contextRail} theme="light"
+        width={contextRail ? 76 : "min(356px, calc(100vw - 24px))"} collapsedWidth={76} collapsed={narrow && !contextRail} theme="light"
         style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
         styles={{ body: { display: "flex", flexDirection: "row", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
         aria-modal={overlay || undefined} aria-hidden={!visible || undefined}
-        inert={!visible} tabIndex={-1} {...peek.triggerBindings}>
+        inert={!visible} tabIndex={-1}>
         <Flex vertical align="center" className="sidebar-navigation-rail">
           <div className="sidebar-rail-scroll">
             <WandBrandMark className="sidebar-brand-mark" style={{ width: "var(--conversation-brand-size, 24px)", height: "var(--conversation-brand-size, 24px)" }} />
+            {!snapshot.layout.sidebarDrawer && <SidebarCompactToggle active={narrow} onToggle={() => { void dispatch({ type: "layout.drawer.collapse" }); }}/>}
             <ConversationNavigation activePage={settings.open ? null : knowledge.open ? "knowledge" : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : taskBoard.page === "calendar" ? "calendar" : "teams"
-              : conversationState.directory ? "teams" : conversationState.mode} teamAttention={teamAttention}
+              : conversationState.directory ? "teams" : "chats"} teamAttention={teamAttention}
               onNavigate={(page) => {
                 setAttentionOpen(false);
                 settingsController.close();
-                peek.close();
                 if (page !== "knowledge" && knowledge.open) knowledgeController.close();
                 if (page === "knowledge") {
                   taskBoardController.close();
@@ -780,19 +642,19 @@ export function ShellSidebar() {
                   taskBoardController.close();
                   if (page === "contacts") conversationUi.directory(true);
                   else {
-                    conversationUi.mode(page);
-                    if (page === "chats") conversationUi.show();
-                    else conversationUi.suspend();
+                    conversationUi.mode("tasks");
+                    conversationUi.suspend();
                   }
                 }
                 if (page !== "chats" && page !== "tasks") dismissSidebarSurfaces();
               }}/>
-            <Flex vertical align="center" gap={4} className="sidebar-rail-notices">
+            <SidebarFilterCapsules model={model} enabled={visible}/>
+          </div>
+          <Flex vertical align="center" gap={4} className="sidebar-rail-notices">
               <HomeAttentionBadge compact open={attentionOpen} onToggle={() => setAttentionOpen(value => !value)} />
               <SidebarListErrorBadge />
               <DaemonUpdateNotice compact visible={visible} />
-            </Flex>
-          </div>
+          </Flex>
           <WandDropdownMenu open={moreOpen} onOpenChange={setMoreOpen} modal={false}>
             <WandDropdownMenuTrigger ref={accountTriggerRef} render={(
               <WandIconButton kind={settings.open ? "soft" : "ghost"} aria-current={settings.open ? "page" : undefined}
@@ -819,87 +681,15 @@ export function ShellSidebar() {
             </WandDropdownMenuContent>
           </WandDropdownMenu>
         </Flex>
-        <Flex vertical className="sidebar-list-panel" hidden={contextRail} inert={contextRail}>
-          <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "8px 4px" : "10px 12px", flexShrink: 0 }}>
-            <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-header-primary">
-              <Flex align="center" gap="small" className="sidebar-header-main">
-                <Typography.Text strong className="sidebar-title" hidden={narrow} style={{ whiteSpace: "nowrap" }}>{conversationState.mode === "tasks" ? "工作区" : "对话"}</Typography.Text>
-              </Flex>
-              <Flex align="center" gap={4} vertical={narrow} className="sidebar-header-actions">
-                <div hidden={conversationState.mode !== "chats"}><ConversationSidebarTools enabled={visible && !contextRail && conversationState.mode === "chats"}
-                  onCreateSession={() => navigate(primaryAction.action)}
-                  onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
-                {!snapshot.layout.sidebarDrawer && (
-                  <SidebarCompactToggle
-                    active={narrow}
-                    onToggle={() => {
-                      peek.close();
-                      void dispatch({ type: "layout.drawer.collapse" });
-                    }}
-                  />
-                )}
-                {snapshot.layout.sidebarDrawer && (
-                  <WandIconButton
-                    id="close-drawer-button"
-                    className="sidebar-close"
-                    aria-label="关闭侧栏"
-                    title="关闭侧栏"
-                    size="medium"
-                    onClick={() => void dispatch({ type: "layout.drawer.close" })}
-                  >
-                    <SidebarToggleIcon open/>
-                  </WandIconButton>
-                )}
-              </Flex>
-            </Flex>
+        <Flex vertical className="sidebar-list-panel" hidden={contextRail || narrow} inert={contextRail || narrow}>
+          <Flex align="center" justify="space-between" className="sidebar-header" style={{ padding: "10px 12px", flexShrink: 0 }}>
+            <Typography.Text strong className="sidebar-title">会话</Typography.Text>
+            {snapshot.layout.sidebarDrawer && <WandIconButton id="close-drawer-button" aria-label="关闭侧栏" onClick={() => void dispatch({ type: "layout.drawer.close" })}><SidebarToggleIcon open/></WandIconButton>}
           </Flex>
-          <Flex hidden={conversationState.mode !== "tasks"} vertical className="sidebar-feature-nav" style={{ padding: narrow ? "0 4px 8px" : "0 12px 8px", flexShrink: 0 }}>
-            <WandButton id="drawer-new-session-button" className="sidebar-new-task" kind="primary" title={primaryAction.label}
-              aria-label={primaryAction.ariaLabel} onClick={() => navigate(primaryAction.action)}>
-              <WandIcon name="plus" size={18}/><span hidden={narrow}>{primaryAction.label}</span>
-            </WandButton>
-          </Flex>
-          <div className="sidebar-body" ref={bodyRef} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: narrow ? 4 : "0 8px" }}>
-            <div id="sessions-panel">
-              <div className="sessions-list" id="sessions-list">
-                <SidebarProjectionSwap value={conversationState.mode}>
-                  {mountedModes.has("chats") ? (
-                    <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && !contextRail && conversationState.mode === "chats"}
-                      selectedSessionId={snapshot.selected?.id ?? null}
-                      sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap(group => group.entries.map(entry => [entry.id, entry.title] as const)))}
-                      onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}
-                      onOpenSession={id => {
-                        taskBoardController.close(); conversationUi.suspend(); dismissSidebarSurfaces();
-                        void openSessionWithOwningTask(id, selectedId => { void dispatch({ type: "session.select", id: selectedId }); });
-                      }}/></div>
-                  ) : null}
-                  {mountedModes.has("tasks") ? (
-                    <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
-                  ) : null}
-                </SidebarProjectionSwap>
-              </div>
-            </div>
-          </div>
-          {/* 首次悬停才挂载，之后常驻（关闭态用 CSS visibility 藏起来）：
-              既不预览就多跑一份任务树轮询，也不会每次悬停都重新拉一次。 */}
-          {narrow && hoverPointer && peek.mounted && peekDirectory ? (
-            <React.Suspense fallback={null}>
-            <SidebarPeekSurface
-              title={peekDirectory.name}
-              top={peekDirectory.top}
-              open={peek.open}
-              surfaceRef={peekSurfaceRef}
-              onExpand={() => {
-                peek.close();
-                void dispatch({ type: "layout.drawer.collapse" });
-              }}
-              {...peek.surfaceBindings}
-            >
-              {/* 仅渲染当前目录，不复制 legacy DOM id。 */}
-              <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
-            </SidebarPeekSurface>
-            </React.Suspense>
-          ) : null}
+          <UnifiedSidebarList model={model} titles={sessionTitles} enabled={visible && !contextRail && !narrow} selectedSessionId={snapshot.selected?.id ?? null}
+            selectedConversationId={conversationState.active && !conversationState.directory ? conversationState.selectedId : null}
+            onOpen={openEntry} onCreate={createSession} historyCount={historyEntries.length}
+            historyRows={historyEntries.map(entry => <SessionEntry key={`${entry.source}:${entry.id}`} entry={entry} manageMode={false} dispatch={navigate}/>)}/>
           {(snapshot.layout.sidebarDrawer || snapshot.capabilities.backToNative || snapshot.capabilities.switchServer) && <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
             <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
               {snapshot.layout.sidebarDrawer && <WandIconButton id="file-panel-toggle-btn" title="查看文件" aria-label="文件"

@@ -23,6 +23,7 @@ export interface WandSelectProps extends Pick<React.ButtonHTMLAttributes<HTMLBut
   options: ReadonlyArray<WandSelectOption>;
   placeholder?: string;
   displayValue?: string;
+  startSlot?: React.ReactNode;
   /** 悬停 tooltip 用的完整值，不参与可见文本；缺省时回退 displayValue。 */
   displayTitle?: string;
   ariaLabel: string;
@@ -45,7 +46,7 @@ export interface WandSelectProps extends Pick<React.ButtonHTMLAttributes<HTMLBut
 
 
 /** A real button ref and popup-owned search are required by the composer focus lease. */
-export function WandSelect({ value, defaultValue, options, placeholder = "请选择", displayValue, displayTitle,
+export function WandSelect({ value, defaultValue, options, placeholder = "请选择", displayValue, startSlot, displayTitle,
   ariaLabel, id, "aria-describedby": describedBy, "aria-invalid": invalid, triggerRef, disabled, triggerKind, searchable, searchPlaceholder = "搜索", className, contentClassName,
   itemClassName, side = "bottom", align = "start", sideOffset = 6, collisionPadding = 12, popupOwner = ariaLabel, onValueChange, onOpenChange }: WandSelectProps) {
   const portal = usePortalContainer();
@@ -111,7 +112,7 @@ export function WandSelect({ value, defaultValue, options, placeholder = "请选
     data-popup-open={open ? "" : undefined} data-placeholder={selectedValue === undefined && !displayValue ? "" : undefined}
     aria-controls={open ? listId : undefined} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
     title={displayTitle ?? shown}>
-    <span className="wand-ui-select-value">{shown}</span><WandIcon name="chevronDown" size={14}/>
+    {startSlot}<span className="wand-ui-select-value">{shown}</span><WandIcon name="chevronDown" size={14}/>
   </WandButton>;
   // 弹层实现还没到时，触发器自己接住这一次点击；实现到达后由 Ant 接管开合。
   const pendingTriggerButton = <WandButton ref={node => {
@@ -123,7 +124,7 @@ export function WandSelect({ value, defaultValue, options, placeholder = "请选
     aria-controls={open ? listId : undefined} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
     title={displayTitle ?? shown}
     onClick={() => { if (!disabled) changeOpen(true); }}>
-    <span className="wand-ui-select-value">{shown}</span><WandIcon name="chevronDown" size={14}/>
+    {startSlot}<span className="wand-ui-select-value">{shown}</span><WandIcon name="chevronDown" size={14}/>
   </WandButton>;
   return <WandUiBoundary>{Surface
     ? <Surface trigger={triggerButton} open={open} triggers={["click"]} disabled={disabled}

@@ -24,6 +24,7 @@ export interface StructuredSpawnRequest {
   stdinData?: string;
   /** Internal opt-in: a real Pi native TUI in an owned tmux pane. Never supplied by HTTP command text. */
   nativePi?: boolean;
+  nativeInputMessageId?: string;
   requestId?: string;
   /** Native launch cancellation before input has been accepted; not sent to daemon RPCs. */
   launchSignal?: AbortSignal;
@@ -75,7 +76,9 @@ export interface StructuredExecProcess {
 export interface StructuredExecHost {
   readonly persistent: boolean;
   readonly piNativeTui?: boolean;
-  collectGarbage?(options: { liveSessionIds: ReadonlySet<string>; retentionMs: number; now?: number }): { removedSlots: number; removedTurns: number; freedBytes: number };
+  offerPiInput?(runId: string, boundaryId: string, take: (identity: import("./pi-native-input.js").PiInputHandoff) => string | null): boolean;
+  resolvePiInput?(runId: string, handoff: import("./pi-native-input.js").PiInputHandoff): import("./pi-native-input.js").PiInputResolution;
+  collectGarbage?(options: { liveSessionIds: ReadonlySet<string>; activeSessionIds?: ReadonlySet<string>; retentionMs: number; now?: number }): { removedSlots: number; removedTurns: number; freedBytes: number };
   spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess>;
   /** Full state incl. replay logs; null when the host does not know the run. */
   attachRun(runId: string, checkpoint?: import("./pi-cli-checkpoint.js").PiCliCheckpoint): Promise<StructuredRunState | null>;

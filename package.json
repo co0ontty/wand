@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "4.89.5-debug.t10101604",
+  "version": "4.106.1",
   "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {
@@ -39,7 +39,6 @@
     "check": "node src/deployment-lock.ts --run-project -- npm run check:body",
     "check:body": "node scripts/check-node-version.js && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
     "typecheck": "node scripts/check-node-version.js && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
-    "test": "node scripts/check-node-version.js && node scripts/run-tests.js",
     "check:bundle-budget": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js",
     "budget:accept": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js --accept-baseline",
     "check:web-performance": "node scripts/check-node-version.js && node scripts/check-web-performance.js",

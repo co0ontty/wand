@@ -1,3 +1,4 @@
+import { createWorkspaceSection } from "./section-create";
 import * as React from "react";
 import { describeError } from "../errors";
 import { workspacesStore } from "./controller";
@@ -18,18 +19,25 @@ export function useSessionMove({ sessionId, taskId, intoNewTask, open, onMoved }
   const [error, setError] = React.useState("");
   const [reloadKey, setReloadKey] = React.useState(0);
   const running = React.useRef(false);
-  const createdTask = React.useRef<{ sessionId: string; workspaceId: string; id: string } | null>(null);
+  const origin = React.useRef<TaskDirectoryGroup | undefined>(intoNewTask);
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setLoading(true); setError("");
     void httpWorkspacesRepository.listTaskGroups().then(({ groups }) => {
-      if (!cancelled) setTargets(groups.flatMap(group => group.tasks.filter(task => task.id !== taskId)
-        .map(task => ({ id: task.id, label: `${group.workspaceName} / ${task.name}` }))));
-    }).catch(cause => { if (!cancelled) setError(describeError(cause, "无法加载任务。")); })
+      if (!cancelled) {
+        origin.current = groups.find(group => group.standaloneSessions.some(session => session.id === sessionId)
+          || group.tasks.some(task => task.sessions.some(session => session.id === sessionId))) ?? intoNewTask;
+        setTargets([
+          ...(taskId ? [{ id: "ungrouped", label: "移回工作区（不分区）" }] : []),
+          ...groups.flatMap(group => group.tasks.filter(task => task.id !== taskId)
+            .map(task => ({ id: task.id, label: `${group.workspaceName} / ${task.kind === "section" ? "" : "任务 · "}${task.name}` }))),
+        ]);
+      }
+    }).catch(cause => { if (!cancelled) setError(describeError(cause, "无法加载分区。")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [open, taskId, reloadKey]);
+  }, [open, taskId, sessionId, reloadKey]);
 
   const run = async (operation: () => Promise<void>, success: string, failure: string): Promise<void> => {
     if (running.current) return;
@@ -52,22 +60,19 @@ export function useSessionMove({ sessionId, taskId, intoNewTask, open, onMoved }
   const move = (id: string): Promise<void> => {
     const target = targets.find(candidate => candidate.id === id);
     if (!target) return Promise.resolve();
-    return run(() => httpWorkspacesRepository.moveSession(id, sessionId), `已移至 ${target.label}，运行目录不变`, "无法移动会话。");
+    return run(() => id === "ungrouped" ? httpWorkspacesRepository.unassignSession(sessionId) : httpWorkspacesRepository.moveSession(id, sessionId), `已移至 ${target.label}，运行目录不变`, "无法移动会话。");
   };
-  const summarize = (): Promise<void> => {
-    if (!intoNewTask) return Promise.resolve();
-    return run(async () => {
-      // If creation succeeded but attachment failed, retry attachment to that same task.
-      // Do not create another empty task on every click of the retry action.
-      if (createdTask.current?.sessionId !== sessionId || createdTask.current.workspaceId !== intoNewTask.workspaceId) {
-        const created = intoNewTask.synthetic || intoNewTask.global
-          ? await httpWorkspacesRepository.createStandaloneTask({ worktree: false, cwd: intoNewTask.workspaceCwd })
-          : await httpWorkspacesRepository.createTask(intoNewTask.workspaceId, { worktree: false });
-        createdTask.current = { sessionId, workspaceId: intoNewTask.workspaceId, id: created.id };
-      }
-      await httpWorkspacesRepository.moveSession(createdTask.current.id, sessionId);
-      createdTask.current = null;
-    }, "已归纳为新任务，稍后按会话内容自动命名", "无法归纳为新任务。");
+  const summarize = async (): Promise<void> => {
+    const group = origin.current;
+    if (!group || running.current) return;
+    running.current = true; setBusy(true); setError("");
+    try {
+      const created = await createWorkspaceSection(group, sessionId);
+      if (!created) return;
+      onMoved?.();
+      await workspacesStore.getRuntime()?.refreshSessions();
+    } catch (cause) { setError(describeError(cause, "无法创建分区。")); }
+    finally { running.current = false; setBusy(false); }
   };
   return { targets, loading, busy, error, move, summarize, retry: () => setReloadKey(key => key + 1) };
 }

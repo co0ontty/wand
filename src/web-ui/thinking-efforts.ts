@@ -52,6 +52,14 @@ export function compactThinkingLabel(native: string): string {
   return COMPACT_LABELS[native] ?? native;
 }
 
+/** Compact projection of the existing stored value; never changes the execution level. */
+export function storedThinkingLabel(provider: string, value: string): string {
+  if (!value || value === "off") return "自动";
+  const native = value.includes(":") ? value.slice(value.indexOf(":") + 1)
+    : LEGACY_NATIVE[provider]?.[value as "standard" | "deep" | "max"] ?? value;
+  return compactThinkingLabel(native);
+}
+
 /**
  * 用 CLI 报出的档位生成下拉。完全没有档位时返回 null，调用方继续用旧的四档兜底。
  * 模型明确只支持 off 时只保留「不覆盖」。原生 off 不重复列出。

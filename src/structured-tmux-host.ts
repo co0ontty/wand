@@ -1,13 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type Socket } from "node:net";
-import { chmodSync, closeSync, constants, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { buildChildEnv } from "./env-utils.js";
+import { buildChildEnv, systemEnvValue } from "./env-utils.js";
 import { shellQuote } from "./shell-quote.js";
 import { signalNumberFromName } from "./signal-utils.js";
 import { createUtf8TextDecoder, type StructuredExecHost, type StructuredExecProcess, type StructuredExitEvent, type StructuredRunState, type StructuredSpawnRequest, type StructuredStreamEvent } from "./structured-exec-host.js";
@@ -16,7 +16,7 @@ const execute = promisify(execFile);
 const LOG_MAX_BYTES = 8 * 1024 * 1024;
 const READ_BYTES = 64 * 1024;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-interface Job { runId: string; incarnationId: string; requestId: string; tmux: string; dir: string; state: string; stdout: string; stderr: string; ack: string; }
+interface Job { runId: string; incarnationId: string; requestId: string; tmux: string; socket?: "default"; pane?: string; dir: string; state: string; stdout: string; stderr: string; ack: string; }
 interface WorkerState { runId: string; incarnationId: string; status: "starting" | "running" | "exited"; pid: number; workerPid?: number; supervisorPid?: number; exitCode: number | null; signal: string | null; spawnError?: string; }
 function atomic(file: string, value: unknown): void {
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -106,7 +106,9 @@ class TmuxProcess implements StructuredExecProcess {
     if (this.ended) return;
     try {
       const state = this.host.state(this.job);
-      this.read("stdout", state.status === "exited"); this.read("stderr", state.status === "exited");
+      if (!this.observationFailed) {
+        this.read("stdout", state.status === "exited"); this.read("stderr", state.status === "exited");
+      }
       if (state.status !== "exited") return;
       this.ended = { exitCode: state.exitCode, signal: state.signal ? signalNumberFromName(state.signal) : null };
     } catch {
@@ -119,11 +121,11 @@ class TmuxProcess implements StructuredExecProcess {
   }
 }
 
-/** Persistent structured CLI execution in isolated tmux sessions, with pipe I/O. */
+/** Persistent structured CLI execution in the default tmux server, with pipe I/O. */
 export class StructuredTmuxHost implements StructuredExecHost {
   readonly persistent = true;
   private readonly root: string;
-  private readonly socket: string;
+  private readonly legacySocket: string;
   private readonly prefix: string;
   private readonly owners = new Map<string, "tmux" | "legacy">();
   private readonly snapshots = new Map<string, StructuredRunState>();
@@ -134,7 +136,7 @@ export class StructuredTmuxHost implements StructuredExecHost {
     this.root = path.join(configDir, "structured-tmux");
     const suffix = createHash("sha256").update(path.resolve(configDir)).digest("hex").slice(0, 12);
     const uid = typeof process.getuid === "function" ? process.getuid() : 0;
-    this.socket = path.join(os.tmpdir(), `wand-st-${uid}-${suffix}.sock`);
+    this.legacySocket = path.join(os.tmpdir(), `wand-st-${uid}-${suffix}.sock`);
     this.prefix = `wand-st-${suffix}-`;
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
     try { chmodSync(this.root, 0o700); } catch { /* existing private directory */ }
@@ -147,6 +149,7 @@ export class StructuredTmuxHost implements StructuredExecHost {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
     const job = JSON.parse(text) as Job;
     if (job.runId !== runId || !job.incarnationId || !job.requestId || !job.tmux?.startsWith(this.prefix) ||
+        (job.socket !== undefined && job.socket !== "default") || (job.pane !== undefined && !/^%\d+$/.test(job.pane)) ||
         path.dirname(job.dir) !== this.slot(runId) ||
         job.state !== path.join(job.dir, "state.json") || job.stdout !== path.join(job.dir, "stdout.log") ||
         job.stderr !== path.join(job.dir, "stderr.log") || job.ack !== path.join(job.dir, "ack")) {
@@ -154,8 +157,12 @@ export class StructuredTmuxHost implements StructuredExecHost {
     }
     return job;
   }
-  private async tmux(args: string[]): Promise<string> {
-    const result = await execute("tmux", ["-f", "/dev/null", "-S", this.socket, ...args], { env: buildChildEnv(false), timeout: 10_000, maxBuffer: 1024 * 1024 });
+  private async tmux(job: Job, args: string[]): Promise<string> {
+    // Records predating the default server keep their original execution owner.
+    const connection = job.socket === "default" ? ["-L", "default"] : ["-S", this.legacySocket];
+    const result = await execute("tmux", [...connection, ...args], {
+      env: buildChildEnv(false, { TMUX_TMPDIR: systemEnvValue("TMUX_TMPDIR") }), timeout: 10_000, maxBuffer: 1024 * 1024,
+    });
     return result.stdout;
   }
   state(job: Job): WorkerState {
@@ -264,7 +271,7 @@ export class StructuredTmuxHost implements StructuredExecHost {
     const dir = mkdtempSync(path.join(slot, "turn-")); const incarnationId = randomUUID();
     const sid = request.runId.replace(/^structured:/, "").replace(/[^a-zA-Z0-9-]/g, "-");
     const job: Job = { runId: request.runId, incarnationId, requestId: request.requestId ?? incarnationId,
-      tmux: `${this.prefix}${sid}-${incarnationId.slice(0, 8)}`, dir,
+      tmux: `${this.prefix}${sid}-${incarnationId.slice(0, 8)}`, socket: "default", dir,
       state: path.join(dir, "state.json"), stdout: path.join(dir, "stdout.log"),
       stderr: path.join(dir, "stderr.log"), ack: path.join(dir, "ack") };
     writeFileSync(job.stdout, "", { mode: 0o600 }); writeFileSync(job.stderr, "", { mode: 0o600 });
@@ -286,12 +293,14 @@ export class StructuredTmuxHost implements StructuredExecHost {
     const command = `exec ${shellQuote(process.execPath)} ${shellQuote(runtimeModule("structured-tmux-worker"))} ${shellQuote(socketPath)} 2>>${shellQuote(path.join(dir, "worker-startup.log"))}`;
     try {
       let exists = false;
-      try { await this.tmux(["has-session", "-t", job.tmux]); exists = true; } catch { /* isolated name is available */ }
+      try { await this.tmux(job, ["has-session", "-t", `=${job.tmux}`]); exists = true; } catch { /* name is available */ }
       if (exists) throw new Error("tmux session name collision; refusing to adopt or stop it");
-      await this.tmux(["new-session", "-d", "-s", job.tmux, "-x", "120", "-y", "36", "-c", request.cwd, command]);
+      job.pane = (await this.tmux(job, ["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", job.tmux, "-x", "120", "-y", "36", "-c", request.cwd, command])).trim();
       created = true;
-      await this.tmux(["set-option", "-t", job.tmux, "@wand-structured-owner", job.runId]);
-      const panePid = Number((await this.tmux(["list-panes", "-t", `${job.tmux}:0.0`, "-F", "#{pane_pid}"])).trim());
+      if (!/^%\d+$/.test(job.pane)) throw new Error("Structured tmux pane identity is unavailable");
+      await this.tmux(job, ["set-option", "-t", job.tmux, "@wand-structured-owner", job.runId]);
+      await this.tmux(job, ["set-window-option", "-t", job.pane, "remain-on-exit", "off"]);
+      const panePid = Number((await this.tmux(job, ["display-message", "-p", "-t", job.pane, "#{pane_pid}"])).trim());
       if (!Number.isSafeInteger(panePid) || panePid <= 0) throw new Error("Structured tmux worker PID is unavailable");
       atomic(job.state, { runId: job.runId, incarnationId, status: "starting", pid: panePid, workerPid: panePid, exitCode: null, signal: null });
       if (request.launchSignal?.aborted) throw new Error("Structured CLI startup cancelled before input delivery");
@@ -309,7 +318,7 @@ export class StructuredTmuxHost implements StructuredExecHost {
     } catch (error) {
       if (!handedOff) {
         (receiver as Socket | null)?.destroy();
-        if (created) await this.tmux(["kill-session", "-t", `=${job.tmux}`]);
+        if (created) await this.tmux(job, ["kill-session", "-t", `=${job.tmux}`]);
         atomic(job.state, { runId: job.runId, incarnationId, status: "exited", pid: -1, exitCode: 1, signal: null });
         if (this.job(job.runId)?.incarnationId === incarnationId) writeFileSync(job.ack, "not-delivered\n", { mode: 0o600 });
         throw error;
@@ -378,11 +387,12 @@ export class StructuredTmuxHost implements StructuredExecHost {
       if (!Number.isSafeInteger(state.pid) || state.pid <= 0) {
         throw new Error("Structured tmux process identity is unavailable; refusing termination");
       }
-      const name = (await this.tmux(["display-message", "-p", "-t", job.tmux, "#{session_name}"])).trim();
-      if (name !== job.tmux) throw new Error("Structured tmux exact target mismatch; refusing termination");
-      const owner = (await this.tmux(["show-options", "-v", "-t", job.tmux, "@wand-structured-owner"])).trim();
+      const panes = (await this.tmux(job, ["list-panes", "-t", `=${job.tmux}`, "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}"])).trim().split("\n");
+      const identity = job.pane ? panes.find(line => line.split("\t")[1] === job.pane) : panes[0];
+      if (!identity || identity.split("\t")[0] !== job.tmux) throw new Error("Structured tmux exact target mismatch; refusing termination");
+      const owner = (await this.tmux(job, ["show-options", "-v", "-t", job.tmux, "@wand-structured-owner"])).trim();
       if (owner !== job.runId) throw new Error("Structured tmux owner mismatch; refusing termination");
-      const pane = Number((await this.tmux(["list-panes", "-t", `${job.tmux}:0.0`, "-F", "#{pane_pid}"])).trim());
+      const pane = Number(identity.split("\t")[2]);
       if (!state.workerPid || pane !== state.workerPid) throw new Error("Structured tmux pane generation mismatch");
       const requested = signal ?? "SIGTERM";
       if (requested === "SIGKILL") {
@@ -434,4 +444,84 @@ export class StructuredTmuxHost implements StructuredExecHost {
     this.forgets.set(runId, forgetting);
     void forgetting.finally(() => { if (this.forgets.get(runId) === forgetting) this.forgets.delete(runId); }).catch(() => {});
   }
+
+  /**
+   * 回收 structured-tmux 下已经没用的执行产物。forgetRun 只写 ack，目录按回合留下。
+   * 只删认得出会话、current 已 ack、全部 turn 已退出、且会话已删除或已归档的 slot。
+   * 这类会话不再续接，进程退出后不再额外等保留期。
+   * 未 ack、进程还在、或 current.json 对不上 slot 的目录一律不动。
+   * 未归档会话整槽保留：恢复执行仍要靠 current.json 指向的日志。
+   */
+  collectGarbage(options: {
+    liveSessionIds: ReadonlySet<string>;
+    activeSessionIds?: ReadonlySet<string>;
+    retentionMs: number;
+    now?: number;
+  }): { removedSlots: number; removedTurns: number; freedBytes: number } {
+    const active = options.activeSessionIds ?? options.liveSessionIds;
+    const report = { removedSlots: 0, removedTurns: 0, freedBytes: 0 };
+    const now = options.now ?? Date.now();
+    let entries;
+    try { entries = readdirSync(this.root, { withFileTypes: true }); } catch { return report; }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const slot = path.join(this.root, entry.name);
+      let record: Job;
+      try { record = JSON.parse(readFileSync(path.join(slot, "current.json"), "utf8")) as Job; }
+      catch { continue; }
+      if (!record.runId?.startsWith("structured:") || this.slot(record.runId) !== slot) continue;
+      const sessionId = record.runId.slice("structured:".length);
+      if (!sessionId || active.has(sessionId)) continue;
+      if (!existsSync(record.ack)) continue;
+      if (!this.slotIsIdle(slot, now, 0)) continue;
+      const bytes = directoryBytes(slot);
+      try { rmSync(slot, { recursive: true, force: false }); }
+      catch { continue; }
+      report.removedSlots += 1;
+      report.freedBytes += bytes;
+    }
+    return report;
+  }
+
+  /** 无主 slot 是否已静默：每个 turn 都已退出，且最新写入超过保留期。 */
+  private slotIsIdle(slot: string, now: number, retentionMs: number): boolean {
+    let turns: import("node:fs").Dirent[];
+    try { turns = readdirSync(slot, { withFileTypes: true }); } catch { return false; }
+    let latest = 0;
+    try { latest = directoryLatestMtime(slot); } catch { return false; }
+    if (now - latest < retentionMs) return false;
+    for (const turn of turns) {
+      if (!turn.isDirectory() || !turn.name.startsWith("turn-")) continue;
+      const directory = path.join(slot, turn.name);
+      let state: WorkerState;
+      try { state = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8")) as WorkerState; }
+      catch { return false; }
+      if (state.status !== "exited" && alive(state.pid)) return false;
+    }
+    return true;
+  }
+}
+
+function directoryLatestMtime(directory: string): number {
+  let latest = lstatSync(directory).mtimeMs;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const child = path.join(directory, entry.name);
+    const stat = lstatSync(child);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) latest = Math.max(latest, directoryLatestMtime(child));
+    else latest = Math.max(latest, stat.mtimeMs);
+  }
+  return latest;
+}
+
+function directoryBytes(directory: string): number {
+  let total = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const child = path.join(directory, entry.name);
+    const stat = lstatSync(child);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) total += directoryBytes(child);
+    else total += stat.size;
+  }
+  return total;
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { openCodeMajorVersion, openCodeModelArgs } from "./opencode-cli.js";
 
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
@@ -29,13 +30,10 @@ function extractStructuredText(value: unknown): string {
   return "";
 }
 
-export function buildOpenCodeArgs(session: SessionSnapshot): string[] {
+export function buildOpenCodeArgs(session: SessionSnapshot, major = 1): string[] {
   const args = ["run", "--format", "json", "--thinking"];
-  const modelChoice = session.selectedModel?.trim();
-  if (modelChoice && modelChoice !== "default") args.push("--model", modelChoice);
-
-  const variant = thinkingEffortToOpenCodeVariant(session.thinkingEffort);
-  if (variant) args.push("--variant", variant);
+  if (major >= 2) args.push("--standalone");
+  args.push(...openCodeModelArgs(session.selectedModel, thinkingEffortToOpenCodeVariant(session.thinkingEffort), major));
   if (
     session.autoApprovePermissions === true
     || session.mode === "full-access"
@@ -136,7 +134,32 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
   ) {}
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
-    const args = buildOpenCodeArgs(context.session);
+    const abort = new AbortController();
+    let execution: StructuredRunnerExecution | undefined;
+    const spawnedAt = new Date().toISOString();
+    const completion = Promise.resolve().then(async () => {
+      const major = await openCodeMajorVersion(context.env, abort.signal);
+      if (abort.signal.aborted || !observer.isActive()) throw new Error("OpenCode 启动已取消。");
+      execution = this.startCli(context, observer, major);
+      return execution.completion;
+    }).catch((error: unknown) => {
+      // Once launched, keep the runner's delivery facts; preparation is the only known rejection.
+      if (execution) throw error;
+      return {
+        state: { blocks: [], result: "", sessionId: context.session.claudeSessionId },
+        exitCode: 1, signal: null, stderr: "", primaryError: error instanceof Error ? error.message : "OpenCode 启动准备失败。",
+        processExited: true, inputAccepted: false, retryForbidden: true,
+      };
+    });
+    return { spawnedAt, completion,
+      get args() { return execution?.args ?? []; }, get pid() { return execution?.pid ?? null; },
+      exited: completion.then(() => execution?.exited, () => execution?.exited).then(() => {}),
+      interrupt() { abort.abort(); execution?.interrupt(); },
+    };
+  }
+
+  private startCli(context: StructuredRunnerContext, observer: StructuredRunnerObserver, major: number): StructuredRunnerExecution {
+    const args = buildOpenCodeArgs(context.session, major);
     const state: OpenCodeTurnState = {
       blocks: [],
       result: "",

@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import type { StructuredInputReceipt } from "./storage/session-input-repository.js";
 import { InputRequest, ResizeRequest } from "./types.js";
 
 import { compactToolMessagesForTransport, truncateMessagesForTransport } from "./message-truncator.js";
@@ -48,6 +49,8 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     // 让退出 handler 不要把剩余 queuedMessages 清空（默认行为是清空）。
     const preserveQueue = !!req.body?.preserveQueue;
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
+    let inputReceipt: StructuredInputReceipt | undefined;
+    let inputAccepted = false;
     try {
       const session = structured.get(req.params.id);
       if (!session) {
@@ -55,18 +58,21 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
         return;
       }
       const snapshot = await structured.sendMessage(req.params.id, input, {
+        onAccepted: receipt => { inputAccepted = true; inputReceipt = receipt; },
         interrupt,
         preserveQueue,
         idempotencyKey,
         source: "user",
       });
-      res.json(sessionResponseDTO(snapshot, req));
+      res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
-      const status = errorCode === "duplicate_idempotency_key" || errorCode === "duplicate_queued_message" ? 409 : 400;
+      const status = inputAccepted ? 503
+        : errorCode === "idempotency_key_conflict" || errorCode === "duplicate_idempotency_key" || errorCode === "duplicate_queued_message" ? 409 : 400;
       res.status(status).json({
         error: getErrorMessage(error, "无法发送结构化消息。"),
-        errorCode,
+        errorCode: inputAccepted ? "INPUT_DELIVERY_UNCONFIRMED" : errorCode,
+        ...(inputReceipt ? { inputReceipt } : {}),
       });
     }
   }));
@@ -85,7 +91,7 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
       const snapshot = structured.reorderQueuedMessages(req.params.id, rawOrder.map((v: unknown) => Number(v)), req.body?.expectedQueue);
       res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /^(排序长度与当前队列不一致，请刷新后重试。|排序参数无效。|排队消息已变化，请刷新后重试。)$/) ?? error, "无法调整排队顺序。");
+      sendRouteError(res, surfaceDomainError(error, /^(排序长度与当前队列不一致，请刷新后重试。|排序参数无效。|排队消息已变化，请刷新后重试。|排队消息正在交接，请按最新状态重试。)$/) ?? error, "无法调整排队顺序。");
     }
   });
 
@@ -100,7 +106,7 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
         req.params.id, Number(req.params.index), expectedText, text,
       ), req));
     } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /^(排队消息已变化，请刷新后重试。|排队消息不能为空。)$/) ?? error, "无法编辑排队消息。");
+      sendRouteError(res, surfaceDomainError(error, /^(排队消息已变化，请刷新后重试。|排队消息不能为空。|排队消息正在交接，请按最新状态重试。)$/) ?? error, "无法编辑排队消息。");
     }
   });
 
@@ -115,7 +121,7 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
       const snapshot = structured.deleteQueuedMessage(req.params.id, index, expectedText);
       res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /^(队列中没有该条消息（可能已被处理）。|排队消息已变化，请按最新顺序重试。)$/) ?? error, "无法删除排队消息。");
+      sendRouteError(res, surfaceDomainError(error, /^(队列中没有该条消息（可能已被处理）。|排队消息已变化，请按最新顺序重试。|排队消息正在交接，请按最新状态重试。)$/) ?? error, "无法删除排队消息。");
     }
   });
 
@@ -127,15 +133,20 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     }
     const expectedText = typeof req.body?.expectedText === "string" ? req.body.expectedText : undefined;
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
+    let inputAccepted = false;
+    let inputReceipt: StructuredInputReceipt | undefined;
     try {
-      const snapshot = await structured.promoteQueuedMessage(req.params.id, index, expectedText, idempotencyKey);
-      res.json(sessionResponseDTO(snapshot, req));
+      const snapshot = await structured.promoteQueuedMessage(req.params.id, index, expectedText, idempotencyKey, receipt => {
+        inputAccepted = true; inputReceipt = receipt;
+      });
+      res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
-      const status = errorCode === "duplicate_idempotency_key" ? 409 : 400;
+      const status = inputAccepted ? 503 : errorCode === "idempotency_key_conflict" || errorCode === "duplicate_idempotency_key" ? 409 : 400;
       res.status(status).json({
         error: getErrorMessage(error, "无法立即发送排队消息。"),
-        errorCode,
+        errorCode: inputAccepted ? "INPUT_DELIVERY_UNCONFIRMED" : errorCode,
+        ...(inputReceipt ? { inputReceipt } : {}),
       });
     }
   }));
@@ -157,16 +168,21 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     const input = body.input ?? "";
     const view = body.view;
     const shortcutKey = body.shortcutKey;
+    let inputReceipt: StructuredInputReceipt | undefined;
+    let inputAccepted = false;
     try {
       if (structured.get(sessionId)) {
-        const completion = structured.sendMessage(sessionId, input, { source: "user" });
+        let confirmAcceptance!: () => void;
+        const acceptance = new Promise<void>(resolve => { confirmAcceptance = resolve; });
+        const completion = structured.sendMessage(sessionId, input, { source: "user",
+          idempotencyKey: body.idempotencyKey,
+          onAccepted: receipt => { inputAccepted = true; inputReceipt = receipt; confirmAcceptance(); },
+        });
         if (body.respondImmediately === true || (structured.get(sessionId)?.provider === "pi"
           && structured.get(sessionId)?.piSettings?.autoResources === true)) {
-          // sendMessage updates the canonical snapshot synchronously before it
-          // starts awaiting the runner. Native clients should not hold this
-          // request open for an entire model turn (which can exceed their HTTP
-          // timeout, especially while the first-turn title job is also active).
-          // The normal structured events continue to carry progress/failure.
+          // Reject before returning 202 if validation/storage did not accept the
+          // input. After acceptance, execution failures arrive on the event stream.
+          await Promise.race([acceptance, completion]);
           completion.catch((error) => {
             console.error("[wand] Accepted structured input later failed", {
               sessionId,
@@ -177,11 +193,11 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
           if (!accepted) {
             throw badRequest("未找到该结构化会话。");
           }
-          res.status(202).json(sessionResponseDTO(accepted, req));
+          res.status(202).json({ ...sessionResponseDTO(accepted, req), ...(inputReceipt ? { inputReceipt } : {}) });
           return;
         }
         const snapshot = await completion;
-        res.json(sessionResponseDTO(snapshot, req));
+        res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
         return;
       }
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
@@ -205,7 +221,10 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
       }
       res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
-      const response = getInputErrorResponse(error, sessionId);
+      const response = inputAccepted
+        ? { statusCode: 503, payload: { error: getErrorMessage(error), errorCode: "INPUT_DELIVERY_UNCONFIRMED",
+          ...(inputReceipt ? { inputReceipt } : {}), sessionId, sessionStatus: structured.get(sessionId)?.status ?? null } }
+        : getInputErrorResponse(error, sessionId);
       console.error("[wand] Input request failed", {
         sessionId, inputLength: input.length, view: view ?? "chat",
         responseStatus: response.statusCode, responsePayload: response.payload,

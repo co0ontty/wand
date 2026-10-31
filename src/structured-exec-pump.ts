@@ -46,6 +46,7 @@ export interface StructuredCliPumpOptions<S extends StructuredRunnerTurnState> {
   /** Pi opts in: stdout is captured to a private file; only file reads feed processLine. */
   stdoutFile?: PiOutputFileOptions;
   nativePi?: boolean;
+  nativeInputMessageId?: string;
   requestId?: string;
   /** Provider-owned streaming projection; defaults to the strict shared line framer. */
   createProtocolReader?(onLine: (line: string) => void): { push(text: string): void; finish(): void; readonly atBoundary?: boolean };
@@ -92,6 +93,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   // history snapshot must not exhaust the raw-file quota before SAX can read it.
   const captureReader = options.stdoutFile ? options.createProtocolReader?.((line) => stdoutFile?.append(line + "\n")) : undefined;
   let settled = false;
+  let processExited = false;
   let stopRequested = false;
   let stopDelivered = false;
   // A pending spawn has no cancellable handle yet. Remember one request and
@@ -102,13 +104,13 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     try { source.interrupt(); } catch { /* best-effort interruption */ }
   }
   function requestStop(): void {
-    if (settled || stopRequested) return;
+    if (processExited || stopRequested) return;
     stopRequested = true;
     launchController?.abort();
     interruptSource();
   }
   let acknowledgeExit = () => {};
-  const exited = new Promise<void>((resolve) => { acknowledgeExit = resolve; });
+  const exited = new Promise<void>((resolve) => { acknowledgeExit = () => { processExited = true; resolve(); }; });
   let resolveCompletion!: (result: StructuredRunnerResult) => void;
   let rejectCompletion!: (error: unknown) => void;
   const completion = new Promise<StructuredRunnerResult>((resolve, reject) => {
@@ -138,7 +140,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     settled = true;
     try {
       if (!protocolError && lineBuffer.trim()) options.processLine(lineBuffer, ctx);
-      const result = options.finalize(ctx, exitCode, signal, spawnError);
+      const result = { ...options.finalize(ctx, exitCode, signal, spawnError), processExited };
       resolveCompletion(beforeSpawn ? { ...result, primaryError: spawnError?.message ?? "Pi 实时事件文件初始化失败。",
         inputAccepted: false, retryForbidden: true, failure: { kind: "preflight", delivery: "rejected", retryable: false } }
         : protocolError ? { ...result, exitCode: 1, primaryError: protocolError.message,
@@ -226,7 +228,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       cwd: options.cwd,
       env: options.env,
       ...(options.stdinData !== undefined ? { stdinData: options.stdinData } : {}),
-      ...(options.nativePi ? { nativePi: true } : {}),
+      ...(options.nativePi ? { nativePi: true, nativeInputMessageId: options.nativeInputMessageId } : {}),
       ...(options.requestId ? { requestId: options.requestId } : {}),
       ...(launchController ? { launchSignal: launchController.signal } : {}),
     };
@@ -250,7 +252,8 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       void host.spawnStructured(request).then((handle) => {
         source = { pid: handle.pid, interrupt: () => handle.interrupt() };
         // Replay and subscribe before applying a pending external cancellation.
-        wireRemoteHandle(handle, captureStdout, handleStderrText, finish, acknowledgeExit, (event) => {
+        wireRemoteHandle(handle, captureStdout, handleStderrText, finish, acknowledgeExit,
+          () => finish(1, null, undefined, new Error("CLI 输出连接中断，正在等待原进程停止；新消息会排队。")), (event) => {
           if (!settled && options.nativePi && event.stream === "stdout" && handle.protocolSource
             && protocolReader?.atBoundary && observer.isActive()) {
             options.checkpoint?.({ incarnationId: handle.incarnationId, source: handle.protocolSource, offset: event.seq });
@@ -274,7 +277,10 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     const stderrDecoder = createUtf8TextDecoder();
     child.stdout?.on("data", (chunk: Buffer) => captureStdout(stdoutDecoder.write(chunk)));
     child.stderr?.on("data", (chunk: Buffer) => handleStderrText(stderrDecoder.write(chunk)));
-    child.on("error", (error) => finish(null, null, error as NodeJS.ErrnoException));
+    child.on("error", (error) => {
+      if (!child.pid) acknowledgeExit(); // Spawn failed before any process existed.
+      finish(null, null, error as NodeJS.ErrnoException);
+    });
     child.stdin?.on("error", (error) => {
       requestStop();
       finish(null, null, error as NodeJS.ErrnoException);
@@ -297,6 +303,7 @@ function wireRemoteHandle(
   onStderr: (text: string) => void,
   finish: (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException) => void,
   acknowledgeExit: () => void,
+  observationFailed: () => void,
   afterStream?: (event: import("./structured-exec-host.js").StructuredStreamEvent) => void,
 ): void {
   const stream = handle.onStream((event) => {
@@ -308,11 +315,10 @@ function wireRemoteHandle(
   let ended = false;
   exit = handle.onExit((event) => {
     stream.dispose();
-    if (event.processExited !== false) {
-      ended = true;
-      exit?.dispose();
-      acknowledgeExit();
-    }
+    if (event.processExited === false) { observationFailed(); return; }
+    ended = true;
+    exit?.dispose();
+    acknowledgeExit();
     finish(event.exitCode, signalNameFromNumber(event.signal));
   });
   if (ended) exit.dispose();

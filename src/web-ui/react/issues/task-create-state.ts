@@ -27,6 +27,7 @@ export function taskCreationRequest(draft: TaskCreationDraft, description: strin
   const executionSubject = draft.subject.type === "employee" && draft.employeeOverride
     ? { ...identity, agentOverride: draft.agent } : identity;
   return { workspaceId: draft.workspaceId || null,
+    cwd: draft.cwd.trim() || undefined,
     title: draft.title.trim(), description: description.trim(), status: draft.status, priority: draft.priority,
     labels: draft.labels.split(/[,，]/).map(label => label.trim()).filter(Boolean), dueDate: draft.dueDate || null,
     milestoneId: draft.milestoneId || null, parentTaskId: draft.parentTaskId || null,

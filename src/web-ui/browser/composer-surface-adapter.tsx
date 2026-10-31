@@ -27,8 +27,7 @@ export function mountComposerSurfaces(): void {
     const root = createRoot(host); roots.set(host, root);
     const children = <OwnedChildren nodes={nodes}/>;
     flushSync(() => root.render(<WandUiProvider>{host.classList.contains("input-composer")
-      ? <div className="composer-surface">{children}</div>
-      : <Card size="small">{children}</Card>}</WandUiProvider>));
+      ? children : <Card size="small">{children}</Card>}</WandUiProvider>));
     if (refocus) active.focus({ preventScroll: true });
   }
 }

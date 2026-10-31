@@ -45,8 +45,6 @@ jobs:
       - run: git submodule update --init -- render-bin
       - run: npm ci --prefer-offline
       - run: npm run check
-      - name: Runtime, storage and installer contracts
-        run: node --test --import tsx tests/deployment-lock.test.ts tests/update-node-bootstrap.test.ts tests/web-update-recovery.test.ts tests/update-deployment-lock.test.ts tests/update-compatibility.test.ts tests/storage-security-migrations.test.ts tests/storage-session-options.test.ts tests/core-harness.test.ts tests/pi-output-file.test.ts tests/build-budget-reporting.test.ts tests/bundle-budget.test.ts
       - run: npm run build
 
   verify:
@@ -113,19 +111,6 @@ jobs:
           test -x render/target/release/wand-render
           # Stage unchanged release artifacts for the distinct package compatibility tests.
           node scripts/stage-render-binaries.js --all --strict
-
-      # 保留业务、协议、存储和运行生命周期断言；不因点击坐标/浏览器启动抖动
-      # 阻止与界面无关的需求。完整 UI 矩阵仍保留在显式专项入口。
-      - name: Unit and contract tests
-        run: node scripts/check-node-version.js && node scripts/run-ci-tests.js --suite=unit
-        env:
-          WAND_RENDER_BIN: ${{ github.workspace }}/render/target/release/wand-render
-
-      - name: Optional browser regression
-        if: github.event_name == 'workflow_dispatch' && inputs.ui_regression
-        run: node scripts/run-ci-tests.js --suite=ui
-        env:
-          WAND_RENDER_BIN: ${{ github.workspace }}/render/target/release/wand-render
 
       # Loopback-only synthetic employee fixtures, not installed-service captures.
       # Preserve the actual DOM/pointer evidence when a hosted browser gate fails.

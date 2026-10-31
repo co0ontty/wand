@@ -13,6 +13,7 @@ import { AUTO_ASSIGN_LABEL, AUTO_ASSIGN_SELECTOR, FREE_MODEL_GROUP_ID, isAutoAss
 import { MODEL_ID_PATTERN, QODER_MODEL_ID_PATTERN, CLAUDE_BUILTIN_MODELS, CODEX_FALLBACK_MODELS, OPENCODE_FALLBACK_MODELS, GROK_FALLBACK_MODELS, QODER_FALLBACK_MODELS, PI_FALLBACK_MODELS, cloneModels, isRecord } from "./models/shared.js";
 import { EFFORT_ID_PATTERN, ThinkingEffortLevel, ProviderThinkingEfforts, FALLBACK_PROVIDER_THINKING, cloneThinkingEfforts, effortLevelsFromIds, unionModelEfforts, parseCliEffortList } from "./models/thinking.js";
 import { parseOpenCodeModelCatalog } from "./models/parsers/opencode.js";
+import { openCodeCatalogArgs } from "./opencode-cli.js";
 import { parseGrokModels } from "./models/parsers/grok.js";
 import { parseQoderModels } from "./models/parsers/qoder.js";
 import { parsePiRpcModels, parsePiModels } from "./models/parsers/pi.js";
@@ -435,20 +436,18 @@ async function probeOpenCode(
   runner: ModelCommandRunner,
   env: NodeJS.ProcessEnv,
 ): Promise<{ models: ProbeResult<ClaudeModelInfo[]>; version: ProbeResult<string | null> }> {
-  const [modelsResult, versionResult] = await Promise.allSettled([
-    runner("opencode", ["models", "--verbose"], { env, timeout: 8000 }),
-    runner("opencode", ["--version"], { env, timeout: 5000 }),
-  ]);
-  const models = modelsResult.status === "fulfilled"
-    ? { ok: true as const, value: parseOpenCodeModelCatalog(modelsResult.value.stdout) }
-    : { ok: false as const };
-  const version = versionResult.status === "fulfilled"
-    ? {
-      ok: true as const,
-      value: extractSemver(versionResult.value.stdout) ?? (versionResult.value.stdout.trim().slice(0, 64) || null),
-    }
-    : { ok: false as const };
-  return { models, version };
+  let version: ProbeResult<string | null> = { ok: false };
+  try {
+    const result = await runner("opencode", ["--version"], { env, timeout: 5000 });
+    version = { ok: true, value: extractSemver(result.stdout) ?? (result.stdout.trim().slice(0, 64) || null) };
+  } catch { /* Directory failure preserves the last known catalog. */ }
+  try {
+    const major = version.ok ? Number(version.value?.split(".")[0]) : 1;
+    const result = await runner("opencode", openCodeCatalogArgs(major), { env, timeout: 8000 });
+    return { models: { ok: true, value: parseOpenCodeModelCatalog(result.stdout) }, version };
+  } catch {
+    return { models: { ok: false }, version };
+  }
 }
 
 async function probeGrokModels(

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { openPlushBrowser } from "../../../tests/helpers/run-plush-avatar-browser-harness.mjs";
+import { openPlushBrowser } from "../helpers/browser-harness.mjs";
 import assert from "node:assert/strict";
 const output=join(import.meta.dirname,"evidence");mkdirSync(output,{recursive:true});
 const browser=await openPlushBrowser(1440,1120);

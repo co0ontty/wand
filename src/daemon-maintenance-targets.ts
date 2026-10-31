@@ -58,6 +58,7 @@ export function countRunningDaemonEntries(value: unknown): number {
 /** Persist the once-only shutdown intent: a second Render drain escalates to kill. */
 export function persistentDaemonTarget(options: {
   name: string;
+  independent?: boolean;
   checkpointPath: string;
   snapshot(includeInventory?: boolean): Promise<OwnerSnapshot>;
   shutdown(snapshot: OwnerSnapshot): Promise<boolean | void>;
@@ -65,18 +66,29 @@ export function persistentDaemonTarget(options: {
   ensure(): Promise<void>;
   reconnect(): Promise<void>;
 }): DaemonMaintenanceTarget {
+  /** An owner that vanished without a shutdown checkpoint must be replaced, not left dead. */
+  const revive = async (): Promise<void> => {
+    await options.ensure();
+    await options.reconnect();
+  };
   const recover = async (): Promise<void> => {
     const checkpoint = readCheckpoint(options.checkpointPath);
-    if (checkpoint && !live(checkpoint.pid)) {
-      await options.ensure();
-      await options.reconnect();
-    }
+    if (checkpoint && !live(checkpoint.pid)) await revive();
   };
   return {
     name: options.name,
+    ...(options.independent ? { independent: true } : {}),
     async inspect(includeInventory = true) {
       await recover();
-      const snapshot = await options.snapshot(includeInventory);
+      let snapshot: OwnerSnapshot;
+      try { snapshot = await options.snapshot(includeInventory); }
+      catch (error) {
+        // A daemon can exit outside a maintenance window. Revive only when no
+        // shutdown intent exists, so an in-flight replacement keeps its checkpoint.
+        if (readCheckpoint(options.checkpointPath)) throw error;
+        await revive();
+        snapshot = await options.snapshot(includeInventory);
+      }
       if (!snapshot.pending && readCheckpoint(options.checkpointPath)) unlinkSync(options.checkpointPath);
       return snapshot;
     },
@@ -131,7 +143,7 @@ export async function createDaemonMaintenanceTargets(
     const version = binary ? await readRenderBinaryVersion(binary) : null;
     const paths = renderPaths(configPath);
     targets.push(persistentDaemonTarget({
-      name: "Render", checkpointPath: `${paths.tokenPath}.update.json`,
+      name: "Render", independent: true, checkpointPath: `${paths.tokenPath}.update.json`,
       async snapshot(includeInventory = true) {
         const { hello, sessions } = await render.maintenanceSnapshot(includeInventory);
         return { ...identity(hello.pid, paths.tokenPath),
@@ -147,13 +159,14 @@ export async function createDaemonMaintenanceTargets(
   if (legacy) {
     const paths = terminalDaemonPaths(configPath);
     targets.push(persistentDaemonTarget({
-      name: "terminald", checkpointPath: `${paths.tokenPath}.update.json`,
+      name: "terminald", independent: true, checkpointPath: `${paths.tokenPath}.update.json`,
       async snapshot(includeInventory = true) {
-        const hello = await legacy.request("hello") as { pid: number; buildId?: string; shutdownIfIdle?: boolean };
+        const hello = await legacy.request("hello") as { pid: number; buildId?: string; shutdownIfIdle?: boolean; detachTmuxOnShutdown?: boolean };
         let running: number | null = null;
         if (includeInventory) {
           const [sessions, runs] = await Promise.all([legacy.request("list"), legacy.request("structuredList")]);
-          running = countRunningDaemonEntries(sessions) + countRunningDaemonEntries(runs);
+          const terminals = countRunningDaemonEntries(sessions);
+          running = (hello.detachTmuxOnShutdown === true ? 0 : terminals) + countRunningDaemonEntries(runs);
         }
         return { ...identity(hello.pid, paths.tokenPath), pending: hello.buildId !== TERMINAL_DAEMON_BUILD_ID,
           running, atomicShutdown: hello.shutdownIfIdle === true };
@@ -192,7 +205,7 @@ export async function createDaemonMaintenanceTargets(
     const version = binary ? await readRenderBinaryVersion(binary, `${binary}.version`) : null;
     const paths = structuredRenderPaths(configPath);
     targets.push(persistentDaemonTarget({
-      name: "Structured Render", checkpointPath: `${paths.tokenPath}.update.json`,
+      name: "Structured Render", independent: true, checkpointPath: `${paths.tokenPath}.update.json`,
       async snapshot(includeInventory = true) {
         const hello = await structured.request("hello") as { pid: number; version: string };
         const result = includeInventory ? await structured.request("list") as { runs: unknown } : null;

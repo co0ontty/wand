@@ -50,13 +50,17 @@ export function paintChatSubtasks(output: HTMLElement, sessionId: string | null,
   }
   island.sessionId = sessionId;
   const activeIsland = island;
-  island.root.render(<WandUiProvider><SubtaskPanel key={sessionId}
+  // 子 Agent 胶囊与待办、待发送同属输入框上方那排；宿主不在时退回阅读区自带工具栏。
+  const triggerHost = document.getElementById("composer-agent-capsule-host");
+  island.root.render(<WandUiProvider><SubtaskPanel key={sessionId} triggerHost={triggerHost}
     tasks={tasks.map(task => ({ ...task, detail: <SubtaskBody task={task}/> }))}
     registerOpen={open => { activeIsland.open = open; }}
     hasNestedPopup={() => Array.from(document.querySelectorAll<HTMLElement>('.ant-modal-wrap, .ant-select-dropdown:not(.ant-select-dropdown-hidden), [role="dialog"][aria-modal="true"]'))
       .some(node => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden")}
     prepareOpenChange={() => prepareReading(output)}
     onOpenChange={open => {
+      // Composer details float above their capsule; they never shrink the reading column.
+      if (triggerHost) { output.dataset.subtasksOpen = "false"; return () => {}; }
       if ((output.dataset.subtasksOpen === "true") === open) {
         preparedReading.get(output)?.cancel(); preparedReading.delete(output);
         output.dataset.subtasksOpen = String(open);

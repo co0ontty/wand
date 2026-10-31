@@ -67,17 +67,17 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
       items: [
         { key: "open", disabled: busy, icon: <WandIcon name="chat"/>, label: "打开会话" },
         ...(session.cwd?.trim() ? [{ key: "copy-cwd", disabled: busy, icon: <WandIcon name="copy"/>, label: "复制工作目录" }] : []),
-        ...(!archived && !systemCall ? [{ key: "move", disabled: busy, icon: <WandIcon name="folder"/>, label: "移动到任务",
+        ...(!archived && !systemCall ? [{ key: "move", disabled: busy, icon: <WandIcon name="folder"/>, label: "移动到分区",
           popupClassName: "workspace-session-move-menu", children: [
             { key: "move-context", type: "group" as const, label: "保留运行目录", children: [] },
-            ...(intoNewTask ? [{ key: "new-task", disabled: busy, icon: <WandIcon name="plus"/>, label: move.busy ? "正在移动…" : "归纳为新任务" },
-              { key: "move-divider", type: "divider" as const }] : []),
-            ...(move.loading ? [{ key: "loading", disabled: true, label: <span role="status">正在加载任务…</span> }]
+            { key: "new-task", disabled: busy, icon: <WandIcon name="plus"/>, label: move.busy ? "正在移动…" : "新建分区并移入" },
+              { key: "move-divider", type: "divider" as const },
+            ...(move.loading ? [{ key: "loading", disabled: true, label: <span role="status">正在加载分区…</span> }]
               : move.targets.length ? move.targets.map(target => ({ key: `target:${target.id}`, disabled: busy,
                 icon: <WandIcon name="folder"/>, label: target.label, title: target.label }))
-                : !move.error ? [{ key: "empty", disabled: true, label: "请先创建另一个任务。" }] : []),
+                : !move.error ? [{ key: "empty", disabled: true, label: "还没有其他分区。" }] : []),
             ...(move.error ? [{ key: "move-error", disabled: true, label: <span role="alert" className="sidebar-menu-error">{move.error}</span> },
-              { key: "retry", disabled: busy || move.loading, icon: <WandIcon name="refresh"/>, label: "重新加载任务" }] : []),
+              { key: "retry", disabled: busy || move.loading, icon: <WandIcon name="refresh"/>, label: "重新加载分区" }] : []),
           ] }] : []),
         ...(onArchive && canArchive ? [{ key: "archive", disabled: busy, icon: <WandIcon name={archived ? "resume" : "archive"}/>,
           label: action === "archive" ? archived ? "正在恢复…" : "正在归档…" : archived ? "恢复会话" : "归档会话" }] : []),

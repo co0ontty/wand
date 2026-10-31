@@ -16,6 +16,10 @@
 例如 `4.91.0-beta.10` 会收到 `4.91.0`；随后发布 `4.91.1-beta.11` 时继续收到它。
 安装正式版不会关闭 Beta 订阅。`4.91.1-beta.11` 不会被 `4.91.0` 自动替换。
 本地 `X.Y.Z-debug.*` 代表该正式 tag 之后的源码，因此也不会自动“升级”到同号正式版。
+本地构建还会用安装包固定记录的完整 commit 核对所选 npm 精确版本的 `gitHead`：
+即使 CI 把同一提交标为下一补丁号的 Beta，也不提示或自动安装，避免覆盖本地未提交的修改。
+该判断不改变 Beta 订阅；不同提交、缺少来源信息或来源查询失败时仍按版本顺序判断。
+提交号不相同并不能证明源码更新，这里不推断提交祖先关系或数据库兼容性。
 用户主动点击“更新或重新安装”允许重新安装或返回所选渠道的较旧版本。
 
 检查结果保留实际候选的 `distTag`、精确 `installSpec` 以及持续订阅 `channel`。
@@ -138,7 +142,3 @@ WAND_CONFIG_PATH=/path/to/config.json bash <(curl -fLsS https://raw.githubuserco
 日志中同时存在近期自动更新成功记录，不能把所有失败归为一个原因。
 历史已做过 squash，最早保留提交/已发布包只证明问题在当时已经存在，不冒充更早的精确引入提交。
 磁盘失败日志没有事件时间戳，不能仅由 debug 后缀推断发生日期。
-
-回归入口：`tests/npm-update-utils.test.ts`、`tests/update-channel-transition.test.ts`、
-`tests/update-helper.test.ts`、`tests/core-restart-guard.test.ts`、`tests/web-update-recovery.test.ts`、
-`tests/update-deployment-lock.test.ts`、`tests/update-compatibility.test.ts`、`tests/update-node-bootstrap.test.ts`。

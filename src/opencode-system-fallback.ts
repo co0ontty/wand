@@ -11,6 +11,7 @@ import { AI_TEAM_MAX_CANDIDATES } from "./ai-team-types.js";
 import { systemEmployeeDefaultAgents } from "./system-employee.js";
 import { whichSync } from "./path-repair.js";
 import { parseProviderCliVersion } from "./provider-cli-updater.js";
+import { openCodeCatalogArgs } from "./opencode-cli.js";
 import { asRecord } from "./structured-content.js";
 import { redactSystemAiText } from "./system-ai-redaction.js";
 import type { WandStorage } from "./storage.js";
@@ -59,10 +60,18 @@ export function parseOpenCodeFreeModels(stdout: string): string[] {
     return !!row && Object.keys(row).length > 0 && Object.values(row).every(allZero);
   };
   return [...new Set(parseOpenCodeModelRecords(stdout).flatMap(({ id, record }) => {
-    const api = asRecord(record.api), cost = asRecord(record.cost), capabilities = asRecord(record.capabilities);
+    const api = asRecord(record.api), capabilities = asRecord(record.capabilities);
+    // v2 supplies a price per context tier. Every tier and every price must be zero.
+    const costs = Array.isArray(record.cost) ? record.cost : [record.cost];
+    const free = costs.length > 0 && costs.every((value) => {
+      const cost = asRecord(value);
+      if (!cost || !zero(cost.input) || !zero(cost.output)) return false;
+      const { tier: _tier, ...prices } = cost;
+      return allZero(prices);
+    });
     if (!isOpenCodeNativeModelId(id) || record.providerID !== "opencode" || record.status !== "active"
       || api?.id !== id.slice("opencode/".length) || typeof api.url !== "string" || !NATIVE_API_URLS.has(api.url)
-      || typeof api.npm !== "string" || !NATIVE_SDKS.has(api.npm) || !cost || !zero(cost.input) || !zero(cost.output) || !allZero(cost)
+      || typeof api.npm !== "string" || !NATIVE_SDKS.has(api.npm) || !free
       || asRecord(capabilities?.input)?.text !== true || asRecord(capabilities?.output)?.text !== true
       || capabilities?.toolcall !== true) return [];
     return [id];
@@ -111,6 +120,7 @@ const runCommand: OpenCodeSetupRunner = async (file, args, options) => {
 export class OpenCodeFreeModelsService implements OpenCodeFreePool {
   private controller = new AbortController();
   private setup: Promise<string> | undefined;
+  private cliMajor = 1;
   private pending: Promise<void> | undefined;
   private retryAfter = 0;
   private disposed = false;
@@ -155,7 +165,7 @@ export class OpenCodeFreeModelsService implements OpenCodeFreePool {
     return this.options.find ? this.options.find(command, this.env()) : whichSync(command, { env: this.env() });
   }
   private async run(file: string, args: string[], timeout: number, signal = this.controller.signal): Promise<string> {
-    const nativeModels = args[0] === "models";
+    const nativeModels = args[0] === "models" || args[0] === "api";
     const result = await (this.options.run ?? runCommand)(file, args, { env: nativeModels ? this.execution.env(this.env()) : this.env(), timeout,
       ...(nativeModels ? { cwd: this.execution.cwd } : {}), signal: AbortSignal.any([signal, this.controller.signal]) });
     this.controller.signal.throwIfAborted(); return result.stdout;
@@ -186,6 +196,7 @@ export class OpenCodeFreeModelsService implements OpenCodeFreePool {
     }
     const version = parseProviderCliVersion(await this.run(executable, ["--version"], 8_000));
     if (!version || /^0\.0\./.test(version)) throw new Error("现有 OpenCode 版本不可用；未覆盖用户安装。");
+    this.cliMajor = Number(version.split(".")[0]);
     return executable;
   }
   private ensure(): Promise<string> {
@@ -199,7 +210,7 @@ export class OpenCodeFreeModelsService implements OpenCodeFreePool {
   private async discover(signal?: AbortSignal): Promise<{ models: string[]; sequence: number }> {
     signal?.throwIfAborted(); const sequence = ++this.catalogSequence;
     const executable = await this.ensure(); signal?.throwIfAborted();
-    return { sequence, models: parseOpenCodeFreeModels(await this.run(executable, ["models", "opencode", "--verbose", "--refresh", "--pure"], 15_000, signal)) };
+    return { sequence, models: parseOpenCodeFreeModels(await this.run(executable, openCodeCatalogArgs(this.cliMajor, true), 15_000, signal)) };
   }
   private async probe(model: string): Promise<boolean> {
     try {

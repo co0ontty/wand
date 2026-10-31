@@ -15,6 +15,7 @@ import { ConversationOrganizationRepository } from "./storage/conversation-organ
 import { PreferencesRepository } from "./storage/preferences-repository.js";
 import { WorkspaceRepository } from "./storage/workspaces-repository.js";
 import { TaskRepository } from "./storage/tasks-repository.js";
+import { TaskWorkflowRepository } from "./storage/task-workflow-repository.js";
 import { SecretsRepository } from "./storage/secrets-repository.js";
 import { KnowledgeRepository } from "./storage/knowledge-repository.js";
 import { EmployeeRepository } from "./storage/employees-repository.js";
@@ -22,6 +23,7 @@ import { UserMemoryRepository } from "./storage/user-memory-repository.js";
 import { AiTeamRepository } from "./storage/ai-teams-repository.js";
 import { MissionRepository } from "./storage/missions-repository.js";
 import { SessionRepository } from "./storage/sessions-repository.js";
+import { SessionInputRepository } from "./storage/session-input-repository.js";
 import { UploadRepository } from "./storage/uploads-repository.js";
 import { FeedbackRepository } from "./storage/feedback-repository.js";
 export { parseWandTaskAgent };
@@ -38,6 +40,7 @@ export interface WandStorage extends
   RepositoryMethods<PreferencesRepository>,
   RepositoryMethods<WorkspaceRepository>,
   RepositoryMethods<TaskRepository>,
+  RepositoryMethods<TaskWorkflowRepository>,
   RepositoryMethods<SecretsRepository>,
   RepositoryMethods<EmployeeRepository>,
   RepositoryMethods<KnowledgeRepository>,
@@ -45,6 +48,7 @@ export interface WandStorage extends
   RepositoryMethods<AiTeamRepository>,
   RepositoryMethods<MissionRepository>,
   RepositoryMethods<SessionRepository>,
+  RepositoryMethods<SessionInputRepository>,
   RepositoryMethods<UploadRepository>,
   RepositoryMethods<FeedbackRepository> {}
 
@@ -57,6 +61,7 @@ export class WandStorage {
   readonly preferences: PreferencesRepository;
   readonly workspaces: WorkspaceRepository;
   readonly tasks: TaskRepository;
+  readonly taskWorkflow: TaskWorkflowRepository;
   readonly secrets: SecretsRepository;
   readonly employees: EmployeeRepository;
   readonly knowledge: KnowledgeRepository;
@@ -64,6 +69,7 @@ export class WandStorage {
   readonly aiTeams: AiTeamRepository;
   readonly missions: MissionRepository;
   readonly sessions: SessionRepository;
+  readonly sessionInputs: SessionInputRepository;
   readonly uploads: UploadRepository;
   readonly feedback: FeedbackRepository;
   private readonly closeListeners = new Set<() => void>();
@@ -80,6 +86,10 @@ export class WandStorage {
   }
 
   onClose(listener: () => void): () => void {
+    if (this.closed) {
+      listener();
+      return () => {};
+    }
     this.closeListeners.add(listener);
     return () => { this.closeListeners.delete(listener); };
   }
@@ -123,6 +133,7 @@ export class WandStorage {
     this.preferences = new PreferencesRepository(this.db, this);
     this.workspaces = new WorkspaceRepository(this.db, this);
     this.tasks = new TaskRepository(this.db, this);
+    this.taskWorkflow = new TaskWorkflowRepository(this.db, this);
     this.secrets = new SecretsRepository(this.db, this);
     this.employees = new EmployeeRepository(this.db, this);
     this.knowledge = new KnowledgeRepository(this.db, this);
@@ -130,6 +141,7 @@ export class WandStorage {
     this.aiTeams = new AiTeamRepository(this.db, this);
     this.missions = new MissionRepository(this.db, this);
     this.sessions = new SessionRepository(this.db, this);
+    this.sessionInputs = new SessionInputRepository(this.db, this);
     this.uploads = new UploadRepository(this.db, this);
     this.feedback = new FeedbackRepository(this.db, this);
     this.schedules = new ScheduledTaskRepository(this.db, action => this.transaction(action));
@@ -554,6 +566,7 @@ const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { 
   ["preferences", PreferencesRepository],
   ["workspaces", WorkspaceRepository],
   ["tasks", TaskRepository],
+  ["taskWorkflow", TaskWorkflowRepository],
   ["secrets", SecretsRepository],
   ["employees", EmployeeRepository],
   ["knowledge", KnowledgeRepository],
@@ -561,6 +574,7 @@ const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { 
   ["aiTeams", AiTeamRepository],
   ["missions", MissionRepository],
   ["sessions", SessionRepository],
+  ["sessionInputs", SessionInputRepository],
   ["uploads", UploadRepository],
   ["feedback", FeedbackRepository],
 ];

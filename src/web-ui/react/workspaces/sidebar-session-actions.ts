@@ -1,3 +1,4 @@
+import { pageSearch, updatePageRoute } from "../../page-route";
 import { httpWorkspacesRepository } from "./repository";
 import { workspacesStore } from "./controller";
 import { workspaceContextStore } from "./workspace-context";
@@ -16,7 +17,16 @@ export async function deleteSidebarSessions(sessionIds: readonly string[], task:
       const next = ids.reduce((layout, id) => closeSessionPane(layout, id), context.layout);
       await runtime.saveTaskLayout(next);
     }
-  } finally { await runtime?.refreshSessions(); }
+  } finally {
+    try { await runtime?.refreshSessions(); }
+    finally {
+      // Confirmed deletion cannot leave a reloadable link to a missing session.
+      // A later user navigation belongs to that newer session.
+      if (ids.includes(new URLSearchParams(pageSearch()).get("session") ?? "")) {
+        updatePageRoute({ session: null, tab: null }, "replace");
+      }
+    }
+  }
 }
 
 export async function archiveSidebarSession(sessionId: string, archived: boolean): Promise<void> {

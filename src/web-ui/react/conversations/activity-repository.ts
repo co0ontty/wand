@@ -1,4 +1,4 @@
-import { HttpResponseError, jsonBody, requestJson } from "../http-adapter.js";
+import { createRequestId, HttpResponseError, jsonBody, requestJson } from "../http-adapter.js";
 import { activityOperationCurrent, activityOperationKey, type ActivityAnswerDraft, type ActivityOperation, type ActivitySession } from "./activity-model.js";
 
 export interface ActivitySubmission { phase: "sending" | "sent" | "failed" | "unknown"; message: string }
@@ -69,7 +69,7 @@ export const conversationActivityRepository = {
         if (session.sessionKind === "structured" || session.structuredState) await post("/stop", {});
         else await post("/input", { input: "\u001b", view: "chat", shortcutKey: "esc", responseMode: "accepted" });
       } else if (session.sessionKind === "structured" || session.structuredState) {
-        await post("/input", { input: operation.input, view: "chat", respondImmediately: true });
+        await post("/input", { input: operation.input, view: "chat", respondImmediately: true, idempotencyKey: createRequestId() });
       } else {
         // Even if navigation changes after the first packet, finish the captured
         // source session's Enter packet. Never redirect it to the new selection.

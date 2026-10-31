@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { openPlushBrowser } from "../../../tests/helpers/run-plush-avatar-browser-harness.mjs";
+import { openPlushBrowser } from "../helpers/browser-harness.mjs";
 import { output, startPreview } from "./serve.mjs";
 
 const preview = await startPreview({ port: 0 });

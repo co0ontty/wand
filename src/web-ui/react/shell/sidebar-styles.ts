@@ -22,6 +22,48 @@ export function installSidebarStyles(): void {
 .sidebar-rail-notices { margin-block:12px 4px; padding-block-start:12px; border-block-start:1px solid var(--border-subtle); }
 .sidebar .sidebar-profile-button { margin-block-start:8px; display:flex; flex-direction:column; gap:3px; color:var(--text-secondary); }
 .sidebar-notification-content { width:min(280px, calc(100vw - 64px)); max-height: min(480px, 65dvh); overflow:auto; }
+/* Unified navigation owns both filter capsules; the list has its own scroll owner. */
+.sidebar-unified .sidebar-navigation-rail { width:76px; padding:8px 10px; }
+.sidebar-unified .sidebar-rail-scroll { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.sidebar-unified .sidebar-rail-scroll > .sidebar-brand-mark { flex:none; margin:6px auto; }
+.sidebar-unified .conversation-navigation { align-items:center; }
+.sidebar-unified .conversation-navigation .wand-ui-icon-button { height:40px; }
+.sidebar-unified .sidebar-nav-label { display:none; }
+.sidebar-unified .sidebar-rail-notices { width:100%; margin:4px 0; padding:4px 0 0; flex:none; }
+.sidebar-unified .sidebar-profile-button { margin:0; }
+.sidebar-filter-capsules { width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 0; }
+.sidebar-capsule-label { font-size:11px; line-height:16px; color:var(--text-secondary); white-space:nowrap; }
+.sidebar-filter-capsule { display:flex; flex-direction:column; align-items:center; flex:none; gap:4px; padding:6px 3px; border:1px solid var(--border-subtle); border-radius:28px; background:var(--sidebar-surface); }
+.sidebar-filter-capsule .wand-ui-icon-button { width:40px; min-width:40px; height:40px; border-radius:50%; }
+.sidebar-filter-capsule [data-filter-active="true"] { color:var(--sidebar-accent); background:var(--sidebar-selected); }
+.sidebar-filter-capsule [data-filter-active="true"]::after { content:""; position:absolute; inset-inline-end:3px; top:6px; width:4px; height:4px; border-radius:50%; background:currentColor; }
+.sidebar-capsule-rest { width:40px; display:flex; flex-direction:column; align-items:center; gap:4px; max-height:min(240px, 32dvh); overflow-y:auto; overflow-x:hidden; scrollbar-width:none; }
+.sidebar-workspace-symbol { position:relative; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; }
+.sidebar-workspace-symbol .sidebar-workspace-monogram { position:absolute; right:-3px; bottom:-2px; min-width:12px; max-width:22px; padding:0 2px; border-radius:3px; background:var(--sidebar-surface); font-size:9px; line-height:12px; font-weight:600; }
+.sidebar-capsule-picker { display:flex; flex-direction:column; gap:12px; width:260px; max-width:calc(100vw - 36px); }
+.sidebar-capsule-choice { display:flex; align-items:center; gap:8px; }
+.unified-sidebar-section { display:flex; justify-content:space-between; padding:12px 8px 6px; font-size:11px; font-weight:600; color:var(--text-secondary); }
+.sidebar-capsule-options { display:flex; flex-direction:column; gap:4px; max-height:300px; overflow:auto; }
+.sidebar-capsule-options .ant-btn { width:100%; justify-content:space-between; min-height:36px; }
+.sidebar-capsule-options .ant-btn > span:first-child { overflow:hidden; text-overflow:ellipsis; }
+.unified-sidebar-list { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; }
+.unified-sidebar-tools { flex:none; display:flex; flex-direction:column; gap:10px; padding:0 12px 12px; }
+.unified-sidebar-tools .sidebar-new-task { width:100%; }
+.unified-sidebar-tools .wand-ui-search { flex:1; min-width:0; }
+.unified-sidebar-tools .conversation-list-filter-trigger { width:34px; min-width:34px; }
+.unified-sidebar-tools .conversation-list-filter-trigger > span:last-child { display:none; }
+.unified-sidebar-tools > [role="status"] { font-size:12px; }
+.unified-sidebar-rows { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:0 8px 12px; scroll-padding-block:8px; }
+.unified-sidebar-row { min-width:0; display:flex; align-items:center; border-radius:var(--control-radius); }
+.unified-sidebar-row > .ant-btn:first-child { flex:1; min-width:0; }
+.unified-sidebar-row .unified-sidebar-more { width:28px; min-width:28px; height:32px; flex:none; opacity:0; }
+.unified-sidebar-row:hover .unified-sidebar-more, .unified-sidebar-row:focus-within .unified-sidebar-more { opacity:1; }
+@media (pointer:coarse) { .unified-sidebar-row .unified-sidebar-more { opacity:1; } }
+.unified-sidebar-row .im-sidebar-item-name { font-size:13px; }
+.unified-sidebar-row .wand-sidebar-session-row { min-height:58px; }
+.unified-sidebar-current { display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:8px; border-radius:var(--control-radius); background:var(--sidebar-selected); font-size:12px; }
+.unified-sidebar-empty { padding:16px 8px; }
+@media (pointer:coarse) { .sidebar-filter-capsule .wand-ui-icon-button { min-width:44px; width:44px; height:44px; } .sidebar-capsule-options .ant-btn { min-height:44px; } }
 /* A continuous directory list, with one indent per real ownership boundary. */
 .sidebar .conversation-navigation { width:100%; }
 .sidebar:not(.collapsed) .conversation-navigation > .wand-ui-stretch-tabs,
@@ -98,7 +140,27 @@ export function installSidebarStyles(): void {
 .sidebar [data-sidebar-menu-open="true"] { border-radius:var(--control-radius); background:var(--sidebar-selected); }
 .sidebar .sidebar-footer-actions { align-items:center; }
 /* One sidebar scale across conversation and workspace pages, including the framed home. */
-.sidebar .conversation-search-host { padding:0 4px 10px; }
+.sidebar .conversation-search-host { display:flex; align-items:center; gap:6px; padding:0 4px 6px; }
+.sidebar .conversation-search-host > .conversation-search-input { flex:1; min-width:0; }
+.sidebar .conversation-list-filter-trigger { flex:none; width:64px; min-width:64px; height:34px; padding-inline:6px; gap:4px; }
+.conversation-list-filter-summary { min-width:0; min-height:28px; }
+.conversation-list-filter-summary > .ant-typography { min-width:0; font-size:12px; }
+.conversation-list-filter-summary > button { flex:none; font-size:12px; padding-inline:4px; }
+.conversation-list-filter-panel { position:relative; width:420px; max-width:calc(100vw - 48px); display:flex; flex-direction:column; gap:12px; }
+.conversation-list-filter-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.conversation-filter-field { min-width:0; display:flex; flex-direction:column; gap:6px; }
+.conversation-filter-field-label { font-size:12px; color:var(--text-secondary); }
+.conversation-filter-field .ant-select { width:100%; min-width:0; height:32px; }
+.conversation-list-filter-activity { font-size:12px; color:var(--text-secondary); }
+.conversation-list-filter-footer { flex:none; padding-top:10px; border-top:1px solid var(--border-subtle); }
+@media (pointer:coarse), (max-width:640px) {
+  .sidebar .conversation-list-filter-trigger, .conversation-list-filter-summary > button { min-height:44px; }
+  .conversation-filter-field .ant-select { height:44px; }
+  .conversation-list-filter-panel .ant-btn { min-height:44px; }
+  .conversation-list-filter-panel .ant-select-item-option { min-height:44px; }
+  .conversation-list-filter-activity { min-height:44px; }
+  .conversation-list-filter-activity .ant-switch { min-width:44px; }
+}
 .sidebar .conversation-search-input { min-height:34px; font-size:12px; background:var(--bg-surface); }
 .sidebar .conversation-list-section { padding:0 4px 10px; gap:6px; }
 .sidebar .conversation-list-count { padding-inline:2px; color:var(--text-secondary); }

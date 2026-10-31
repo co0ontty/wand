@@ -9,7 +9,7 @@ import { WandButton } from "../ui";
 import { Alert, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
 import { taskAcceptanceLabel, taskSessionActivity, taskSessionSummary } from "./task-delivery-state";
-import type { TaskExecutionSubject, WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
+import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
 import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
 import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
@@ -30,6 +30,7 @@ import {
   issueAgentProviderModelLine,
   type IssueModelCatalog,
   issueBoardStats,
+  issueProgressSeries,
   issueDueStamp,
   issueFilterCount,
   issueGanttRange,
@@ -132,7 +133,7 @@ export function TaskBoardProcessingRow({
     {running ? <TaskBoardProcessingGlyph/> : null}
     <span className="task-board-processing-label">{running ? "正在处理..." : queued > 0
       ? queued === 1 ? "排队中 · 等待执行" : `排队中 · ${queued} 条等待执行`
-      : task.acceptance?.acceptedAt ? "验收通过 · 已完成" : task.acceptance?.blocker ? `待处理：${task.acceptance.blocker}`
+      : taskHumanAccepted(task) ? "人工已确认 · 已完成" : task.acceptance?.blocker ? `待处理：${task.acceptance.blocker}`
       : task.sessions.length > 0 ? taskSessionSummary(task.sessions) + " · 尚待验收" : "等待派发"}</span>
     <span style={{ flex: 1 }} aria-hidden="true"/>
     <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
@@ -377,7 +378,7 @@ function TaskBoardListRow({
       <strong>{task.title}</strong>
     </WandButton>
     <Flex wrap align="center" gap={4} className="task-board-list-meta">
-      <Typography.Text type={task.acceptance?.acceptedAt ? "success" : "secondary"}>{taskAcceptanceLabel(task.acceptance)}</Typography.Text>
+      <Typography.Text type={taskHumanAccepted(task) ? "success" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text>
       <TaskBoardPriorityChip priority={task.priority}/>
       {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
@@ -484,7 +485,6 @@ export function TaskBoardCardDetail({
             </Flex>)}
           </Flex>}
           <Typography.Text type="secondary">任务摘要与执行记录请在详情事项流中查看。</Typography.Text>
-          <WandButton kind="ghost" size="small" onClick={() => onOpen(task.id)}>打开详情事项流</WandButton>
           <Flex wrap gap="small" className="task-board-card-detail-actions">
             <WandButton kind="ghost" type="button" className="task-board-card-detail-open" onClick={() => onOpen(task.id)}>查看完整详情</WandButton>
             <WandButton kind="ghost" type="button" className="task-board-card-detail-collapse" onClick={() => onCollapse()}>收起</WandButton>
@@ -495,6 +495,7 @@ export function TaskBoardCardDetail({
 }
 
 export function TaskBoardListView({
+  archiveOnly = false,
   grouped,
   allTasks,
   collapsed,
@@ -508,6 +509,7 @@ export function TaskBoardListView({
   onOpenSession,
   onOpenComments,
 }: {
+  archiveOnly?: boolean;
   grouped: Record<WandTaskStatus, WandTaskListed[]>;
   allTasks: WandTaskListed[];
   collapsed: Record<WandTaskStatus, boolean>;
@@ -528,9 +530,10 @@ export function TaskBoardListView({
   };
   const archived = grouped.archived;
   return <Flex vertical gap="middle" className="task-board-list-view">
-    {ISSUE_COLUMNS.map((column) => {
-      const items = grouped[column.status];
-      const isCollapsed = column.status === "done" && archiveOpen && archived.length > 0
+    {archiveOnly && <Flex justify="space-between" align="center"><Typography.Text type="secondary">归档保留交付与执行历史，不代表旧任务已经通过本轮验收。</Typography.Text>{onPurgeArchive && archived.length > 0 && <WandButton kind="danger" disabled={archivePurging} onClick={onPurgeArchive}>清空归档</WandButton>}</Flex>}
+    {(archiveOnly ? [ISSUE_ARCHIVE_COLUMN] : ISSUE_COLUMNS).map((column) => {
+      const items = grouped[column.status] ?? (column.status === "review" ? grouped.done : []) ?? [];
+      const isCollapsed = column.status === "ready" && archiveOpen && archived.length > 0
         ? false
         : collapsed[column.status];
       return <section key={column.status} className={`task-board-list-group is-${column.status}`}>
@@ -548,8 +551,8 @@ export function TaskBoardListView({
           <b>{items.length}</b>
         </WandButton>
         {!isCollapsed && <Flex vertical gap="small" className="task-board-list-rows">
-          {items.length === 0 && column.status !== "done" && <p className="task-board-column-empty">{column.empty}</p>}
-          {items.length === 0 && column.status === "done" && archived.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
+          {items.length === 0 && column.status !== "ready" && <p className="task-board-column-empty">{column.empty}</p>}
+          {items.length === 0 && column.status === "ready" && archived.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
           {items.map((task) => <TaskBoardListRow
             key={task.id}
             task={task}
@@ -562,7 +565,7 @@ export function TaskBoardListView({
             onOpenComments={onOpenComments}
             bindTrigger={bindTrigger}
           />)}
-          {column.status === "done" ? <TaskBoardArchiveFolder
+          {!archiveOnly && column.status === "ready" && archiveOpen && archived.length > 0 ? <TaskBoardArchiveFolder
             count={archiveCount}
             open={archiveOpen}
             onToggle={onToggleArchive}
@@ -590,77 +593,47 @@ export function TaskBoardListView({
   </Flex>;
 }
 
-export function TaskBoardDashboard({
-  allTasks = [],
-  projectName,
-  tasks,
-  onOpen,
-  onOpenSession,
-}: {
-  allTasks?: WandTaskListed[];
-  projectName: string;
-  tasks: WandTaskListed[];
-  onOpen(id: string): void;
-  onOpenSession?: (sessionId: string) => void;
+export function TaskBoardDashboard({ tasks, projectName, onOpen, onStage, actionHub }: {
+  allTasks?: WandTaskListed[]; projectName: string; tasks: WandTaskListed[];
+  onOpen(id: string): void; onOpenSession?: (sessionId: string) => void;
+  onStage?(status: WandTaskStatus): void; actionHub?: React.ReactNode;
 }): React.ReactElement {
-  const stats = issueBoardStats(tasks);
-  const activeTasks = tasks.filter((task) => task.status !== "archived");
-  const dueSoon = [...activeTasks]
-    .filter((task) => task.dueDate && task.status !== "done")
-    .sort((left, right) => (left.dueDate ?? "").localeCompare(right.dueDate ?? ""))
-    .slice(0, 6);
-  const byPriority = ISSUE_PRIORITIES.map((entry) => ({
-    ...entry,
-    count: activeTasks.filter((task) => task.priority === entry.value).length,
-  })).filter((entry) => entry.count > 0);
-  const labels = collectIssueLabels(activeTasks).map((label) => ({
-    label,
-    count: activeTasks.filter((task) => task.labels.includes(label)).length,
-  }));
-  const summary = stats.total === 0
-    ? `${projectName} 当前没有任务。`
-    : `共 ${stats.total} 项任务，${stats.remaining} 项待处理，${stats.done} 项${issueStatusLabel("done")}。`;
-  const highRemaining = activeTasks.filter((task) => task.status !== "done" && (task.priority === "high" || task.priority === "urgent")).length;
-  const metric = (label: string, value: number, tone: string, total = stats.total): React.ReactElement =>
-    <Card size="small" className={`task-board-metric tone-${tone}`} style={{ flex: "1 1 160px" }}>
-      <Typography.Text type="secondary">{label}</Typography.Text>
-      <Typography.Title level={3} style={{ margin: "4px 0" }}>{value}</Typography.Title>
-      <Progress status="normal" percent={Math.round(total ? value / total * 100 : 0)} aria-label={`${label}占当前任务比例`}/>
-    </Card>;
-  const panel = (title: string, children: React.ReactNode): React.ReactElement =>
-    <Card title={title} size="small" className="task-board-dashboard-panel" style={{ flex: "1 1 260px", minWidth: 0 }}>{children}</Card>;
-  return <Flex vertical gap="middle" className="task-board-dashboard">
-    <Card size="small"><Typography.Title level={4} style={{ margin: 0 }}>{projectName}</Typography.Title><Typography.Paragraph style={{ margin: "8px 0 0" }}>{summary}</Typography.Paragraph></Card>
-    <section aria-label="任务状态">
-      <Typography.Title level={5} style={{ margin: "0 0 8px" }}>任务状态</Typography.Title>
-      <Flex wrap gap="small" className="task-board-metrics">
-        {metric(issueStatusLabel("backlog"), stats.backlog, "backlog")}
-        {metric(issueStatusLabel("todo"), stats.todo, "todo")}
-        {metric(issueStatusLabel("doing"), stats.doing, "doing")}
-        {metric(issueStatusLabel("done"), stats.done, "done")}
-      </Flex>
-    </section>
-    <Card size="small" title="验收进度" aria-label="任务验收进度">
-      <Typography.Text>{stats.accepted} / {tasks.length} 项验收通过 · 按任务计数，不按会话数或归档计数</Typography.Text>
-      <Progress percent={Math.round(tasks.length ? stats.accepted / tasks.length * 100 : 0)}/>
+  const goals = tasks.filter(task => !task.parentTaskId), stats = issueBoardStats(goals);
+  const active = goals.filter(task => task.status !== "archived");
+  const ready = active.filter(task => task.status === "ready" && taskAiVerified(task));
+  const review = active.filter(task => taskWorkflowStage(task.status) === "review");
+  const running = active.filter(task => task.executionStatus === "running" || task.sessions.some(session => taskSessionActivity(session) === "运行中"));
+  const gaps = active.filter(task => task.acceptance?.blocker.trim());
+  const due = [...active].filter(task => task.dueDate).sort((a,b) => a.dueDate!.localeCompare(b.dueDate!)).slice(0,4);
+  const series = issueProgressSeries(goals), maximum = Math.max(1, stats.accepted);
+  const points = series.map((point, index) => `${20 + index * 36},${120 - point.completed / maximum * 88}`).join(" ");
+  const count = (status: WandTaskStatus): number => status === "backlog" ? stats.backlog : status === "todo" ? stats.todo : status === "doing" ? stats.doing : status === "review" ? stats.review : stats.ready;
+  const row = (task: WandTaskListed, caption?: string): React.ReactElement => <WandButton kind="ghost" key={task.id} className="task-panel-summary-row" onClick={() => onOpen(task.id)}>
+    <span><strong>{task.title}</strong><small>{caption || `${task.identifier} · ${task.assignedExecutor?.name || "未指派"}`}</small></span><WandIcon name="chevron" size={12}/>
+  </WandButton>;
+  const panel = (title: string, children: React.ReactNode, extra?: React.ReactNode): React.ReactElement => <Card title={title} extra={extra} size="small" className="task-panel-analysis">{children}</Card>;
+  return <div className="task-board-dashboard task-panel-dashboard">
+    <div className="task-panel-overview"><div><Typography.Text type="secondary">项目完成度 · 人工确认口径</Typography.Text><div className="task-panel-completion"><strong>{stats.total ? Math.round(stats.accepted / stats.total * 100) : 0}<small>%</small></strong><span>{stats.accepted} / {stats.total} 个主目标已确认</span></div></div>
+      <div className="task-panel-summary"><Typography.Title level={3}>{projectName}</Typography.Title><Typography.Paragraph>当前 {active.length} 个主目标推进中，<WandButton kind="ghost" onClick={() => onStage?.("review")}>{review.length} 项待 AI 验收</WandButton>，<WandButton kind="ghost" onClick={() => onStage?.("ready")}>{ready.length} 项待你确认归档</WandButton>。{gaps.length ? `另有 ${gaps.length} 项验收缺口。` : ""}</Typography.Paragraph><Typography.Text type="secondary">AI 通过不代表人工已接受，不提前计入完成度。旧记录未核对前不自动认定通过。</Typography.Text></div>
+    </div>
+    <section className="task-panel-metrics" aria-label="五阶段统计">{ISSUE_COLUMNS.map(column => <WandButton key={column.status} kind="ghost" className={`task-panel-metric is-${column.status}`} aria-label={`查看${column.label}任务`} onClick={() => onStage?.(column.status)}>
+      <span><TaskBoardStatusGlyph status={column.status}/>{column.label}</span><strong>{count(column.status)}</strong><Progress showInfo={false} percent={active.length ? count(column.status) / active.length * 100 : 0} strokeColor={column.status === "ready" ? "var(--success)" : column.status === "review" ? "var(--info, var(--accent))" : column.status === "doing" ? "var(--accent)" : "var(--text-secondary)"} size="small"/>
+    </WandButton>)}</section>
+    <div className="task-panel-section-title"><Typography.Title level={5}>先看需要你决定的事</Typography.Title><Typography.Text type="secondary">AI 做验收，你确认交付</Typography.Text></div>
+    <Card title={`待你确认归档 · ${ready.length}`} extra={<WandButton kind="ghost" onClick={() => onStage?.("ready")}>查看全部</WandButton>} size="small" className="task-panel-ready">
+      {ready.length ? ready.slice(0,6).map(task => <div className="task-panel-ready-row" key={task.id}><WandIcon name="shieldCheck" size={18}/><WandButton kind="ghost" onClick={() => onOpen(task.id)}><strong>{task.title}</strong><small>{task.identifier} · {task.assignedExecutor?.name || "负责人未记录"} · AI 已通过</small></WandButton><Typography.Text type="secondary">人工未确认</Typography.Text><WandButton onClick={() => onOpen(task.id)}>查看交付</WandButton></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有等待你确认的交付"/>}
     </Card>
-    <Card size="small" title="需要关注" className="task-board-risk-panel">
-      <Flex wrap gap="small">
-        <Tag color={stats.overdue > 0 ? "error" : "default"}>已逾期 {stats.overdue}</Tag>
-        <Tag color={highRemaining > 0 ? "warning" : "default"}>高优先级待处理 {highRemaining}</Tag>
-      </Flex>
-      <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-        {stats.overdue === 0 && highRemaining === 0 ? "当前没有逾期或高优先级待处理任务。" : "同一任务可能同时逾期且属于高优先级。"}
-      </Typography.Paragraph>
-    </Card>
-    <Flex wrap gap="middle" className="task-board-dashboard-grid">
-      {panel("目标与子任务计划", <Flex vertical>{tasks.map(task => <div key={task.id}><WandButton kind="ghost" onClick={() => onOpen(task.id)}>{task.title}</WandButton><TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/></div>)}</Flex>)}
-      {panel("即将到期", dueSoon.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有设置截止日期的任务"/> : <List size="small" dataSource={dueSoon} renderItem={(task) => <List.Item><WandButton kind="ghost" onClick={() => onOpen(task.id)} style={{ height: "auto", whiteSpace: "normal" }}><TaskBoardStatusGlyph status={task.status}/><span>{task.title}</span><Tag color={issueIsOverdue(task.dueDate, task.status) ? "error" : "default"}>{issueDueStamp(task.dueDate)}</Tag></WandButton></List.Item>}/>)}
-      {panel("优先级", byPriority.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有优先级分布"/> : <List size="small" dataSource={byPriority} renderItem={(entry) => <List.Item><Flex vertical style={{ width: "100%" }}><Flex justify="space-between"><span>{entry.label}</span><span>{entry.count}</span></Flex><Progress status="normal" percent={Math.round(entry.count / Math.max(1, stats.total) * 100)} size="small" showInfo={false}/></Flex></List.Item>}/>)}
-      {panel("标签", labels.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有标签"/> : <List size="small" dataSource={labels} renderItem={(entry) => <List.Item><TaskBoardLabelChip label={entry.label}/><Tag>{entry.count}</Tag></List.Item>}/>)}
-      {panel("最近会话", tasks.every((task) => task.sessions.length === 0) ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有派发会话"/> : <List size="small" dataSource={tasks.flatMap((task) => task.sessions.map((session) => ({ task, session }))).slice(0, 6)} renderItem={({ task, session }) => <List.Item><WandButton kind="ghost" onClick={() => onOpenSession?.(session.id)} style={{ height: "auto", whiteSpace: "normal" }}><ProviderLogo provider={session.provider}/><span>{task.title}</span><span>{issueAgentLabel(session.provider, session.engine)}</span></WandButton></List.Item>}/>)}
-    </Flex>
-  </Flex>;
+    {actionHub && <Collapse className="task-panel-action-hub" items={[{ key:"actions", label:"授权、待答与其他待处理事项", children:actionHub }]}/>}
+    <div className="task-panel-section-title"><Typography.Title level={5}>项目分析</Typography.Title><Typography.Text type="secondary">{running.length} 项正在执行 · {gaps.length} 项有缺口 · {stats.overdue} 项已逾期</Typography.Text></div>
+    <div className="task-panel-analysis-grid">
+      {panel("AI 验收队列", review.length ? review.slice(0,5).map(task => row(task, `${task.identifier} · ${task.legacyReview ? "历史交付待核对" : task.executionStatus === "running" ? "正在核验" : task.executionStatus === "queued" ? "验收已排队 · 等待员工空闲" : "交付已提交 · 查看核验进度与回执"}`)) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无待 AI 验收任务"/>)}
+      {panel("执行与返工", gaps.length || running.length ? [...gaps, ...running.filter(task => !gaps.includes(task))].slice(0,5).map(task => row(task, task.acceptance?.blocker || `${task.identifier} · 正在执行`)) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有执行或返工项目"/>)}
+      {panel("优先级分布", <div className="task-panel-distribution">{ISSUE_PRIORITIES.filter(entry => entry.value !== "none").map(entry => { const n = active.filter(task => task.priority === entry.value).length; return <div key={entry.value}><span>{entry.label}</span><Progress showInfo={false} size="small" percent={active.length ? n / active.length * 100 : 0}/><b>{n}</b></div>; })}<Typography.Text type="secondary">按未归档主目标统计，不重复计算子任务。</Typography.Text></div>)}
+      {panel("累计人工确认", <><svg className="task-panel-trend" viewBox="0 0 475 150" role="img" aria-label="基于已记录确认时间的累计人工确认"><path d="M20 120H452 M20 32H452" stroke="var(--border-subtle)" fill="none"/><polyline points={points} fill="none" stroke="var(--accent)" strokeWidth="2"/><text x="20" y="145" fontSize="11" fill="var(--text-secondary)">记录开始</text><text x="420" y="145" fontSize="11" fill="var(--text-secondary)">当前</text></svg><Typography.Text type="secondary">只计入明确人工确认的记录；不推测缺失历史。</Typography.Text></>)}
+      {panel("近期到期", due.length ? due.map(task => row(task, `${task.identifier} · ${task.dueDate} · ${issueStatusLabel(task.status)}`)) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有设置截止日期"/>)}
+      {panel("负责人交付", <div className="task-panel-owner-delivery">{[...new Set(goals.map(task => task.assignedExecutor?.id).filter(Boolean))].map(id => { const owned = goals.filter(task => task.assignedExecutor?.id === id); return <div key={id}><strong>{owned[0].assignedExecutor?.name}</strong><span>{owned.filter(taskHumanAccepted).length} 项人工确认 · {owned.filter(task => task.status === "ready").length} 项待归档</span></div>; })}{!goals.some(task => task.assignedExecutor) && <Typography.Text type="secondary">暂无已记录的负责人</Typography.Text>}</div>)}
+    </div>
+  </div>;
 }
 
 export function TaskBoardGantt({
@@ -680,7 +653,7 @@ export function TaskBoardGantt({
   onHideCompleted(hide: boolean): void;
   onOpen(id: string): void;
 }): React.ReactElement {
-  const closed = (status: WandTaskStatus): boolean => status === "done" || status === "archived";
+  const closed = (status: WandTaskStatus): boolean => status === "archived";
   const hidden = (task: WandTaskListed): boolean => hideCompleted && closed(task.status) && !taskHasOpenDescendant(allTasks, task.id);
   const tasks = [...ISSUE_COLUMNS.flatMap((column) => grouped[column.status]), ...grouped.archived]
     .filter((task) => !hidden(task));
@@ -700,7 +673,7 @@ export function TaskBoardGantt({
   return <Card size="small" className="task-board-gantt" styles={{ body: { minWidth: 0 } }}>
     <Flex wrap align="center" justify="space-between" gap="small" className="task-board-gantt-toolbar">
       <Checkbox className="task-board-gantt-hide" checked={hideCompleted} onChange={(event) => onHideCompleted(event.target.checked)}>
-        {issueHideStatusFilterLabel("done")}
+        隐藏已归档
       </Checkbox>
       <WandStretchTabs
         className="task-board-gantt-zooms"
@@ -711,7 +684,7 @@ export function TaskBoardGantt({
       />
     </Flex>
     <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-      今天 {today} · 时间条表示创建至截止日期，未设截止日期时仅标记创建日。
+      今天 {today} · 只标记真实截止日期；未设置日期的任务保留为待排期，不虚构持续时长。
     </Typography.Paragraph>
     {tasks.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有可显示的任务"/> :
     <div className="task-board-gantt-scroll" tabIndex={0} role="region" aria-label="任务时间线，可横向滚动" style={{ overflowX: "auto", marginTop: 12 }}>
@@ -736,7 +709,7 @@ export function TaskBoardGantt({
           </div>
         </div>
         {[...ISSUE_COLUMNS, ISSUE_ARCHIVE_COLUMN].map((column) => {
-          const items = grouped[column.status].filter((task) => !hidden(task));
+          const items = (grouped[column.status] ?? []).filter((task) => !hidden(task));
           if (items.length === 0) return null;
           return <section key={column.status} className={`task-board-gantt-group is-${column.status}`}>
             <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", height: 36 }}>
@@ -744,14 +717,12 @@ export function TaskBoardGantt({
               <div style={{ position: "relative" }}>{todayLine}</div>
             </div>
             {items.map((task) => {
-              const created = isoDate(new Date(task.createdAt));
-              const finish = task.dueDate || created;
-              const inRange = created <= range.columns.at(-1)! && finish >= range.start;
-              const span = issueGanttSpan({ ...task, dueDate: finish }, range.start, range.days);
+              const span = issueGanttSpan(task, range.start, range.days);
+              const inRange = span.length > 0;
               return <div key={task.id}><WandButton kind="ghost"
                 type="button"
                 className="task-board-gantt-row"
-                title={`${task.title} · ${created}${task.dueDate ? ` 至 ${task.dueDate}` : " · 未设置截止日期"}`}
+                title={`${task.title} · ${task.dueDate ? `截止 ${task.dueDate}` : "待排期，未设置截止日期"}`}
                 style={{ width: "100%", height: 48, padding: 0, display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", gap: 0, textAlign: "left" }}
                 onClick={() => onOpen(task.id)}
               >
@@ -759,8 +730,8 @@ export function TaskBoardGantt({
                 <div className="task-board-gantt-track" style={{ position: "relative", display: "grid", gridTemplateColumns: timelineColumns, alignItems: "center", height: "100%", minWidth: 0,
                   backgroundImage: "linear-gradient(to right, var(--border-subtle) 1px, transparent 1px)", backgroundSize: `${100 / range.days}% 100%` }}>
                   {inRange ? <i className={`is-${task.status}`} aria-hidden="true"
-                    style={{ gridColumn: `${span.offset + 1} / span ${span.length}`, height: 16, borderRadius: 4, marginInline: 2, background: task.status === "done" ? "var(--success)" : task.status === "archived" ? "var(--text-tertiary)" : "var(--accent)" }}/>
-                    : <Typography.Text type="secondary" style={{ gridColumn: `1 / ${range.days + 1}`, paddingInline: 8 }}>时间不在当前范围</Typography.Text>}
+                    style={{ gridColumn: `${span.offset + 1} / span 1`, height: 12, width: 12, justifySelf: "center", borderRadius: "50%", background: taskHumanAccepted(task) ? "var(--success)" : task.status === "archived" ? "var(--text-tertiary)" : "var(--accent)" }}/>
+                    : <Typography.Text type="secondary" style={{ gridColumn: `1 / ${range.days + 1}`, paddingInline: 8 }}>{task.dueDate ? "截止日期不在当前范围" : "待排期 · 未设置截止日期"}</Typography.Text>}
                   {todayLine}
                 </div>
               </WandButton><TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/></div>;

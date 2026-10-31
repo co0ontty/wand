@@ -8,7 +8,7 @@ function fields(value: unknown): Record<string, unknown> {
 }
 function namespace(value: unknown): { scope: KnowledgeScope; ownerId: string } {
   const data = fields(value);
-  if (data.scope !== "personal" && data.scope !== "project") throw new KnowledgeError("请选择个人或项目知识库。");
+  if (data.scope !== "global" && data.scope !== "personal" && data.scope !== "project") throw new KnowledgeError("请选择全局、个人或项目知识库。");
   if (typeof data.ownerId !== "string" || !data.ownerId.trim() || data.ownerId.length > 200) throw new KnowledgeError("请选择员工或项目。");
   return { scope: data.scope, ownerId: data.ownerId };
 }

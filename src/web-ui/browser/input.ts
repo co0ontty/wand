@@ -49,7 +49,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         var computedMaxHeight = parseFloat(inputStyles.maxHeight || "");
         var maxHeight = Number.isFinite(computedMaxHeight)
           ? Math.max(minHeight, computedMaxHeight)
-          : 120;
+          : 240;
         var touchDevice = isTouchDevice();
         // PTY passthrough is a compact control surface, not a drafting area.
         // Keep it at the CSS minimum even if a previous composer draft still
@@ -963,7 +963,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         // 给每次发送生成唯一 idempotency key。Android WebView 进程被冻结再恢复
         // 的边界场景下，底层网络栈偶尔会把上次未收到响应的 POST 重发一次（前端
         // JS 拦不住），导致同一条消息被 backend 处理两遍。带上 key 让 backend
-        // 在窗口内识别重发并丢弃。
+        // 持久化接受身份，跨服务重启也只接受同一意图一次。
         var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
           ? crypto.randomUUID()
           : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
@@ -1307,7 +1307,7 @@ import { compactSessionFetch } from "./session-fetch.js";
           busy: queueBarEditing.has(session.id) || queueBarMutating.has(session.id),
           retrieval: retrieval,
           removal: removal,
-          steering: session.provider === "pi" && session.structuredState?.engine === "core",
+          steering: session.structuredState?.inputMode === "steer" || (session.provider === "pi" && session.structuredState?.engine === "core"),
           onDragStart: queueBarDragStart,
           onAction: (action, index, expected) => {
             if (state.selectedId !== session.id) return;

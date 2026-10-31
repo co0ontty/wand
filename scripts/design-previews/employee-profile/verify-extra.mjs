@@ -3,7 +3,7 @@ import { readFileSync,writeFileSync } from "node:fs";
 import { join } from "node:path";
 const output=join(import.meta.dirname,"evidence");
 process.env.WAND_PLUSH_BROWSER_OUTPUT=output;
-const {openPlushBrowser,recordMotion}=await import("../../../tests/helpers/run-plush-avatar-browser-harness.mjs");
+const {openPlushBrowser,recordMotion}=await import("../helpers/browser-harness.mjs");
 const report=JSON.parse(readFileSync(join(output,'browser-report.json'),'utf8'));
 const browser=await openPlushBrowser(1280,1000);
 try{

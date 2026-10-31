@@ -25,6 +25,8 @@ export interface EmployeeTaskCommentSubmission {
   instruction: string;
   sourceCommentId: string | null;
   taskVersion: string;
+  purpose?: "execution" | "review";
+  reviewRevision?: number | null;
   referencedTaskIds: readonly string[];
   /** 提交时选中的执行快照；排队后仍按它启动，避免员工候选变化改变已接受的本轮意图。 */
   agent: WandTaskAgent;
@@ -63,16 +65,16 @@ export class TaskExecutionQueue {
       if (!task) throw new Error("未找到该任务。");
       const latest = this.deps.storage.getSiliconEmployee(input.employeeId);
       if (!latest || latest.archivedAt) throw new Error("硅基员工不存在或已归档。");
-      const closed = task.status === "done" || task.status === "archived";
+      const closed = task.status === "archived";
       // 先持久化再统一选队首，不能先排空低优先级旧项再比较新派发。
       const queued = !closed;
       const comment = this.deps.storage.createTaskCommentIntent({
         taskId: input.taskId, requestId: input.requestId, signature: input.signature, body: input.body,
         instruction: input.instruction, sourceCommentId: input.sourceCommentId, employeeId: input.employeeId,
         employeeName: input.employeeName, taskVersion: input.taskVersion, referencedTaskIds: input.referencedTaskIds,
-        agent: input.agent, queued,
+        agent: input.agent, queued, purpose: input.purpose, reviewRevision: input.reviewRevision,
       });
-      this.promoteTask(task);
+      this.promoteTask(task, input.purpose);
       if (!queued) await this.dispatchComment(comment.id, input.employeeId);
       else await this.drainLocked(employee.id);
       return this.deps.storage.getWandTaskComment(comment.id)!;
@@ -141,7 +143,7 @@ export class TaskExecutionQueue {
         this.deps.storage.cancelQueuedTaskComment(next.commentId, "任务不存在，排队执行已取消。");
         continue;
       }
-      if (task.status === "done" || task.status === "archived") {
+      if (task.status === "archived") {
         this.deps.storage.cancelQueuedTaskComment(next.commentId, "任务已关闭，排队执行已取消。");
         continue;
       }
@@ -160,7 +162,7 @@ export class TaskExecutionQueue {
       if (comment) this.deps.storage.updateTaskCommentDispatch(comment.id, "failed", null, "任务或派发记录不存在。");
       return;
     }
-    if (task.status === "done" || task.status === "archived") {
+    if (task.status === "archived" || comment.purpose === "review" && (task.status !== "review" || comment.reviewRevision !== (task.deliveryRevision ?? 0))) {
       this.deps.storage.updateTaskCommentDispatch(comment.id, "failed", null, "任务已关闭，排队执行已取消。");
       return;
     }
@@ -191,7 +193,7 @@ export class TaskExecutionQueue {
           employeeCandidateIndex: Math.max(0, candidateIndex),
           automationId: `wand-task-comment:${comment.id}`,
           prompt: taskCommentPrompt({ taskId: task.id, commentId: comment.id, sourceCommentId: comment.sourceCommentId ?? null,
-            taskVersion: comment.taskVersion ?? task.updatedAt, instruction: comment.instruction ?? comment.body, referencedTasks }),
+            taskVersion: comment.taskVersion ?? task.updatedAt, instruction: comment.instruction ?? comment.body, referencedTasks, purpose: comment.purpose }),
           sessionCreated: session => {
             sessionId = session.id;
             // 已从队列认领、正在启动的派发不再被后来入队项抢占。
@@ -258,9 +260,9 @@ export class TaskExecutionQueue {
     return result.sort((a, b) => b.priority - a.priority || a.createdAt.localeCompare(b.createdAt) || (a.sequence ?? 0) - (b.sequence ?? 0));
   }
 
-  private promoteTask(task: WandTask): void {
-    if (task.status !== "backlog" && task.status !== "todo") return;
-    this.deps.storage.updateWandTask(task.id, { status: statusAfterWandTaskDispatch(task.status) });
+  private promoteTask(task: WandTask, purpose?: "execution" | "review"): void {
+    const status = purpose === "review" ? "review" : statusAfterWandTaskDispatch(task.status);
+    if (status !== task.status) this.deps.storage.updateWandTask(task.id, { status });
   }
 
   private hasCapacity(employee: NonNullable<ReturnType<WandStorage["getSiliconEmployee"]>>, taskId: string): boolean {

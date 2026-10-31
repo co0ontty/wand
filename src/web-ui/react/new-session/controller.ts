@@ -4,6 +4,7 @@ import type { TaskExecutionSubject, WandTaskAgent, WandTaskPriority, WandTaskSta
 /** Entry points supply context; the new-work page owns the only task editor. */
 export interface NewTaskDraftOptions {
   workspaceId?: string;
+  cwd?: string;
   status?: WandTaskStatus;
   priority?: WandTaskPriority;
   parentTaskId?: string;

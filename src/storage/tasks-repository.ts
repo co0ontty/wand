@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { normalizeProjectCwd } from "../workspace-binding.js";
 import { assertTaskHierarchy } from "../task-hierarchy.js";
 import { TASK_RETENTION_ARCHIVE_VERSION } from "../task-retention.js";
 import { DatabaseSync } from "node:sqlite";
@@ -8,7 +9,7 @@ import { isSessionProvider } from "../session-provider.js";
 import { isSystemAiCall } from "../system-ai-call.js";
 import { isThinkingEffort } from "../structured-provider-common.js";
 import type { WandTask, WandTaskAgent, WandTaskComment, WandTaskStatus } from "../task-types.js";
-import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_PRIORITY, isTaskExecutionSubject, normalizeWandTaskAgentMode } from "../task-types.js";
+import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_PRIORITY, isTaskExecutionSubject, isWandTaskStatus, normalizeWandTaskAgentMode, taskAiVerified, taskHumanAccepted } from "../task-types.js";
 import { GLOBAL_WORKSPACE_ID, SessionSnapshot } from "../types.js";
 import { safeJsonParse, mapWandMilestoneRow, mapIterationPromptRow } from "./mappers.js";
 import { parseWandTaskAgent } from "./mappers.js";
@@ -110,6 +111,8 @@ export class TaskRepository {
   mapWandTaskRow(row: Record<string, unknown>): WandTask {
     return {
       acceptance: safeJsonParse(String(row.acceptance_json ?? "null")),
+      verification: safeJsonParse(String(row.verification_json ?? "null")),
+      deliveryRevision: Number(row.delivery_revision) || 0,
       id: String(row.id),
       identifier: typeof row.identifier === "string" && row.identifier ? row.identifier : `TASK-${String(row.id).slice(0, 6)}`,
       workspaceId: typeof row.workspace_id === "string" ? row.workspace_id : null,
@@ -119,7 +122,7 @@ export class TaskRepository {
       titleSource: row.title_source === "auto" ? "auto" : "user",
       autoTitleSignature: typeof row.auto_title_signature === "string" && row.auto_title_signature ? row.auto_title_signature : null,
       description: String(row.description ?? ""),
-      status: row.status === "backlog" || row.status === "doing" || row.status === "done" || row.status === "archived" ? row.status as WandTaskStatus : "todo",
+      status: isWandTaskStatus(row.status) ? row.status : "todo",
       priority: row.priority === "low" || row.priority === "medium" || row.priority === "high" || row.priority === "urgent" ? row.priority : "none",
       labels: (() => { const parsed = safeJsonParse<unknown>(String(row.labels_json ?? "[]")); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []; })(),
       dueDate: typeof row.due_date === "string" ? row.due_date : null,
@@ -170,10 +173,14 @@ export class TaskRepository {
     return new Map(rows.map(row => [row.task_id, Number(row.count) || 0]));
   }
 
+  isTaskReviewComment(id: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE comment_id = ? AND purpose = 'review' LIMIT 1").get(id));
+  }
+
   getWandTaskComment(id: string): WandTaskComment | null {
     const row = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
       d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status, d.referenced_task_ids,
-      d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint FROM wand_task_comments c
+      d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint, d.purpose, d.review_revision FROM wand_task_comments c
       LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id WHERE c.id = ?`).get(id) as Record<string, string | null> | undefined;
     return row ? this.mapWandTaskCommentRow(row) : null;
   }
@@ -185,7 +192,7 @@ export class TaskRepository {
     const placeholders = boundedIds.map(() => "?").join(", ");
     const rows = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
       d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status, d.referenced_task_ids,
-      d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint
+      d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint, d.purpose, d.review_revision
       FROM wand_task_comments c LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id
       WHERE c.task_id = ? AND c.id IN (${placeholders})`).all(taskId, ...boundedIds) as Array<Record<string, string | null>>;
     const byId = new Map(rows.map(row => [row.id!, this.mapWandTaskCommentRow(row)]));
@@ -195,6 +202,7 @@ export class TaskRepository {
   private mapWandTaskCommentRow(row: Record<string, string | null>): WandTaskComment {
     const referencedTaskIds = parseReferencedTaskIds(row.referenced_task_ids);
     return { id: row.id!, taskId: row.task_id!, authorName: row.author_name!, body: row.body!, createdAt: row.created_at!,
+      purpose: row.purpose === "review" ? "review" : "execution", reviewRevision: row.review_revision == null ? null : Number(row.review_revision),
       ...(row.request_id ? { requestId: row.request_id, sourceCommentId: row.source_comment_id, instruction: row.instruction!, taskVersion: row.task_version!,
         ...(referencedTaskIds.length ? { referencedTaskIds } : {}),
         dispatch: row.employee_id ? { employeeId: row.employee_id, employeeName: row.employee_name!,
@@ -216,16 +224,16 @@ export class TaskRepository {
   /** Atomically persist both the visible comment and the one-shot dispatch intent before any side effect. */
   createTaskCommentIntent(input: { taskId: string; requestId: string; signature: string; body: string; instruction: string;
     sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string;
-    referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean }): WandTaskComment {
+    referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean; purpose?: "execution" | "review"; reviewRevision?: number | null }): WandTaskComment {
     return this.s.transaction(() => {
       const id = crypto.randomUUID();
       this.db.prepare(`INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)`)
         .run(id, input.taskId, "用户", input.body, nowIso());
       this.db.prepare(`INSERT INTO wand_task_comment_dispatches(comment_id, task_id, request_id, signature, source_comment_id,
-        employee_id, employee_name, instruction, task_version, state, referenced_task_ids, agent_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        employee_id, employee_name, instruction, task_version, state, referenced_task_ids, agent_json, purpose, review_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, input.taskId, input.requestId, input.signature, input.sourceCommentId, input.employeeId, input.employeeName,
           input.instruction, input.taskVersion, input.employeeId ? input.queued ? "queued" : "pending" : "accepted",
-          JSON.stringify(input.referencedTaskIds ?? []), input.agent ? JSON.stringify(input.agent) : null);
+          JSON.stringify(input.referencedTaskIds ?? []), input.agent ? JSON.stringify(input.agent) : null, input.purpose ?? "execution", input.reviewRevision ?? null);
       return this.getWandTaskComment(id)!;
     });
   }
@@ -490,13 +498,13 @@ export class TaskRepository {
       FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'`).get() as { value: number };
     try {
       this.db.prepare(`INSERT INTO wand_tasks (${WAND_TASK_FIELDS})
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, `TASK-${number.value + 1}`, input.workspaceId ?? null, input.workspaceTaskId ?? null,
         input.parentTaskId ?? null, input.title, input.titleSource ?? "user", null,
         input.description ?? "", status, input.priority ?? DEFAULT_WAND_TASK_PRIORITY,
         JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null,
         max.value + 1, input.agent ? JSON.stringify(input.agent) : null,
-        input.executionSubject ? JSON.stringify(input.executionSubject) : null, archivedAt, createdAtValue, createdAtValue, input.acceptance ? JSON.stringify(input.acceptance) : null);
+        input.executionSubject ? JSON.stringify(input.executionSubject) : null, archivedAt, createdAtValue, createdAtValue, input.acceptance ? JSON.stringify(input.acceptance) : null, null, 0);
     } catch (error) {
       if (input.workspaceTaskId && this.getWandTaskByWorkspaceTaskId(input.workspaceTaskId)) {
         throw new Error("该任务容器已有任务卡片。", { cause: error });
@@ -509,7 +517,11 @@ export class TaskRepository {
     }
     if (input.parentTaskId) {
       const parent = this.getWandTask(input.parentTaskId);
-      if (parent?.acceptance?.acceptedAt) this.writeWandTask(parent, { acceptance: { ...parent.acceptance, acceptedAt: null } });
+      if (parent && (parent.verification || parent.acceptance?.acceptedAt)) this.writeWandTask(parent, {
+        deliveryRevision: (parent.deliveryRevision ?? 0) + 1, verification: null,
+        ...(parent.acceptance ? { acceptance: { ...parent.acceptance, acceptedAt: null, confirmedRevision: undefined } } : {}),
+        ...(parent.status === "ready" || parent.status === "review" ? { status: "doing" as const } : {}),
+      }, true);
     }
     this.s.notifyTaskTitleChange();
     return this.getWandTask(id)!;
@@ -518,11 +530,19 @@ export class TaskRepository {
   createWandTask(input: CreateWandTaskInput): WandTask {
     return this.s.transaction(() => {
       const linked = input.workspaceTaskId ? this.s.getWorkspaceTask(input.workspaceTaskId) : null;
-      const workspaceId = input.workspaceId === undefined && linked
+      let workspaceId = input.workspaceId === undefined && linked
         ? linked.workspaceId === GLOBAL_WORKSPACE_ID ? null : linked.workspaceId
         : input.workspaceId ?? null;
-      const workspace = workspaceId ? this.s.getWorkspace(workspaceId) : this.s.ensureGlobalWorkspace();
+      let workspace = workspaceId ? this.s.getWorkspace(workspaceId) : this.s.ensureGlobalWorkspace();
       if (!workspace) throw new Error("任务所属工作区不存在。");
+      if (input.cwd && (!workspaceId || workspace.id === GLOBAL_WORKSPACE_ID)) {
+        const normalized = normalizeProjectCwd(input.cwd);
+        const match = this.s.listWorkspaces().find(w => w.id !== GLOBAL_WORKSPACE_ID && normalizeProjectCwd(w.cwd) === normalized);
+        if (match) {
+          workspace = match;
+          workspaceId = match.id;
+        }
+      }
       const milestoneId = this.s.taskMilestoneForWrite(input.milestoneId, workspaceId);
       if (input.workspaceTaskId) {
         const container = this.s.getWorkspaceTask(input.workspaceTaskId);
@@ -533,21 +553,35 @@ export class TaskRepository {
       }
       const workspaceTaskId = input.workspaceTaskId ?? this.s.insertWorkspaceTask({
         workspaceId: workspace.id, name: input.title,
-        status: input.status === "done" || input.status === "archived" ? "done" : "active",
+        status: input.status === "archived" ? "done" : "active",
         milestoneId,
+        cwd: input.cwd ?? null,
       });
       return this.insertWandTask({ ...input, workspaceId, workspaceTaskId, milestoneId });
     });
   }
 
   /** Private canonical writer; callers own the transaction, never a reverse writer. */
-  writeWandTask(current: WandTask, patch: WandTaskPatch): WandTask {
-    const next = { ...current, ...patch, updatedAt: nowIso() };
+  writeWandTask(current: WandTask, patch: WandTaskPatch, workflow = false): WandTask {
+    const next = { ...current, ...patch, updatedAt: new Date(Math.max(Date.now(), (Date.parse(current.updatedAt) || 0) + 1)).toISOString() };
+    const deliveryChanged = patch.description !== undefined && patch.description !== current.description
+      || patch.parentTaskId !== undefined && patch.parentTaskId !== current.parentTaskId
+      || patch.workspaceId !== undefined && patch.workspaceId !== current.workspaceId
+      || patch.acceptance !== undefined && (patch.acceptance?.evidence !== current.acceptance?.evidence || patch.acceptance?.blocker !== current.acceptance?.blocker)
+      || patch.status !== undefined && ["backlog", "todo", "doing"].includes(patch.status) && patch.status !== current.status && ["ready", "review", "done", "archived"].includes(current.status);
+    if (!workflow && deliveryChanged) {
+      next.deliveryRevision = (current.deliveryRevision ?? 0) + 1;
+      next.verification = null;
+      if (next.acceptance) next.acceptance = { ...next.acceptance, acceptedAt: null, confirmedRevision: undefined };
+      if (next.status === "ready" || next.status === "review") next.status = "doing";
+    }
+    if (next.status === "ready" && !taskAiVerified(next)) throw new Error("待归档需要当前交付的 AI 验收记录，请走验收工作流。");
+    if (!workflow && next.status !== current.status && next.status === "archived" && !taskHumanAccepted(current)) throw new Error("请先经 AI 验收，再由人工确认并归档。");
+    if (!workflow && patch.acceptance?.acceptedAt && patch.acceptance.acceptedAt !== current.acceptance?.acceptedAt) throw new Error("人工确认只能通过验收工作流写入。");
     assertTaskHierarchy(this.listWandTasks(), current.id, next.parentTaskId, next.workspaceId, current);
-    if (next.acceptance?.acceptedAt) {
-      if (patch.description !== undefined && patch.description !== current.description) next.acceptance = { ...next.acceptance, acceptedAt: null };
-      else if (!next.acceptance.evidence.trim() || next.acceptance.blocker.trim()) throw new Error("验收通过需要交付证据，并先解除阻塞。");
-      else if (this.listWandTasks().some(child => child.parentTaskId === current.id && !child.acceptance?.acceptedAt)) throw new Error("仍有子任务未验收通过，不能通过主目标整体验收。");
+    if (taskHumanAccepted(next)) {
+      if (!next.acceptance!.evidence.trim() || next.acceptance!.blocker.trim()) throw new Error("人工确认需要交付证据，并先解除阻塞。");
+      if (this.listWandTaskChildren(current.id).some(child => !taskHumanAccepted(child))) throw new Error("仍有子任务未由人工确认。");
     }
     // 归档时间只在进入归档时写一次；取消归档/重新打开时清空，恢复“未动多久”重新计时。
     if (next.status === "archived") {
@@ -573,20 +607,21 @@ export class TaskRepository {
       if (!workspace) throw new Error("任务所属工作区不存在。");
       next.workspaceTaskId = this.s.insertWorkspaceTask({
         workspaceId: workspace.id, name: next.title, milestoneId: next.milestoneId,
-        status: next.status === "done" ? "done" : "active", createdAt: next.createdAt,
+        status: "active", createdAt: next.createdAt,
       });
     }
     this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, parent_task_id = ?,
       title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?,
       labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, execution_subject_json = ?,
-      archived_at = ?, updated_at = ?, acceptance_json = ?
+      archived_at = ?, updated_at = ?, acceptance_json = ?, verification_json = ?, delivery_revision = ?
       WHERE id = ?`)
       .run(next.workspaceId, next.workspaceTaskId, next.parentTaskId, next.title, next.titleSource,
         next.autoTitleSignature ?? null, next.description, next.status, next.priority,
         JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder,
         next.agent ? JSON.stringify(next.agent) : null,
         next.executionSubject ? JSON.stringify(next.executionSubject) : null,
-        next.archivedAt, next.updatedAt, next.acceptance ? JSON.stringify(next.acceptance) : null, next.id);
+        next.archivedAt, next.updatedAt, next.acceptance ? JSON.stringify(next.acceptance) : null,
+        next.verification ? JSON.stringify(next.verification) : null, next.deliveryRevision ?? 0, next.id);
     // Only a real transition may opt into the new policy. Editing/backfilling an old archive must not do so.
     if (next.status !== current.status) {
       this.db.prepare("UPDATE wand_tasks SET retention_archive_version = ? WHERE id = ?")
@@ -600,9 +635,15 @@ export class TaskRepository {
       this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE workspace_task_id = ?")
         .run(workspaceId, next.workspaceTaskId);
     }
-    if ((patch.acceptance !== undefined || patch.description !== undefined || patch.parentTaskId !== undefined) && next.parentTaskId) {
-      const parent = this.getWandTask(next.parentTaskId);
-      if (parent?.acceptance?.acceptedAt) this.writeWandTask(parent, { acceptance: { ...parent.acceptance, acceptedAt: null } });
+    if (deliveryChanged || patch.parentTaskId !== undefined && patch.parentTaskId !== current.parentTaskId || patch.deliveryRevision !== undefined && patch.deliveryRevision !== current.deliveryRevision
+      || patch.verification !== undefined && !taskAiVerified(next)
+      || patch.acceptance !== undefined && taskHumanAccepted(current) && !taskHumanAccepted(next)) for (const parentId of new Set([current.parentTaskId, next.parentTaskId].filter((id): id is string => Boolean(id)))) {
+      const parent = this.getWandTask(parentId);
+      if (parent && (parent.verification || parent.acceptance?.acceptedAt)) this.writeWandTask(parent, {
+        deliveryRevision: (parent.deliveryRevision ?? 0) + 1, verification: null,
+        ...(parent.acceptance ? { acceptance: { ...parent.acceptance, acceptedAt: null, confirmedRevision: undefined } } : {}),
+        ...(parent.status === "ready" || parent.status === "review" ? { status: "doing" as const } : {}),
+      }, true);
     }
     this.s.notifyTaskTitleChange();
     return next;
@@ -613,6 +654,18 @@ export class TaskRepository {
       const current = this.getWandTask(id);
       if (!current) return null;
       return this.writeWandTask(current, patch);
+    });
+  }
+
+  /** Explicit destructive project removal collects history, never claims delivery acceptance. */
+  archiveTaskForWorkspaceRemoval(id: string): WandTask | null {
+    return this.s.transaction(() => {
+      const current = this.getWandTask(id);
+      if (!current) return null;
+      const task = this.writeWandTask(current, { status: "archived", workspaceTaskId: null }, true);
+      this.db.prepare("INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(crypto.randomUUID(), id, "项目移除", "项目被明确删除，仅收纳原任务与历史；这不是 AI 验收或人工接受交付。", task.updatedAt);
+      return task;
     });
   }
 
@@ -631,7 +684,8 @@ export class TaskRepository {
       for (const id of new Set(ids)) {
         const task = this.getWandTask(id);
         if (!task || task.status === "archived") continue;
-        if (options.completedOnly && task.status !== "done") continue;
+        if (options.completedOnly && !taskHumanAccepted(task)) continue;
+        if (!taskHumanAccepted(task)) continue;
         this.writeWandTask(task, { status: "archived" });
         archived.push(id);
       }
@@ -939,6 +993,7 @@ export class TaskRepository {
       if (!session) throw new Error("未找到该会话。");
       const target = taskId ? this.s.getWorkspaceTask(taskId) : null;
       if (taskId && !target) throw new Error("未找到目标任务。");
+      if (target?.archived) throw new Error("目标已归档，请先恢复后再移入会话。");
       if (target && !this.s.getWorkspace(target.workspaceId)) throw new Error("目标工作区不存在。");
       const source = session.workspaceTaskId ? this.s.getWorkspaceTask(session.workspaceTaskId) : null;
       if (source && source.id !== target?.id && source.layout) {
@@ -949,15 +1004,15 @@ export class TaskRepository {
         this.s.saveWorkspaceTaskLayout(source.id, { ...source.layout, windows });
       }
       const targetCard = target ? this.getWandTaskByWorkspaceTaskId(target.id) : null;
-      if (target && !targetCard) throw new Error("未找到目标任务。");
+      if (target && target.kind !== "section" && !targetCard) throw new Error("未找到目标任务。");
       this.db.prepare("DELETE FROM wand_task_sessions WHERE session_id = ? AND (? IS NULL OR task_id != ?)")
         .run(sessionId, targetCard?.id ?? null, targetCard?.id ?? null);
       this.db.prepare("UPDATE command_sessions SET workspace_task_id = ?, workspace_id = ? WHERE id = ?")
         .run(target?.id ?? null, target?.workspaceId ?? session.workspaceId ?? null, sessionId);
-      if (target) {
+      if (targetCard) {
         this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)")
           .run(targetCard!.id, sessionId, nowIso());
-        if (source?.id !== target.id) this.recordTaskSession(this.s.getSessionSlim(sessionId)!);
+        if (source?.id !== target?.id) this.recordTaskSession(this.s.getSessionSlim(sessionId)!);
       }
     });
   }

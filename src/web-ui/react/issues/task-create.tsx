@@ -3,21 +3,23 @@ import { Alert, AutoComplete, Flex, Form, Spin, Typography } from "antd";
 import { DEFAULT_WAND_TASK_PRIORITY, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { useSiliconEmployees } from "../agents/employee-repository";
 import { EmployeeAvatar } from "../agents/employee-avatar";
+import { ComposerEmployeeButton } from "../composer-sender/employee";
 import { aiTeamsRepository, type AiTeam } from "../ai-teams/repository";
 import { teamChatComposer } from "../ai-teams/composer-bridge";
 import { conversationDraftKey } from "../conversations/state";
 import { ConversationSubmitButton } from "../conversations/controls";
+import { ConversationExecutionSelectors } from "../conversations/execution-preference";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { useImeGuard } from "../composer-sender/ime-guard";
 import { useEditorExpansion } from "../composer-sender/editor-expansion";
 import { installChatComposerStyles } from "../chat-composer-styles";
 import { installConversationHomeStyles } from "../conversations/home-styles";
 import { NewWorkComposer, type NewWorkComposerHandle } from "../new-session/composer";
-import { NewWorkIntent } from "../new-session/intent";
 import { newSessionController, newSessionStore, type NewSessionControllerSnapshot } from "../new-session/controller";
 import { httpNewSessionRepository } from "../new-session/repository";
 import { installNewWorkStyles } from "../new-session/start-styles";
 import { type NewSessionDefaults } from "../new-session/types";
+import { taskGroupsStore } from "../workspaces/task-groups-store";
 import { httpWorkspacesRepository } from "../workspaces/repository";
 import { notifyTasksChanged } from "../task-changes";
 import { updatePageRoute } from "../../page-route";
@@ -232,7 +234,7 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
         } catch (cause) { dispatchError = describeError(cause, "任务已创建，但启动执行失败。请在任务详情中核对执行记录。"); }
       }
       teamChatComposer.edit(composerKey, { acknowledgeRevision: textDraft.revision });
-      taskDrafts.delete(scope); notifyTasksChanged();
+      taskDrafts.delete(scope); notifyTasksChanged(); void taskGroupsStore.reload();
       if (dispatchError) { setError(`任务已创建。${dispatchError} 请打开已创建的任务，不要重复创建。`); return; }
       acceptedTasks.delete(scope);
       if (createMore) {
@@ -277,7 +279,7 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
           onValueChange={value => { const id = issueWorkspaceIdFromSelect(value) || ""; const next = workspaces.find(item => item.id === id); edit({ workspaceId: id, cwd: next?.cwd || "", ...(id === draft.workspaceId ? {} : { parentTaskId: "", milestoneId: workspaceMilestone(id) }) }); }}/></AgentField>
         <AgentField label="父任务"><WandSelect ariaLabel="归属父任务" value={draft.parentTaskId || ISSUE_NO_PARENT} options={issueParentOptions(tasks, draft.workspaceId || undefined, null, draft.parentTaskId)} searchable searchPlaceholder="搜索主任务编号或标题" disabled={disabled}
           onValueChange={value => { const parent = tasks.find(item => item.id === value); const next = workspaces.find(item => item.id === parent?.workspaceId); edit({ parentTaskId: parent?.id || "", ...(parent ? { workspaceId: parent.workspaceId || "", cwd: next?.cwd || draft.cwd, milestoneId: parent.milestoneId || (parent.workspaceId === draft.workspaceId ? draft.milestoneId : workspaceMilestone(parent.workspaceId || "")) } : {}) }); }}/></AgentField>
-        <AgentField label="任务状态"><WandSelect ariaLabel="状态" value={draft.status} options={ISSUE_COLUMNS.map(item => ({ value: item.status, label: item.label }))} disabled={disabled} onValueChange={status => edit({ status: status as WandTaskStatus })}/></AgentField>
+        <AgentField label="任务状态"><WandSelect ariaLabel="状态" value={draft.status} options={ISSUE_COLUMNS.filter(item => ["backlog", "todo", "doing"].includes(item.status)).map(item => ({ value: item.status, label: item.label }))} disabled={disabled} onValueChange={status => edit({ status: status as WandTaskStatus })}/></AgentField>
         <AgentField label="优先级"><WandSelect ariaLabel="优先级" value={draft.priority} options={ISSUE_PRIORITIES.map(item => ({ value: item.value, label: item.label }))} disabled={disabled} onValueChange={priority => edit({ priority: priority as WandTaskPriority })}/></AgentField>
         <AgentField label="截止日期"><TaskDatePicker ariaLabel="截止日期" value={draft.dueDate} popupOwner="task-create-properties" disabled={disabled} onValueChange={dueDate => edit({ dueDate })}/></AgentField>
         <AgentField label="迭代"><MilestonePicker value={draft.milestoneId || null} workspaceId={draft.workspaceId || null} disabled={disabled} onChange={milestoneId => edit({ milestoneId: milestoneId || "" })}/></AgentField>
@@ -287,6 +289,7 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
     </Flex>
   </Form></PopupOwnerProvider>;
   const subjects = <PopupOwnerProvider owner="task-create-subject"><Form layout="vertical" component={false}><Flex vertical gap={12} className="new-work-subject task-board-create-assign-controls">
+    <div className="composer-editor-menu">{editor.control}</div>
     <Typography.Text strong>执行对象</Typography.Text>
     <AgentFields agent={draft.agent} catalog={catalog} providerOptions={providerOptions} ariaPrefix="任务" disabled={disabled}
       teams={teams} teamId={draft.subject.type === "team" ? draft.subject.id : ""} employees={employees} employeeId={draft.subject.type === "employee" ? draft.subject.id : ""} employeeOverride={draft.employeeOverride}
@@ -300,11 +303,6 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
   </Flex></Form></PopupOwnerProvider>;
   return <section className="new-work-page conversation-root task-create-page" aria-label="新建工作">
     <div className="new-work-context">
-      <NewWorkIntent task options={{ ...options, initialKind: options.initialKind || undefined, initialCwd: draft.cwd, workspaceId: draft.workspaceId,
-        initialEmployeeId: draft.subject.type === "employee" ? draft.subject.id : "", taskDraft: { ...options.taskDraft,
-          draftKey: composerKey, scope, title: draft.title, description: textDraft.text, workspaceId: draft.workspaceId,
-          status: draft.status, priority: draft.priority, parentTaskId: draft.parentTaskId, milestoneId: draft.milestoneId,
-          executionSubject: taskCreationRequest(draft, textDraft.text, false).executionSubject, agent: draft.agent } }} disabled={disabled}/>
       <h1>
         今天你想与
         <WandPopover ariaLabel="选择新工作员工" popupOwner="task-create-subject" side="bottom" open={titleSubjectOpen} onOpenChange={setTitleSubjectOpen}
@@ -337,13 +335,6 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
       </h1>
     </div>
     <div className="conversation-composer new-work-composer">
-      <div className="new-work-context-bar">
-        <div className="new-work-location"><WandPopover ariaLabel="新工作运行目录" side="top" open={directoryOpen} onOpenChange={setDirectoryOpen} trigger={<WandButton kind="ghost" disabled={disabled} className="new-work-directory" title={draft.cwd}><WandIcon name="folder"/><span>{directoryLabel}</span><WandIcon name="chevronDown" size={12}/></WandButton>}>
-          {directoryPickerContent}
-        </WandPopover></div>
-        <WandPopover ariaLabel="新工作执行对象" popupOwner="task-create-subject" side="top" open={subjectOpen} onOpenChange={setSubjectOpen} trigger={<WandButton kind="ghost" disabled={disabled} className="new-work-person"><WandIcon name="spark"/><span className="new-work-person-name">{subjectLabel}</span><WandIcon name="chevronDown" size={14}/></WandButton>}>{subjects}</WandPopover>
-        <WandPopover ariaLabel="任务属性" popupOwner="task-create-properties" side="top" open={propertiesOpen} onOpenChange={setPropertiesOpen} trigger={<WandButton kind="ghost" disabled={disabled} aria-label="任务属性"><WandIcon name="gear"/>属性</WandButton>}>{properties}</WandPopover>
-      </div>
       {employeesError ? <Alert type="warning" title={employeesError}/> : null}
       {error ? <Alert type="error" role="alert" title={error}/> : null}
       {unknown ? <Alert type="warning" role="status" title={unknown}/> : null}
@@ -355,12 +346,25 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
         header={textDraft.attachments.length ? <ComposerAttachmentList items={textDraft.attachments.map((item, index) => ({ index, name: item.name, sizeLabel: `${item.size} B`, previewUrl: item.previewUrl || null }))}
           onRemove={index => { if (!disabled) teamChatComposer.edit(composerKey, { removeAttachment: index }); }}/> : null}
         footer={<Flex justify="space-between" align="center" wrap gap={8} className="conversation-action-row task-board-create-footer">
-          <Flex align="center" gap={8}><WandSwitch checked={saveAndDispatch} onCheckedChange={setSaveAndDispatch} ariaLabel="保存并派发" disabled={disabled}/><Typography.Text>{saveAndDispatch ? "创建并开始执行" : "仅创建任务"}</Typography.Text><span className="composer-edit-action">{editor.control}</span></Flex>
+          <Flex align="center" gap={8}><WandSwitch checked={saveAndDispatch} onCheckedChange={setSaveAndDispatch} ariaLabel="保存并派发" disabled={disabled}/><Typography.Text>{saveAndDispatch ? "创建并开始执行" : "仅创建任务"}</Typography.Text></Flex>
+          <Flex align="center" gap={4} className="new-work-send-actions">
+          {employee ? <WandPopover ariaLabel="新工作执行对象" popupOwner="task-create-subject" side="top" open={subjectOpen} onOpenChange={setSubjectOpen}
+            trigger={<ComposerEmployeeButton employee={employee} disabled={disabled} aria-label={`选择员工：${employee.name}`}/>}>{subjects}</WandPopover> : null}
+          {draft.subject.type !== "team" ? <div className="conversation-runtime-summary"><ConversationExecutionSelectors agent={draft.agent} catalog={catalog} disabled={disabled}
+            onChange={preference => edit({ agent: { ...draft.agent, ...preference }, employeeOverride: draft.subject.type === "employee" })}/></div> : null}
           <ConversationSubmitButton stops={false} phase={busy ? "sending" : unknown ? "unknown" : error ? "failed" : "idle"} label={label}
             disabled={disabled || !!textDraft.attachments.length || (!draft.title.trim() && !textDraft.text.trim()) || (saveAndDispatch && !textDraft.text.trim())}
             disabledReason={unknown || (textDraft.attachments.length ? "请回开始工作发送附件，或先移除附件。" : !draft.title.trim() && !textDraft.text.trim() ? "请填写任务标题或描述。" : "请填写本次交付目标。")}
             onClick={() => void submit()}/>
+          </Flex>
         </Flex>}/>
+      {/* 面板外只留真实上下文：目录、执行对象与任务属性，和新建会话同一行。 */}
+      <div className="wand-composer-context">
+        <WandPopover ariaLabel="新工作运行目录" side="top" open={directoryOpen} onOpenChange={setDirectoryOpen} trigger={<WandButton kind="ghost" disabled={disabled} className="new-work-directory conversation-directory-trigger" title={draft.cwd}><WandIcon name="folder" size={14}/><span>{directoryLabel}</span><WandIcon name="chevronDown" size={12}/></WandButton>}>
+          {directoryPickerContent}
+        </WandPopover>
+        <WandPopover ariaLabel="任务属性" popupOwner="task-create-properties" side="top" open={propertiesOpen} onOpenChange={setPropertiesOpen} trigger={<WandButton kind="ghost" disabled={disabled} aria-label="任务属性" className="conversation-directory-trigger"><WandIcon name="gear" size={14}/>属性</WandButton>}>{properties}</WandPopover>
+      </div>
     </div>
   </section>;
 }

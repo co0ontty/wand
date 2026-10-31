@@ -46,7 +46,7 @@ export function parseTaskBoardViewState(value: unknown): TaskBoardViewState {
     sort: TASK_BOARD_SORTS.some((entry) => entry.value === item.sort) ? item.sort as TaskBoardSort : "manual",
     filters: {
       statuses: strings(filter.statuses).filter((entry): entry is IssueBoardFilters["statuses"][number] =>
-        ["backlog", "todo", "doing", "done", "archived"].includes(entry)),
+        ["backlog", "todo", "doing", "review", "ready", "done", "archived"].includes(entry)),
       priorities: strings(filter.priorities).filter((entry): entry is IssueBoardFilters["priorities"][number] =>
         ISSUE_PRIORITIES.some((priority) => priority.value === entry)),
       labels: strings(filter.labels),

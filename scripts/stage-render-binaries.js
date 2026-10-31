@@ -52,7 +52,6 @@ export const SHA256_FILE_NAME = "wand-render.sha256";
  * 支持的平台三元组，必须与 `render-bin/manifest.json` 的键和
  * `src/render-binary.ts` 的 `SUPPORTED_RENDER_TRIPLES` 一致。
  * `src` 侧与 `scripts` 侧的解析逻辑各自独立（TS 不能直接被构建脚本 import），
- * 一致性由 `tests/render-staging.test.ts` 的对照用例守住。
  */
 export const SUPPORTED_TRIPLES = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
 

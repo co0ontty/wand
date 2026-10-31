@@ -27,7 +27,7 @@ import { TaskReadModel } from "./task-read-model.js";
 import { readTaskActions } from "./task-actions.js";
 import { refreshAutoBoardTaskTitles, taskTitleService } from "./task-title-service.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription } from "./task-title.js";
-import { isWandTaskStatus, statusAfterWandTaskDispatch, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus, type WandTaskTitleSource } from "./task-types.js";
+import { isWandTaskStatus, taskWorkflowStage, statusAfterWandTaskDispatch, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus, type WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import type { SessionSnapshot, WandConfig } from "./types.js";
 import { badRequest, surfaceDomainError } from "./http-error.js";
@@ -179,6 +179,9 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
     : task.executionSubject?.type === "team" ? storage.getAiTeam(task.executionSubject.id) : null;
   return {
     ...task,
+    status: taskWorkflowStage(task.status),
+    workflowVersion: 1 as const,
+    ...(task.status === "done" ? { legacyReview: true } : {}),
     commentCount: model ? model.commentCounts.get(task.id) ?? 0 : storage.countWandTaskComments(task.id),
     queuedCommentCount: model ? model.queuedCommentCounts.get(task.id) ?? 0 : storage.countQueuedTaskCommentDispatchesForTask(task.id),
     ...(model ? model.execution(task) : taskExecutionProjection(sessionIds.flatMap(id => {
@@ -350,6 +353,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const titleSource: WandTaskTitleSource = providedTitle ? "user" : "auto";
       const title = providedTitle || provisionalTaskTitleFromDescription(description) || "新建任务";
       const status = isWandTaskStatus(body.status) ? body.status as WandTaskStatus : "todo";
+      if (!["backlog", "todo", "doing"].includes(status)) throw badRequest("新建任务不能冒充已交付或已验收，请先创建再提交交付。");
       const priority = PRIORITIES.has(body.priority as WandTaskPriority) ? body.priority as WandTaskPriority : DEFAULT_WAND_TASK_PRIORITY;
       const agent = body.agent === undefined ? null : parseTaskAgent(body.agent);
       const executionSubject = body.executionSubject === undefined
@@ -370,8 +374,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const requestedMilestoneId = milestoneIdFrom(storage, body.milestoneId) ?? defaultMilestoneIdForWrite(storage);
       const milestoneId = scopedMilestoneId(storage, requestedMilestoneId, workspaceId)
         ?? defaultMilestoneIdForWrite(storage);
+      const cwd = typeof body.cwd === "string" && body.cwd.trim() ? text(body.cwd) : undefined;
       const task = storage.createWandTask({
         workspaceId,
+        cwd,
         parentTaskId,
         title,
         titleSource,
@@ -407,6 +413,13 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
+      if (body.workflow !== undefined) {
+        if (Object.keys(body).some(key => key !== "workflow")) throw badRequest("工作流动作不能与其他编辑混合提交。");
+        const result = storage.applyTaskWorkflow(currentTask.id, body.workflow, { kind: "user" }, sessions);
+        res.json(dto(result));
+        return;
+      }
+      if (body.verification !== undefined || body.deliveryRevision !== undefined || body.legacyReview !== undefined) throw badRequest("验收版本与 AI 结论只能通过工作流写入。");
       const patch: Parameters<WandStorage["updateWandTask"]>[1] = {};
       if (body.title !== undefined) {
         // 显式改标题（包括原生端的可编辑标题框）都算用户自己写的。
@@ -420,14 +433,16 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         const acceptance = bodyObject(body.acceptance);
         const evidence = text(acceptance.evidence).slice(0, 16000);
         const blocker = text(acceptance.blocker).slice(0, 4000);
-        const accepted = acceptance.acceptedAt != null;
-        if (accepted && (!evidence || blocker)) throw badRequest("验收通过需要交付证据，并先解除阻塞。");
-        if (accepted && storage.listWandTasks().some(child => child.parentTaskId === currentTask.id && !child.acceptance?.acceptedAt)) throw badRequest("仍有子任务未验收通过，不能通过主目标整体验收。");
-        patch.acceptance = { evidence, blocker, acceptedAt: accepted ? new Date().toISOString() : null };
+        if (acceptance.acceptedAt != null || acceptance.confirmedRevision !== undefined) throw badRequest("请使用‘确认并归档’工作流；保存证据不能代替人工确认。");
+        patch.acceptance = { evidence, blocker, acceptedAt: null };
       }
       if (body.status !== undefined) {
         if (!isWandTaskStatus(body.status)) throw badRequest("任务状态无效。");
-        patch.status = body.status as WandTaskStatus;
+        if (body.status !== taskWorkflowStage(currentTask.status) && body.status !== currentTask.status) {
+          if (body.status === "archived") { res.status(409).json({ error: "请先核对 AI 验收，再由人工确认并归档。" }); return; }
+          if (!["backlog", "todo", "doing"].includes(body.status as string)) throw badRequest("验收、待归档和归档只能通过明确的验收动作流转。");
+          patch.status = body.status as WandTaskStatus;
+        }
       }
       if (body.priority !== undefined) {
         if (!PRIORITIES.has(body.priority as WandTaskPriority)) throw badRequest("任务优先级无效。");
@@ -582,6 +597,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
+      if (task.status === "archived") throw badRequest("归档任务需要先恢复，再新建执行。");
       if (!config) throw badRequest("当前服务未启用派发，无法派发 Agent。");
       const body = bodyObject(req.body);
       const subject = body.subject === undefined
@@ -591,6 +607,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         && (body.kind === "pty" || (body.agent && bodyObject(body.agent).kind === "pty"))) {
         throw badRequest("PTY 只能选择 CLI 工具。");
       }
+      const reviewing = body.purpose === "review";
+      if (body.purpose !== undefined && body.purpose !== "review" && body.purpose !== "execution") throw badRequest("派发目的无效。");
+      if (reviewing && (taskWorkflowStage(task.status) !== "review" || subject?.type !== "employee")) throw badRequest("AI 验收请在待验收阶段明确选择员工，以获得当前任务的受限回填能力。");
+      const dispatchStatus = reviewing ? "review" : statusAfterWandTaskDispatch(task.status);
       const requestedPrompt = text(body.prompt);
       const existingSessions = storage.listWandTaskSessionIds(task.id).length;
       if (existingSessions > 0 && !requestedPrompt) throw badRequest("请输入提示词。");
@@ -613,7 +633,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         storage.updateWandTask(task.id, {
           executionSubject: subject,
           agent: preferredAgent,
-          status: statusAfterWandTaskDispatch(task.status),
+          status: dispatchStatus,
         });
         recordIterationPromptForTask(storage, {
           sessionId: detail.run.chatSessionId ?? undefined,
@@ -670,11 +690,11 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       // Compatibility creation/drag clients also enter the same durable comment path for employees.
       // No implicit description fallback: a first dispatch needs an explicit round instruction too.
       if (employee) {
-        const result = await submitTaskComment(deps, task.id, { requestId: text(body.requestId) || randomUUID(), body: requestedPrompt, employeeId: employee.id }, override ?? undefined);
+        const result = await submitTaskComment(deps, task.id, { requestId: text(body.requestId) || randomUUID(), body: requestedPrompt, employeeId: employee.id, purpose: reviewing ? "review" : "execution" }, override ?? undefined);
         const session = result.comment.dispatch?.sessionId ? sessions?.getSlim(result.comment.dispatch.sessionId)
           ?? storage.getSessionSlim(result.comment.dispatch.sessionId) : null;
         // 排队中的派发同样要把任务挂到员工并保持活动；不能因为没有会话就跳过。
-        if (result.comment.dispatch) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: statusAfterWandTaskDispatch(task.status) });
+        if (result.comment.dispatch) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: dispatchStatus });
         res.status(202).json({ ok: true, taskId: task.id, subject: { type: "employee", id: employee.id }, comment: result.comment,
           queued: result.comment.dispatch?.state === "queued",
           session: session ? { ...taskSessionSummary(session), employeeCandidateIndex: session.employeeCandidateIndex } : null });
@@ -689,7 +709,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       storage.updateWandTask(task.id, {
         agent,
         executionSubject: usedSubject,
-        status: statusAfterWandTaskDispatch(task.status),
+        status: dispatchStatus,
       });
       if (body.rememberAgentDefaults === true && !employee) writeTaskBoardLastAgent(storage, agent);
       // 派发也算一轮迭代里的改动意图：直接把任务的标题 / 描述记进迭代记录。

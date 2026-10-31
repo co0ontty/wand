@@ -72,7 +72,6 @@ SQLite outbox 跨服务重启保留：完成提醒 TTL 1 小时，授权提醒 T
 ## 验证
 
 ```bash
-npm test -- tests/live-activity-apns.test.ts tests/apns.test.ts tests/session-completion.test.ts tests/storage-additive-migrations.test.ts tests/http-auth-scope.test.ts
 bash ios/scripts/test-live-activity-push.sh   # 真实TS payload → 生产Swift Codable声明
 bash ios/scripts/test-apns.sh
 python3 ios/scripts/test-adhoc-signing.py

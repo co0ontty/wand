@@ -468,6 +468,8 @@ export interface CommandRequest {
 
 export interface InputRequest {
   input?: string;
+  /** Structured input acceptance identity; same key must preserve the same intent. */
+  idempotencyKey?: string;
   /**
    * Structured sessions normally keep the HTTP request open until the whole
    * turn finishes. Native clients can opt into an accepted snapshot instead
@@ -767,6 +769,8 @@ export interface StructuredSessionState {
   lastActivityAt?: string | null;
   /** Pi 已结束前台回复、但 CLI 仍在等待异步子任务收尾。 */
   phase?: "responding" | "background";
+  /** Actual running input capability; absent/turn-end means wait for the whole run. */
+  inputMode?: "steer" | "turn-end";
   /**
    * 本轮实际使用的执行引擎：`core` = Wand 进程内 harness（目前仅 pi），
    * `cli` = 外部 CLI runner。决定重启后能否恢复：进程内回合不会比服务活得更久。
@@ -995,6 +999,7 @@ export type WorkspaceTaskStatus = "active" | "done";
  * 一个工作空间下可有多个任务，任务在侧栏列表里单独展示；每个任务的会话共享该任务的 worktree。
  */
 export interface WorkspaceTask {
+  kind?: "task" | "section";
   id: string;
   workspaceId: string;
   name: string;

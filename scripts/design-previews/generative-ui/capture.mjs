@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { build } from "esbuild";
-import { openPlushBrowser } from "../../../tests/helpers/run-plush-avatar-browser-harness.mjs";
+import { openPlushBrowser } from "../helpers/browser-harness.mjs";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const out = join(repo, "output/generative-ui-demo");

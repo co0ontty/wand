@@ -20,6 +20,7 @@ import {
   resolveGlobalWandCli,
   type UpdateChannel,
 } from "../npm-update-utils.js";
+import { RUNNING_BUILD_INFO } from "../build-info.js";
 import { whichSync } from "../path-repair.js";
 import { computeRelaunch } from "../relaunch.js";
 import { ensureDatabaseFile, resolveDatabasePath, WandStorage } from "../storage.js";
@@ -97,7 +98,7 @@ export function readUpdateChannel(configPath: string): UpdateChannel {
 
 /** 通过 npm dist-tag 拿到当前通道最新版本号。失败返回 latest=null。 */
 export function checkUpdate(currentVersion: string, channel: UpdateChannel = "stable"): UpdateInfo {
-  const info = checkPackageUpdateSync(currentVersion, channel);
+  const info = checkPackageUpdateSync(currentVersion, channel, undefined, RUNNING_BUILD_INFO);
   return {
     channel: info.channel,
     current: info.current,

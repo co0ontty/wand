@@ -55,7 +55,7 @@ export async function restorePageNavigation(): Promise<boolean> {
     const ui = conversationUi.getSnapshot();
     if (ui.active === true || ui.directory) {
       updatePageRoute({ view: ui.directory ? "contacts" : "chats", sidebar: ui.mode,
-        conversation: ui.selectedId, chatFilter: ui.listFilter, chatActivity: String(ui.activityOnly),
+        conversation: ui.selectedId, chatRuntime: ui.listRuntime, chatTaskStage: ui.listTaskStage, chatWorkspace: ui.listWorkspace, chatFilter: ui.listFilter, chatActivity: String(ui.activityOnly),
         chatQuery: ui.filters["list-query"] ?? "" }, "replace");
       lastTarget = targetKey();
     } else syncSelection("replace");

@@ -13,6 +13,10 @@ import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { failureMessage } from "../errors";
 import { ComposerAttachmentList } from "../composer-attachments/host";
+import { pasteFilesInto } from "../composer-paste";
+import { installChatComposerStyles } from "../chat-composer-styles";
+import { ComposerEmployeeButton } from "../composer-sender/employee.js";
+import { employeeProfile } from "../agents/employee-profile-state.js";
 import { ComposerPopoverAction } from "../composer-popover/action";
 import { RunningStatusBar } from "../chat/running-status-bar";
 import { filePreviewController } from "../file-preview/controller";
@@ -107,6 +111,10 @@ const AI_TEAMS_HOST: Record<string, object> = {
     useTeamDispatchFlow, TeamDispatchRoster, TeamDispatchActionButton, dispatchStartBlockedReason,
   },
   "composer-attachments/host": { ComposerAttachmentList },
+  "composer-paste": { pasteFilesInto },
+  "chat-composer-styles": { installChatComposerStyles },
+  "composer-sender/employee": { ComposerEmployeeButton },
+  "agents/employee-profile-state": { employeeProfile },
   "composer-popover/action": { ComposerPopoverAction },
   "chat/running-status-bar": { RunningStatusBar },
   "chat/message": { ChatMessage },

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Sender } from "@ant-design/x";
+import { createPortal } from "react-dom";
 import { useEditorExpansion } from "./editor-expansion.js";
 
 export type ResizeInput = (input: HTMLTextAreaElement) => void;
@@ -47,7 +48,8 @@ export function ComposerSender({ input, resize, projection }: { input: HTMLTextA
     wrapper.dataset.editorExpanded = String(editor.expanded); resize(input);
     return () => { delete wrapper.dataset.editorExpanded; };
   }, [input, resize, editor.expanded]);
+  const controls = document.querySelector("#composer-plus-popover [data-composer-editor-control]");
   return <InputContext.Provider value={{ input, resize, projection }}><Sender value={projection.text()}
     placeholder={input.placeholder} components={components} suffix={false} autoSize={false} onKeyDown={() => false}
-    styles={{ root: { border: 0, boxShadow: "none", borderRadius: 0, background: "transparent" }, content: { padding: 0 } }}/><div className="composer-editor-controls">{editor.control}</div></InputContext.Provider>;
+    styles={{ root: { border: 0, boxShadow: "none", borderRadius: 0, background: "transparent" }, content: { padding: 0 } }}/>{controls ? createPortal(editor.control, controls) : null}</InputContext.Provider>;
 }

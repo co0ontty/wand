@@ -1,4 +1,5 @@
 import { isSessionProvider, SESSION_PROVIDERS, type SessionProvider } from "./provider-catalog.js";
+import { badRequest } from "./http-error.js";
 import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_PROVIDER, OPENROUTER_FREE_SELECTOR,
   isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
 import { isOpenCodeFreeGroup, isOpenCodeNativeModelId, OPENCODE_FREE_GROUP_ID, OPENCODE_FREE_GROUP_NAME } from "./opencode-free-selection.js";
@@ -127,16 +128,18 @@ export function resolveModelGroupModels(
 ): string[] {
   const value = modelSelectorWithoutAutoAssign(selector);
   if (value === OPENROUTER_FREE_SELECTOR) {
-    if (provider !== "pi") throw new Error("免费分组仅属于 Pi。");
+    if (provider !== "pi") throw badRequest("免费分组仅属于 Pi。", "model_group_provider_mismatch");
     return [value];
   }
   const group = findModelGroup(groups, provider, value, options);
   if (group?.id === FREE_MODEL_GROUP_ID) return [OPENROUTER_FREE_SELECTOR];
   if (group) {
-    if (!group.models.length) throw new Error("所选模型分组已删除、为空或不属于当前工具，请重新选择。");
+    if (!group.models.length) throw badRequest(isOpenCodeFreeGroup(group)
+      ? "OpenCode 免费分组暂时没有可用模型，请等待模型同步完成，或在设置中重新选择模型。"
+      : "所选模型分组为空，请在设置中添加模型或重新选择。", "model_group_empty");
     return [...group.models];
   }
-  if (isModelGroupSelector(value)) throw new Error("所选模型分组已删除、为空或不属于当前工具，请重新选择。");
+  if (isModelGroupSelector(value)) throw badRequest("所选模型分组已删除或不属于当前工具，请重新选择。", "model_group_unavailable");
   return [value === "default" ? "" : value];
 }
 

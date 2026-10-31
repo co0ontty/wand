@@ -26,7 +26,7 @@ import {
 } from "./middleware/auth.js";
 import { createApiScopeMiddleware } from "./middleware/api-scope.js";
 import { createExtensionCors } from "./middleware/cors.js";
-import { type WandBuildInfo } from "./build-info.js";
+import { RUNNING_BUILD_INFO as BUILD_INFO } from "./build-info.js";
 import { ensureCertificates } from "./cert.js";
 import {
   getDefaultModelForProvider,
@@ -113,6 +113,7 @@ import { registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-ses
 import { registerWorkspaceRoutes } from "./server-workspace-routes.js";
 import { backfillSessionWorkspaces } from "./workspace-binding.js";
 import { getErrorMessage } from "./error-utils.js";
+import { stopIterationPrompts, whenIterationPromptsSettled } from "./iteration-log.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
 import { FeedbackReceiver, FeedbackReporter } from "./feedback.js";
 import { feedbackFeatureForApiPath } from "./feedback-feature-map.js";
@@ -147,9 +148,12 @@ import { createDaemonMaintenanceTargets } from "./daemon-maintenance-targets.js"
 import { registerDaemonMaintenanceRoutes } from "./server-daemon-maintenance-routes.js";
 import { terminalDaemonBuildIsCurrent } from "./terminal-daemon-build.js";
 import { createUpgradeAwareStructuredHost } from "./render-structured-host.js";
-import { PiTmuxHost } from "./pi-tmux-host.js";
+import { PiTmuxHost, type PiNativeGcReport } from "./pi-tmux-host.js";
+import { PtyTmuxBackend, type PtyTmuxGcReport } from "./pty-tmux-backend.js";
+import type { StructuredExecHost } from "./structured-exec-host.js";
 import { StructuredTmuxHost } from "./structured-tmux-host.js";
-import { tmuxEnabled } from "./tmux-policy.js";
+import { logInfo } from "./runtime-log.js";
+import { probeTmuxSupport, tmuxEnabled } from "./tmux-policy.js";
 import { structuredHostMaintenance } from "./structured-host-maintenance.js";
 import { createTmuxTerminalHost } from "./tmux-terminal-host.js";
 import type { TerminalHost } from "./terminal-host.js";
@@ -196,7 +200,7 @@ async function checkLatestPackageVersion(channel: UpdateChannel, forceRefresh = 
   }
   // The immutable running build is also what the UI reports. Shared package metadata may
   // belong to a different installer; it must not make a local Beta look like an older stable.
-  const info = await checkPackageUpdateAsync(DISPLAY_VERSION, channel);
+  const info = await checkPackageUpdateAsync(DISPLAY_VERSION, channel, undefined, BUILD_INFO);
   if (info.latest) {
     packageUpdateCache.set(channel, { info, timestamp: now });
   }
@@ -205,24 +209,6 @@ async function checkLatestPackageVersion(channel: UpdateChannel, forceRefresh = 
 
 // ── Build info (构建时打入的 commit SHA) + Beta 通道 ──
 
-/** 读取 dist/build-info.json（由 scripts/stamp-build-info.js 在 build 时生成）。 */
-function readBuildInfo(): WandBuildInfo {
-  try {
-    const raw = readFileSync(path.join(SERVER_MODULE_DIR, "build-info.json"), "utf8");
-    const j = JSON.parse(raw) as Partial<WandBuildInfo>;
-    return {
-      commit: typeof j.commit === "string" && j.commit ? j.commit : null,
-      builtAt: typeof j.builtAt === "string" && j.builtAt ? j.builtAt : null,
-      version: typeof j.version === "string" && j.version ? j.version : null,
-      channel: typeof j.channel === "string" && j.channel ? j.channel : null,
-    };
-  } catch {
-    // dev（tsx 跑 src/）或老版本（无此文件）时降级为全 null。
-    return { commit: null, builtAt: null, version: null, channel: null };
-  }
-}
-
-const BUILD_INFO = readBuildInfo();
 const DISPLAY_VERSION = BUILD_INFO.version || PKG_VERSION;
 const SERVER_INSTANCE_ID = crypto.randomUUID();
 
@@ -398,8 +384,11 @@ export async function startServer(
   if (!testMode && isDefaultConfigPath(configPath)) {
     const ensured = formatManagedSkillsEnsureLog(await ensureManagedSkills(configPath));
     if (ensured) process.stdout.write(ensured);
+    storage.syncGlobalKnowledge();
   }
   let notifyFreeDefaultChanged = (_employeeId: string): void => {};
+  let collectNativeRunArtifacts: (() => PiNativeGcReport | null) | null = null;
+  let collectPtyTmuxArtifacts: (() => PtyTmuxGcReport | null) | null = null;
   const systemFallback = testMode || process.env.WAND_DISABLE_OPENCODE_FALLBACK === "1" ? undefined : new OpenCodeFreeModelsService({ configDir,
     storage, inheritEnv: config.inheritEnv, onLog: line => process.stdout.write(`[wand] ${line}\n`),
     onModelsChanged(models) {
@@ -440,11 +429,11 @@ export async function startServer(
         freedBytes: results.reduce((total, result) => total + result.freedBytes, 0),
       };
     },
-    // Pi 原生回合目录（pi-native/）按回合数增长，同样交给同一轮定时回收。
-    collectNativeArtifacts: () => structuredSessions.collectNativeGarbage({
-      liveSessionIds: new Set(sessionRegistry.listSlim().map((session) => session.id)),
-      retentionMs: STORAGE_CLEANUP_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-    }),
+    // Pi 原生回合目录（pi-native/）和 structured-tmux 按回合数增长，交给同一轮定时回收。
+    // 只保护未归档会话。已删除或已归档的 slot 在 ack 完成、进程退出后整槽删除。
+    // 宿主在下面才包好，这里先留空，避免清理闭包引用尚未赋值的变量。
+    collectNativeArtifacts: () => collectNativeRunArtifacts?.() ?? null,
+    collectPtyTmuxArtifacts: () => collectPtyTmuxArtifacts?.() ?? null,
     // 旧版本遗留的迁移前快照：无上限堆积。迁移成功路径已在 storage-schema 修剪。
     pruneMigrationSnapshots: () => pruneMigrationBackups(databasePath, { dryRun: false }) });
   const localModels = new LocalModelSetupService({ configDir, decisions,
@@ -479,6 +468,14 @@ export async function startServer(
   const tmuxTerminals = options.terminalHost
     ? { host: ptyHosts.host, client: null, configPath, maintenanceTarget: undefined }
     : await createTmuxTerminalHost(configPath, ptyHosts.host);
+  if (tmuxEnabled()) {
+    const probe = probeTmuxSupport();
+    if (probe.ok) {
+      logInfo(`tmux runtime active (${probe.version}, ${probe.path}); terminal and structured CLI runs hosted.`);
+    } else {
+      wandWarn(`tmux 执行底座检查未通过: ${probe.error}`);
+    }
+  }
   const daemonAdmission = new DaemonAdmission();
   const terminalHost = daemonAdmission.terminal(tmuxTerminals.host);
   let decisionRuntime: DecisionRuntimeAccess | null = null;
@@ -495,12 +492,13 @@ export async function startServer(
     configPath, legacyStructuredHost, config.structured?.processHost,
   );
   let structuredHost = structuredHosts.host;
+  let structuredTmuxHost: StructuredTmuxHost | null = null;
   if (structuredHost?.persistent) {
     const enabled = tmuxEnabled();
-    const tmuxHost = new StructuredTmuxHost(configDir, structuredHost, enabled);
+    structuredTmuxHost = new StructuredTmuxHost(configDir, structuredHost, enabled);
     // Keep both routes available after disabling new tmux launches: existing
     // native and generic runs still belong to their original persistent owner.
-    structuredHost = new PiTmuxHost(configDir, tmuxHost, enabled && process.env.WAND_PI_NATIVE_TMUX !== "0");
+    structuredHost = new PiTmuxHost(configDir, structuredTmuxHost, enabled && process.env.WAND_PI_NATIVE_TMUX !== "0");
   }
   const structuredSessions = new StructuredSessionManager(
     storage, config, structuredLogger, {},
@@ -510,6 +508,30 @@ export async function startServer(
   // No SDK prewarm: Pi defaults to CLI. Only an explicit Wand Agent selection
   // probes the in-process harness; CLI startup/settings must not depend on it.
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
+  collectNativeRunArtifacts = () => {
+    const activeSessionIds = new Set(sessionRegistry.listSlim().filter((session) => !session.archived).map((session) => session.id));
+    const retentionMs = STORAGE_CLEANUP_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const hosts = [structuredHost, structuredTmuxHost].filter((host): host is StructuredExecHost => Boolean(host?.collectGarbage));
+    let removedSlots = 0;
+    let removedTurns = 0;
+    let freedBytes = 0;
+    let ran = false;
+    for (const host of hosts) {
+      const part = host.collectGarbage?.({ liveSessionIds: activeSessionIds, activeSessionIds, retentionMs });
+      if (!part) continue;
+      ran = true;
+      removedSlots += part.removedSlots;
+      removedTurns += part.removedTurns;
+      freedBytes += part.freedBytes;
+    }
+    const report: PiNativeGcReport | null = ran ? { removedSlots, removedTurns, freedBytes } : null;
+    return report;
+  };
+  collectPtyTmuxArtifacts = () => {
+    const activeSessionIds = new Set(sessionRegistry.listSlim().filter((session) => !session.archived).map((session) => session.id));
+    const retentionMs = STORAGE_CLEANUP_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    return PtyTmuxBackend.collectGarbage(configDir, { activeSessionIds, retentionMs });
+  };
   // 员工任务并发闸门：所有员工派发共用同一实例，排队状态随存储持久化。
   const taskExecutionQueue = new TaskExecutionQueue({
     storage, config, structured: structuredSessions, processes, sessions: sessionRegistry,
@@ -1040,14 +1062,14 @@ export async function startServer(
       while (structuredSessions.getCoreTurnStatus().hasActiveTurns) {
         await new Promise<void>((resolve) => setTimeout(resolve, 1000));
       }
-      // Do not dispose tools/services or arm the force-exit timer while a native
-      // turn is still running. The same barrier covers manual and auto restart.
+      // Do not dispose tools/services while a native turn is still running.
+      // The same barrier covers manual and auto restart.
       const plan = computeRelaunch({
         serviceInstalled: safeServiceInstalled(),
         globalCli: resolveGlobalWandCli(),
       });
-      const forceExitTimer = setTimeout(() => process.exit(0), 5000);
-      forceExitTimer.unref?.();
+      // Accepted iteration records can need the bounded Git compatibility retry;
+      // a force-exit timer here would discard them before close() drains the queue.
       await close();
       if (plan.mode === "spawn") {
         spawn(process.execPath, [plan.bin ?? "", ...(plan.args ?? [])], {
@@ -1096,6 +1118,7 @@ export async function startServer(
   await new Promise<void>((resolve, reject) => {
     const cleanupFailedListen = async (): Promise<void> => {
       shuttingDown = true;
+      stopIterationPrompts(storage);
       dingtalk.dispose();
       dingtalkDws.dispose();
       employeeImLifecycle.dispose();
@@ -1118,15 +1141,20 @@ export async function startServer(
       try { server.close(); } catch { /* noop */ }
       authService.dispose();
       taskExecutionQueue.dispose();
-      try { storage.close(); } catch { /* noop */ }
+      try {
+        await whenIterationPromptsSettled(storage);
+      } finally {
+        storage.close();
+      }
     };
     const onListenError = (err: NodeJS.ErrnoException): void => {
       feedback.capture("startup_failed", err);
       feedback.stop();
       server.off("error", onListenError);
+      const startupError = err.code === "EADDRINUSE" ? new PortInUseError(config.port, config.host) : err;
       void cleanupFailedListen().then(() => {
-        reject(err.code === "EADDRINUSE" ? new PortInUseError(config.port, config.host) : err);
-      }, reject);
+        reject(startupError);
+      }, cleanupError => reject(new AggregateError([startupError, cleanupError], "Server startup rollback failed")));
     };
     server.once("error", onListenError);
     server.listen(config.port, config.host, () => {
@@ -1193,6 +1221,7 @@ export async function startServer(
     storage,
     sessions: sessionRegistry,
     taskRetention: () => config.taskRetention,
+    releaseArchivedProviderHistory: (sessionIds: readonly string[]) => sessionRegistry.releaseArchivedProviderHistory(sessionIds),
   };
   const sweepRetention = createRetentionSweep(retentionDeps);
   runTaskRetentionSweep = () => {
@@ -1349,6 +1378,7 @@ export async function startServer(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       shuttingDown = true;
+      stopIterationPrompts(storage);
       feedback.stop();
       if (activeFeedback === feedback) activeFeedback = null;
       taskExecutionQueue.dispose();
@@ -1420,7 +1450,11 @@ export async function startServer(
         // Auth cleanup must precede DatabaseSync.close() so its cleanup timer
         // can never retain or call a closed storage instance.
         authService.dispose();
-        try { storage.close(); } catch { /* ignore */ }
+        try {
+          await whenIterationPromptsSettled(storage);
+        } finally {
+          storage.close();
+        }
       }
     })();
     return closePromise;

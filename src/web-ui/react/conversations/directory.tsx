@@ -3,7 +3,7 @@ import { GROUP_CHAT_VISIBLE } from "../../group-chat-visibility.js";
 import { usePageRouteState, routeEnum } from "../use-page-route";
 import { CopyPageLink } from "../ui/copy-page-link";
 import { Alert, Flex, Typography } from "antd";
-import { employeeConversationId } from "../../../conversation-types.js";
+import { newSessionController } from "../new-session/controller";
 import { employeeProfile } from "../agents/employee-profile-state";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { employeeCliLabel } from "../agents/employee-identity.js";
@@ -68,7 +68,7 @@ export function ConversationDirectory({ active = true, onSelect }: { active?: bo
         </Flex> : null}
         {visibleEmployees.map(e => <Flex key={e.id} align="center" gap={12} className="conversation-contact-row">
           <WandIconButton className="conversation-avatar-button" aria-label={`查看${e.name}的资料`} onClick={event => employeeProfile.open(e, event.currentTarget)}><EmployeeAvatar employee={e} size="md"/></WandIconButton>
-          <WandButton kind="ghost" className="conversation-contact-copy" onClick={() => onSelect(employeeConversationId(e.id))}>
+          <WandButton kind="ghost" className="conversation-contact-copy" onClick={() => newSessionController.open({ initialEmployeeId: e.id })}>
             <span><strong className="conversation-contact-name" title={e.name}>{e.name}</strong><span className="conversation-contact-duty" title={e.duty || "暂无职责说明"}>{e.duty || "暂无职责说明"}{e.archivedAt ? " · 已归档" : ""}</span>{e.agents[0] ? <span className="conversation-contact-engine">{employeeCliLabel(e.agents[0].provider, e.agents[0].engine)}{e.agents.length > 1 ? ` · ${e.agents.length - 1} 个备用` : ""}</span> : null}</span>
           </WandButton><WandButton kind="ghost" size="small" onClick={event => employeeProfile.open(e, event.currentTarget)}>资料</WandButton>
         </Flex>)}

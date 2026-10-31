@@ -1,6 +1,6 @@
 import { ClaudeModelInfo } from "../../types.js";
 import { variantsToEfforts } from "../thinking.js";
-import { cloneModels, OPENCODE_FALLBACK_MODELS } from "../shared.js";
+import { cloneModels, isRecord, OPENCODE_FALLBACK_MODELS } from "../shared.js";
 
 /**
  * `opencode models --verbose` 是「一行 id + 一段 JSON」。
@@ -9,10 +9,37 @@ import { cloneModels, OPENCODE_FALLBACK_MODELS } from "../shared.js";
 export function parseOpenCodeModelCatalog(stdout: string): ClaudeModelInfo[] {
   const verbose = parseOpenCodeVerboseModels(stdout);
   if (verbose.length) return verbose;
+  if (stdout.trimStart().startsWith("{")) return [{ id: "default", label: "跟随 OpenCode 默认", alias: true }];
   return parseOpenCodeModels(stdout);
 }
 /** Shared native catalog records; callers enforcing prices must never fall back to bare IDs. */
 export function parseOpenCodeModelRecords(stdout: string): Array<{ id: string; record: Record<string, unknown> }> {
+  if (stdout.trimStart().startsWith("{")) {
+    const response: unknown = JSON.parse(stdout);
+    if (!isRecord(response) || !Array.isArray(response.data)) throw new Error("OpenCode 模型目录响应无效。");
+    return response.data.flatMap((entry) => {
+      if (!isRecord(entry) || typeof entry.providerID !== "string" || typeof entry.id !== "string"
+        || entry.enabled === false) return [];
+      const id = `${entry.providerID}/${entry.id}`;
+      if (!/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(id)) return [];
+      // Project only model metadata; settings can contain credentials and never leave discovery.
+      const settings = isRecord(entry.settings) ? entry.settings : {};
+      const capabilities = isRecord(entry.capabilities) ? entry.capabilities : {};
+      const sdk = entry.package === "@opencode/ai/providers/openai-compatible" ? "@ai-sdk/openai-compatible"
+        : entry.package === "@opencode/ai/providers/openai" ? "@ai-sdk/openai" : undefined;
+      return [{ id, record: {
+        providerID: entry.providerID, status: entry.status, cost: entry.cost,
+        api: { id: entry.modelID, url: settings.baseURL, npm: sdk },
+        capabilities: {
+          input: { text: Array.isArray(capabilities.input) && capabilities.input.includes("text") },
+          output: { text: Array.isArray(capabilities.output) && capabilities.output.includes("text") },
+          toolcall: capabilities.tools === true,
+        },
+        variants: Array.isArray(entry.variants) ? entry.variants.flatMap((variant) =>
+          isRecord(variant) && typeof variant.id === "string" ? [variant.id] : []) : [],
+      } }];
+    });
+  }
   const lines = stdout.split(/\r?\n/);
   const found: Array<{ id: string; record: Record<string, unknown> }> = [];
   for (let index = 0; index < lines.length; index += 1) {

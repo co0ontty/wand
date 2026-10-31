@@ -116,6 +116,8 @@ export const TaskCommentStreamRow = React.forwardRef<HTMLDivElement, {
 }>(function TaskCommentStreamRow({ comment, sourceComment, onReply, onViewDispatch, expanded, onExpanded, onOpenTask }, ref): React.ReactElement {
   return <RowDisclosure id={`comment-${comment.id}`} summary={<Flex align="center" gap="small" wrap className="task-stream-row-line">
     <Typography.Text strong>{comment.authorName || "用户"}</Typography.Text>
+    {comment.purpose === "review" && <Tag color="blue">AI 验收</Tag>}
+    {comment.reviewWritebackPending && <Tag color="warning">验收结论待回填</Tag>}
     {comment.dispatch && <Tag color="purple">{comment.dispatch.state === "paused" ? `已暂停 · ${comment.dispatch.employeeName}` : comment.dispatch.state === "queued" ? `排队中 · 已派发给 ${comment.dispatch.employeeName}` : `已派发给 ${comment.dispatch.employeeName}`}</Tag>}
     {sourceComment && <Typography.Text type="secondary">回复 {sourceComment.authorName}：{sourceComment.body.slice(0, 100)}</Typography.Text>}
     <time dateTime={comment.createdAt}>{new Date(comment.createdAt).toLocaleString()}</time>
@@ -217,6 +219,7 @@ function TaskCommentDispatchStreamRowContent({ comment, onOpenSession, onLocateC
 }): React.ReactElement {
   const dispatch = comment.dispatch!;
   return <div ref={rowRef} className="task-stream-row" data-stream-row={`dispatch-${comment.id}`}>
+    {comment.reviewWritebackPending && <Alert type="warning" showIcon title="本轮已结束，验收结论尚未回填" description="任务未自动通过。请在原会话核对结果并通过当前任务级能力记录证据；不要重复派发或从模型正文猜结论。"/>}
     <TaskExecutionCard comment={comment} result={result} onOpenSession={onOpenSession} onLocateComment={onLocateComment}
       onLoadResult={onLoadResult} onOpenTask={onOpenTask}/>
     <Flex wrap gap="small" align="center" className="task-stream-row-actions">

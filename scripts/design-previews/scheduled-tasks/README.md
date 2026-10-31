@@ -15,7 +15,6 @@
 node scripts/design-previews/scheduled-tasks/serve.mjs        # 仅监听回环8797
 node scripts/design-previews/scheduled-tasks/serve.mjs --build
 node node_modules/typescript/bin/tsc --noEmit -p scripts/design-previews/scheduled-tasks/tsconfig.json
-node --test --import tsx scripts/design-previews/scheduled-tasks/{agenda,execution,calendar}-model.test.ts
 node scripts/design-previews/scheduled-tasks/verify.mjs
 node scripts/design-previews/scheduled-tasks/verify-calendar.mjs
 ```

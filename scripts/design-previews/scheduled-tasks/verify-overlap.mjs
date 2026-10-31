@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeFileSync } from "node:fs";
 import { startStudy, output } from "./serve-overlap.mjs";
-import { openPlushBrowser } from "../../../tests/helpers/run-plush-avatar-browser-harness.mjs";
+import { openPlushBrowser } from "../helpers/browser-harness.mjs";
 const study = await startStudy(0), browser = await openPlushBrowser(1440, 1100, true, "no-preference");
 const cases = [], e = browser.evaluate;
 const finishPopupMotion = () => e("Promise.allSettled([...document.querySelectorAll('.overlap-more-popover')].flatMap(node=>node.getAnimations({subtree:true})).filter(animation=>animation.effect.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished))");

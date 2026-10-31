@@ -513,6 +513,9 @@ interface DoPushOptions {
    *   - `"no"`：完全不递归（submodule 已由 `pushSubmodules` 单独推送过）。
    */
   recurseSubmodules?: "no" | "check";
+  /** Batch merge pins the exact reviewed commit and target; ignore push.default/matching. */
+  expectedBranch?: string;
+  expectedHead?: string;
 }
 
 /**
@@ -535,7 +538,15 @@ async function doPush(opts: DoPushOptions): Promise<PushOutcome> {
 
   try {
     if (pushCommits) {
-      if (hasUpstream) {
+      if (opts.expectedBranch && opts.expectedHead) {
+        const branch = await runGitAsync(["branch", "--show-current"], cwd);
+        const head = await runGitAsync(["rev-parse", "HEAD"], cwd);
+        if (branch !== opts.expectedBranch || head !== opts.expectedHead) throw new Error("当前分支或提交已经变化，未推送。");
+        let target = `refs/heads/${branch}`;
+        if (hasUpstream) target = await runGitAsync(["config", "--get", `branch.${branch}.merge`], cwd);
+        if (!target.startsWith("refs/heads/")) throw new Error("当前分支的上游目标不是有效分支，未推送。");
+        await pushRemoteRefs(cwd, pushRemote, [recurseFlag], [`${opts.expectedHead}:${target}`]);
+      } else if (hasUpstream) {
         await pushRemoteRefs(cwd, pushRemote, [recurseFlag]);
       } else {
         await pushRemoteRefs(cwd, pushRemote, ["-u", recurseFlag], ["HEAD"]);
@@ -637,6 +648,8 @@ interface PushOptions {
   submodule?: boolean;
   /** `submodule` + `pushTags` 时，要连带推送到 submodule 的同名 tag。 */
   tagName?: string;
+  expectedBranch?: string;
+  expectedHead?: string;
 }
 
 export async function runPush(opts: PushOptions): Promise<PushResult> {
@@ -670,7 +683,8 @@ export async function runPush(opts: PushOptions): Promise<PushResult> {
     };
   }
 
-  const outcome = await doPush({ cwd, pushCommits, pushTags, recurseSubmodules: submodule ? "no" : "check" });
+  const outcome = await doPush({ cwd, pushCommits, pushTags, recurseSubmodules: submodule ? "no" : "check",
+    expectedBranch: opts.expectedBranch, expectedHead: opts.expectedHead });
   return {
     ok: !outcome.error && subPushErrors.length === 0,
     pushedCommits: outcome.pushedCommits,

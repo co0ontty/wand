@@ -3,7 +3,7 @@ export const PAGE_ROUTE_EVENT = "wand:page-route";
 export const PAGE_ROUTE_KEYS = new Set([
   "view", "session", "workspace", "workspaceTask", "window", "tab", "task", "run", "team", "settings", "range",
   "sidebar", "sidebarQuery", "workspaceView", "conversation", "conversationTask", "conversationRun",
-  "chatFilter", "chatActivity", "chatQuery", "directoryTab", "directoryQuery",
+  "chatFilter", "chatActivity", "chatQuery", "chatTaskStage", "chatWorkspace", "chatRuntime", "directoryTab", "directoryQuery",
   "boardView", "q", "directory", "sort", "filters",
   "scheduleView", "scheduleQuery", "scheduleFilter", "scheduleRange", "scheduleDate",
   "teamQuery", "teamFilter", "teamPage", "settingsNested",
@@ -17,7 +17,7 @@ const VIEW_SCOPED: Array<{ views: string[]; keys: string[] }> = [
   { views: ["taskboard", "issues"], keys: ["boardView", "q", "sort", "filters", "directory", "task"] },
   { views: ["teams", "teamchat"], keys: ["team", "teamQuery", "teamFilter", "teamPage", "run"] },
   { views: ["schedules", "calendar"], keys: ["scheduleView", "scheduleQuery", "scheduleFilter", "scheduleRange", "scheduleDate", "range"] },
-  { views: ["chats", "contacts"], keys: ["conversation", "conversationTask", "conversationRun", "chatFilter", "chatActivity", "chatQuery", "directoryTab", "directoryQuery"] },
+  { views: ["chats", "contacts"], keys: ["conversation", "conversationTask", "conversationRun", "directoryTab", "directoryQuery"] },
 ];
 const COMPATIBILITY_KEYS = new Set([...LEGACY_KEYS, "embed", "reactUi", "nativeInput", "reactShell", "backToNative", "switchServer", "passthrough"]);
 

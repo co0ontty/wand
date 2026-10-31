@@ -63,6 +63,7 @@ export interface CreateWandTaskInput {
   priority?: WandTask["priority"];
   labels?: string[];
   dueDate?: string | null;
+  cwd?: string | null;
   milestoneId?: string | null;
   agent?: WandTaskAgent | null;
   executionSubject?: WandTask["executionSubject"];
@@ -71,11 +72,11 @@ export interface CreateWandTaskInput {
 export type WandTaskPatch = Partial<Pick<WandTask,
   "workspaceId" | "workspaceTaskId" | "parentTaskId" | "title" | "titleSource"
   | "autoTitleSignature" | "description" | "status" | "priority" | "labels"
-  | "dueDate" | "milestoneId" | "sortOrder" | "agent" | "executionSubject" | "acceptance">>;
+  | "dueDate" | "milestoneId" | "sortOrder" | "agent" | "executionSubject" | "acceptance" | "verification" | "deliveryRevision">>;
 
 export const WAND_TASK_FIELDS = `id, identifier, workspace_id, workspace_task_id, parent_task_id,
   title, title_source, auto_title_signature, description, status, priority, labels_json,
-  due_date, milestone_id, sort_order, agent_json, execution_subject_json, archived_at, created_at, updated_at, acceptance_json`;
+  due_date, milestone_id, sort_order, agent_json, execution_subject_json, archived_at, created_at, updated_at, acceptance_json, verification_json, delivery_revision`;
 
 // Shared metadata comes from the latest explicitly linked card, including meaningful NULLs.
 // The old container columns remain readable for legacy rows until the startup migration.
@@ -84,9 +85,9 @@ export const WORKSPACE_TASK_PROJECTION = `SELECT wt.id,
     ELSE COALESCE(card.workspace_id, '${GLOBAL_WORKSPACE_ID}') END AS workspace_id,
   CASE WHEN card.id IS NULL THEN wt.name ELSE card.title END AS name,
   CASE WHEN card.id IS NULL THEN wt.status
-    WHEN card.status IN ('done', 'archived') THEN 'done' ELSE 'active' END AS status,
+    WHEN card.status = 'archived' THEN 'done' ELSE 'active' END AS status,
   CASE WHEN card.id IS NULL THEN wt.milestone_id ELSE card.milestone_id END AS milestone_id,
-  wt.worktree_json, wt.layout_json, wt.cwd, wt.created_at, wt.last_opened_at, wt.layout_revision,
+  wt.container_kind, wt.worktree_json, wt.layout_json, wt.cwd, wt.created_at, wt.last_opened_at, wt.layout_revision,
   card.status AS card_status, wt.rowid AS _created_order
   FROM workspace_tasks wt LEFT JOIN wand_tasks card ON card.id = (
     SELECT id FROM wand_tasks WHERE workspace_task_id = wt.id

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { WandStorage } from "./storage.js";
-import { KnowledgeError, type KnowledgeScope } from "./knowledge-types.js";
+import { GLOBAL_KNOWLEDGE_OWNER_ID, KnowledgeError, type KnowledgeScope } from "./knowledge-types.js";
 
 async function readKnowledgeStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -29,7 +29,7 @@ function options(args: string[]) {
     else positional.push(arg);
   }
   const scope = flags["--scope"] ?? "personal";
-  if (scope !== "personal" && scope !== "project") throw new Error("--scope 只能为 personal 或 project。");
+  if (scope !== "global" && scope !== "personal" && scope !== "project") throw new Error("--scope 只能为 global、personal 或 project。");
   const revision = flags["--revision"] === undefined ? undefined : Number(flags["--revision"]);
   if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 1)) throw new Error("版本必须是读取文档时返回的正整数。");
   return { positional, stdin, scope: scope as KnowledgeScope, revision, title: flags["--title"], folder: flags["--folder"] };
@@ -47,7 +47,7 @@ export async function runEmployeeKnowledgeCli(command: string, args: string[]): 
     const legacy = access ? null : storage.resolveEmployeeKnowledgeAccess(token);
     if (!access && !legacy) throw new Error("知识库访问已失效，请等待新的会话执行；不能改存到其他归属。");
     if (legacy && opts.scope !== "personal") throw new Error("旧会话仅授权当前员工知识库，请新开一轮执行使用项目库。");
-    const ownerId = opts.scope === "personal" ? access?.employeeId ?? legacy : access?.workspaceId;
+    const ownerId = opts.scope === "global" ? GLOBAL_KNOWLEDGE_OWNER_ID : opts.scope === "personal" ? access?.employeeId ?? legacy : access?.workspaceId;
     if (!ownerId) throw new Error(`当前会话未绑定${opts.scope === "personal" ? "员工" : "项目"}知识库，不能改存到另一库。`);
     const scopedToken = access ? token : undefined;
     const [id, text] = opts.positional;
@@ -57,7 +57,7 @@ export async function runEmployeeKnowledgeCli(command: string, args: string[]): 
     };
     if (command === "knowledge:search") {
       assertNoEditFlags();
-      if (opts.positional.length > 1) throw new Error("用法：knowledge:search [查询文字] [--scope personal|project]。");
+      if (opts.positional.length > 1) throw new Error("用法：knowledge:search [查询文字] [--scope global|personal|project]。");
       const library = storage.readKnowledgeLibrary(opts.scope, ownerId, id ?? "", scopedToken);
       result = { scope: opts.scope, ownerId, total: library.total, matched: library.entries.length,
         entries: library.entries.map(({ id: entryId, title, folder, revision, updatedAt }) => ({ id: entryId, title, folder, revision, updatedAt })),

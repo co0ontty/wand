@@ -13,6 +13,7 @@ import { asRecord } from "./structured-content.js";
 import { AiCallTraceError, type AiCallTrace, type AiCallTraceFactory, type SystemAiPurpose } from "./system-ai-call.js";
 import type { OpenCodeTextRuntime, OpenCodeFreePool } from "./opencode-system-fallback.js";
 import { OPENCODE_FREE_GROUP_SELECTOR } from "./opencode-free-selection.js";
+import { openCodeMajorVersion, openCodeModelArgs } from "./opencode-cli.js";
 import {
   composeSystemFallback,systemPromptFlag,thinkingEffortToClaudeCliEffort,
   thinkingEffortToCodexReasoningEffort,thinkingEffortToGrokEffort,thinkingEffortToOpenCodeVariant,
@@ -431,11 +432,10 @@ async function callCodexText(request: AiTextRequest, cwd: string, opts: CliAiTex
 
 async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
   const agent = `wand-text-${randomUUID()}`;
-  const args = ["run", "--format", "json", "--pure", "--agent", agent];
-  const model = opts.model?.trim();
-  if (model && model !== "default") args.push("--model", model);
+  const major = await openCodeMajorVersion(buildChildEnv(opts.inheritEnv !== false), opts.signal);
+  const args = ["run", "--format", "json", major >= 2 ? "--standalone" : "--pure", "--agent", agent];
   const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");
-  if (variant) args.push("--variant", variant);
+  args.push(...openCodeModelArgs(opts.model, variant, major));
   const stdout = await runCliText("opencode", args, contentWithSystemPrompt("opencode", request), {
     cwd: opts.opencodeRuntime?.cwd ?? cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
@@ -449,14 +449,26 @@ async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: CliAi
       const base = opts.opencodeRuntime ? opts.opencodeRuntime.env(inherited) : inherited;
       const configured = base.OPENCODE_CONFIG_CONTENT ? JSON.parse(base.OPENCODE_CONFIG_CONTENT) : {};
       if (!configured || typeof configured !== "object" || Array.isArray(configured)) throw new Error("OpenCode 内联配置无效。");
-      return { ...base, OPENCODE_PERMISSION: JSON.stringify("ask"), OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      const textPrompt = "Return only the requested text. Do not use tools.";
+      const config = major >= 2 ? {
+        ...configured, update: "disable", share: "disabled",
+        policies: [...(Array.isArray(configured.policies) ? configured.policies : []),
+          { action: "tool.use", resource: "*", effect: "deny" }],
+        permissions: [{ action: "*", resource: "*", effect: "deny" }],
+        agents: {
+          ...configured.agents,
+          title: { ...configured.agents?.title, disabled: true },
+          [agent]: { mode: "primary", system: textPrompt, permissions: [{ action: "*", resource: "*", effect: "deny" }] },
+        },
+      } : {
         ...configured, permission: "ask", autoupdate: false, share: "disabled",
         agent: {
           ...configured.agent,
           title: { ...configured.agent?.title, disable: true },
-          [agent]: { mode: "primary", permission: "ask", prompt: "Return only the requested text. Do not use tools." },
+          [agent]: { mode: "primary", permission: "ask", prompt: textPrompt },
         },
-      }) };
+      };
+      return { ...base, OPENCODE_PERMISSION: JSON.stringify("ask"), OPENCODE_CONFIG_CONTENT: JSON.stringify(config) };
     },
   });
   const text = extractOpenCodeText(stdout);

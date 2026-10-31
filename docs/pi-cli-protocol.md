@@ -27,5 +27,3 @@ Pi CLI 的协议入口由 `pi-protocol-reader.ts` 负责。它按小块进行 SA
 旧 terminald/Render JSON 执行宿主没有原生文件字节游标，仍使用已有日志恢复；已经完成的历史同样直接读数据库。旧记录不会在普通 GET 中全表扫描、重建或修改。数据库迁移只增加断点表，不改写用户历史。
 
 ## 验证
-
-相关入口：`tests/pi-protocol-reader.test.ts`、`tests/pi-protocol-recovery.test.ts`、`tests/pi-output-file.test.ts`、`tests/pi-native-tmux.test.ts`、`tests/pi-cli-checkpoint.test.ts`。包括超 256 MiB 的工具事件、转义导致的 JSON 膨胀、聚合字段、错误与后续答复、旧历史恢复、原子提交、文件更换和真实零费用 Pi/tmux 回合。

@@ -20,7 +20,7 @@ export function EmployeeAvatar({ employee, provider, engine, size = "md", classN
   employee: { id: string; name: string; avatar?: string; systemKey?: string; agents?: ReadonlyArray<{ provider?: string; engine?: "cli" | "sdk" }> };
   provider?: string;
   engine?: AgentToolEngine | "core";
-  size?: "sm" | "md" | "lg" | "xl" | "chat" | "composer";
+  size?: "sm" | "md" | "lg" | "xl" | "chat" | "composer" | "toolbar";
   className?: string;
   renderMode?: "live" | "static";
   /** Audio playback owners may set this only while this employee is actually speaking. Work status is separate. */
@@ -33,7 +33,7 @@ export function EmployeeAvatar({ employee, provider, engine, size = "md", classN
   const cli = employeeAvatarProvider(employee, provider);
   const actualEngine = provider === undefined ? employee.agents?.[0]?.engine : engine;
   const cliLabel = cli ? employeeCliLabel(cli, actualEngine) : "";
-  const pixelSize = { sm: 36, md: 48, lg: 56, xl: 88, chat: 48, composer: 72 }[size];
+  const pixelSize = { sm: 36, md: 48, lg: 56, xl: 88, chat: 48, composer: 72, toolbar: 24 }[size];
   const providerSize = pixelSize <= 36 ? 14 : pixelSize >= 56 ? 20 : 18;
   const plush = resolveEmployeeAvatar(employee);
   const face = plush ? null : avatarFaceParts(employee, pixelSize);

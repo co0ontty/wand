@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createTerminalHost, TerminalDaemonClient } from "./terminal-daemon-client.js";
 import type { TerminalHost, TerminalSpawnRequest } from "./terminal-host.js";
-import { tmuxEnabled } from "./tmux-policy.js";
+import { probeTmuxSupport, tmuxEnabled } from "./tmux-policy.js";
 import type { DaemonMaintenanceTarget } from "./daemon-maintenance.js";
 import { logInfo } from "./runtime-log.js";
 
@@ -16,15 +16,19 @@ export async function createTmuxTerminalHost(
 }> {
   const daemonConfig = path.join(path.dirname(configPath), "tmux-terminald.json");
   const enabled = tmuxEnabled();
+  const probe = enabled ? probeTmuxSupport() : { ok: true };
   const { existsSync } = await import("node:fs");
   if (!enabled && !existsSync(path.join(path.dirname(configPath), "pty-tmux"))) {
     return { host: previous, client: null, configPath: daemonConfig };
   }
   let tmux: TerminalHost;
-  try { tmux = await createHost(daemonConfig, { persistent: true }); }
+  try {
+    if (!probe.ok) throw new Error(probe.error);
+    tmux = await createHost(daemonConfig, { persistent: true });
+  }
   catch (cause) {
     const unavailable = () => new Error("tmux terminal ownership is unavailable; refusing execution or maintenance", { cause });
-    logInfo("tmux terminal backend unavailable; existing other owners remain accessible, new PTY execution is blocked");
+    logInfo(`tmux terminal backend unavailable${probe.error ? `: ${probe.error}` : ""}; existing other owners remain accessible, new PTY execution is blocked`);
     return {
       configPath: daemonConfig,
       client: null,

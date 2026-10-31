@@ -3,7 +3,8 @@ import { configureWorkspacesRuntime } from "../react/workspaces/controller";
 import { clearActiveWorkspaceContext, setActiveWorkspaceContext, workspaceContextStore } from "../react/workspaces/workspace-context";
 import { persistActiveTask } from "./active-task";
 import { closeReactOverlays } from "./react-overlay-coordinator";
-import { dismissDrawerIfOverlay, getChatModelForProvider, goHome, loadSessions, refreshAll, selectSession, setChatModelForProvider, startSessionInCwd } from "./session-engine";
+import { clearDraftValueForSession, dismissDrawerIfOverlay, getChatModelForProvider, goHome, loadSessions, refreshAll, selectSession, setChatModelForProvider, startSessionInCwd, updateSessionSnapshot } from "./session-engine";
+import { compactSessionFetch } from "./session-fetch.js";
 import { getEffectiveCwd } from "./render";
 import { showToast } from "./notifications";
 import { confirmDelete } from "./sidebar";
@@ -222,13 +223,22 @@ export function installWorkspacesLegacyAdapter(): void {
       });
     },
     startWorktreeMergeAgent(payload) {
-      return startSessionInCwd(payload.cwd, {
-        workspaceId: payload.workspaceId,
-        provider: payload.provider,
-        mode: "managed",
-        systemPrompt: payload.systemPrompt,
-        initialInput: payload.prompt,
-      });
+      return compactSessionFetch(`/api/workspaces/${encodeURIComponent(payload.workspaceId)}/worktree-merge-agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          prompt: payload.prompt,
+          systemPrompt: payload.systemPrompt,
+        }),
+      })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) throw new Error(data.error);
+          clearDraftValueForSession(data.id, true);
+          updateSessionSnapshot(data);
+          return Promise.resolve(selectSession(data.id)).then(function() { return data; });
+        });
     },
     saveTaskLayout(layout: TaskWindowLayout | null, options?: TaskLayoutSaveOptions) {
       const taskId = currentTaskId();

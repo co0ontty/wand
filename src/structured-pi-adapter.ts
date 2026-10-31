@@ -276,6 +276,7 @@ export class PiRunner implements StructuredRunnerAdapter {
     const state: PiTurnState = {
       blocks: [],
       result: "",
+      inputMessageId: [...(context.session.messages ?? [])].reverse().find(turn => turn.role === "user")?.messageId,
       sessionId: context.session.claudeSessionId,
       model: context.session.selectedModel ?? undefined,
       phase: "responding",
@@ -297,7 +298,7 @@ export class PiRunner implements StructuredRunnerAdapter {
       observer,
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,
-      ...(nativePi ? { nativePi: true } : { stdoutFile: this.outputFiles?.(context.session.id) ?? {} }),
+      ...(nativePi ? { nativePi: true, nativeInputMessageId: state.inputMessageId } : { stdoutFile: this.outputFiles?.(context.session.id) ?? {} }),
       requestId: context.session.structuredState?.activeRequestId ?? undefined,
       createState: () => state,
       createProtocolReader: (onLine) => new PiProtocolReader(onLine),
@@ -307,8 +308,13 @@ export class PiRunner implements StructuredRunnerAdapter {
       },
       processLine: (line) => {
         if (!observer.isActive() || !line.trim()) return;
+        let event: Record<string, unknown>;
+        try { event = JSON.parse(line) as Record<string, unknown>; }
+        catch { unparsedOutput = true; return; }
+        // Control/storage failures must reach the pump and stop this execution;
+        // they cannot be swallowed as harmless unparsed provider stdout.
+        context.onPiInputEvent?.(event, state);
         try {
-          const event = JSON.parse(line) as Record<string, unknown>;
           observer.onEvent?.(event);
           protocolEventObserved = true;
           const eventError = applyPiEvent(state, event, new Date().toISOString());

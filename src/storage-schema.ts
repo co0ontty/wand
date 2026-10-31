@@ -260,6 +260,8 @@ const INIT_SQL = `
     agent_json TEXT,
     execution_subject_json TEXT,
     acceptance_json TEXT,
+    verification_json TEXT,
+    delivery_revision INTEGER NOT NULL DEFAULT 0,
     workspace_task_id TEXT,
     parent_task_id TEXT,
     title_source TEXT,

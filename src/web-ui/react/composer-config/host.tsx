@@ -39,7 +39,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
       title={mount.groupTitle}
     >
       {showRuntime && mount.toolVisible && (
-        <span data-mode-control-pill="tool" style={{ display: "inline-flex", width: 120, flexShrink: scope === "runtime" ? 1 : 0 }}
+        <span data-mode-control-pill="tool" style={{ display: "inline-flex", width: scope === "runtime" ? 32 : 120, flexShrink: 0 }}
           aria-live="polite" aria-busy={mount.toolDisabled || undefined} title={mount.toolStatus}>
           {selectHost(scope, "tool")}
         </span>
@@ -56,7 +56,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
         <>
           <span
             data-mode-control-pill="model"
-            style={{ minWidth: scope === "runtime" ? 60 : 120 }}
+            style={{ minWidth: scope === "runtime" ? 0 : 120 }}
             title={`模型：${mount.modelFullLabel}`}
           >
             {selectHost(scope, "model")}
@@ -75,11 +75,10 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
               <WandIcon name="refresh" size={13} strokeWidth={1.9} />
             </WandIconButton>
           )}
-          {scope === "runtime" ? <span className="composer-runtime-separator" aria-hidden="true">·</span> : null}
           <span
             aria-label={`思考深度：${mount.thinkingLabel}`}
             data-mode-control-pill="thinking"
-            style={{ minWidth: 68 }}
+            style={{ minWidth: scope === "runtime" ? 0 : 68 }}
             data-thinking={mount.thinkingValue}
             title={`思考深度：${mount.thinkingLabel}`}
           >

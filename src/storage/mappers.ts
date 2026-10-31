@@ -327,7 +327,11 @@ export function parseSessionOptions(raw: string | null): DurableSessionOptions {
       isRecord(value) && (value.source === "user" || value.source === "task")
         && typeof value.enqueuedAt === "string" && Number.isFinite(Date.parse(value.enqueuedAt))
         ? { source: value.source, enqueuedAt: value.enqueuedAt,
-          ...(Number.isSafeInteger(value.sequence) && Number(value.sequence) >= 0 ? { sequence: Number(value.sequence) } : {}) }
+          ...(Number.isSafeInteger(value.sequence) && Number(value.sequence) >= 0 ? { sequence: Number(value.sequence) } : {}),
+          ...(isRecord(value.handoff) && typeof value.handoff.id === "string"
+            && typeof value.handoff.boundaryId === "string" && typeof value.handoff.incarnationId === "string"
+            ? { handoff: { id: value.handoff.id, boundaryId: value.handoff.boundaryId, incarnationId: value.handoff.incarnationId } } : {}),
+          ...(typeof value.acceptanceId === "string" ? { acceptanceId: value.acceptanceId } : {}) }
         : { source: "task", enqueuedAt: new Date(0).toISOString() });
   }
   if (isAutonomyPolicy(parsed.autonomyPolicy)) options.autonomyPolicy = parsed.autonomyPolicy;
@@ -495,6 +499,7 @@ export function mapWorkspaceRow(row: WorkspaceRow): Workspace {
 }
 
 export interface WorkspaceTaskRow {
+  container_kind?: string;
   id: string;
   workspace_id: string;
   name: string;
@@ -535,6 +540,7 @@ export function mapWorkspaceTaskRow(row: WorkspaceTaskRow): WorkspaceTask {
     id: row.id,
     workspaceId: row.workspace_id,
     name: row.name,
+    kind: row.container_kind === "section" ? "section" : "task",
     worktree: mapWorkspaceTaskWorktree(row.worktree_json),
     ...(cwd ? { cwd } : {}),
     milestoneId: typeof row.milestone_id === "string" && row.milestone_id ? row.milestone_id : null,

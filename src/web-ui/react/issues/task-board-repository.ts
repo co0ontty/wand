@@ -32,6 +32,16 @@ export interface WandTaskListed extends WandTaskListedDto {
   sessions: IssueSessionSummary[];
 }
 
+export type TaskWorkflowAction = "submit" | "pass" | "fail" | "return" | "accept";
+
+export interface TaskWorkflowPatch {
+  action: TaskWorkflowAction;
+  requestId: string;
+  expectedUpdatedAt: string;
+  evidence: string;
+  blocker: string;
+}
+
 export interface IssueSessionSummary {
   employeeId?: string;
   employeeName?: string;
@@ -86,6 +96,7 @@ export const taskBoardRepository = {
   },
   create(input: {
     workspaceId: string | null;
+    cwd?: string | null;
     /** 可选：留空时由服务端按描述自动生成标题。 */
     title: string;
     description: string;
@@ -115,7 +126,7 @@ export const taskBoardRepository = {
     return requestJson<{ comments: WandTaskComment[]; totalCount: number; nextCursor: string | null }>(`/api/wand-tasks/${encodeURIComponent(id)}/comments${query.size ? `?${query}` : ""}`, { signal: options.signal, cache: "no-store" })
       .catch(error => { if (error instanceof HttpResponseError && error.status === 404) return { comments: [], totalCount: 0, nextCursor: null }; throw error; });
   },
-  commentStatuses(id: string, commentIds: string[], options: { signal?: AbortSignal } = {}): Promise<{ comments: Array<{ id: string; dispatch: WandTaskComment["dispatch"] }> }> {
+  commentStatuses(id: string, commentIds: string[], options: { signal?: AbortSignal } = {}): Promise<{ comments: Array<{ id: string; dispatch: WandTaskComment["dispatch"]; reviewWritebackPending?: boolean }> }> {
     if (!commentIds.length) return Promise.resolve({ comments: [] });
     const query = new URLSearchParams({ ids: [...new Set(commentIds)].join(",") });
     return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}/comments/status?${query}`, { signal: options.signal, cache: "no-store" });
@@ -212,14 +223,24 @@ export const taskBoardRepository = {
     return { input: JSON.parse(new TextDecoder().decode(input)) as Record<string, unknown>,
       content: JSON.parse(new TextDecoder().decode(content)), is_error: first.is_error, pending: first.pending };
   },
-  postComment(id: string, input: { requestId: string; body: string; employeeId?: string | null; sourceCommentId?: string | null }): Promise<{ comment: WandTaskComment; replayed: boolean }> {
+  async postComment(id: string, input: { requestId: string; body: string; employeeId?: string | null; sourceCommentId?: string | null; purpose?: "execution" | "review" }): Promise<{ comment: WandTaskComment; replayed: boolean }> {
+    if (input.purpose === "review" && input.employeeId) {
+      const task = await this.get(id);
+      if (task.workflowVersion !== 1 || task.id !== id) throw new HttpResponseError("服务端尚不支持验收派发；草稿与原请求标识已保留，请更新服务并核对，不会改用普通执行。", 409);
+    }
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}/comments`, jsonBody(input));
   },
   update(
     id: string,
-    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent" | "executionSubject" | "acceptance">>,
+    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent" | "executionSubject" | "acceptance">> & { workflow?: TaskWorkflowPatch },
   ): Promise<WandTaskListed> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, jsonBody(patch, "PATCH"));
+  },
+  workflow(id: string, input: TaskWorkflowPatch): Promise<WandTaskListed> {
+    return this.update(id, { workflow: input }).then(task => {
+      if (task.workflowVersion !== 1 || task.id !== id) throw new HttpResponseError("服务端不支持两级验收或回执不匹配当前任务；请更新服务并核对，不能将此响应当作验收通过。", 409);
+      return task;
+    });
   },
   remove(id: string): Promise<void> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => undefined);
@@ -230,11 +251,15 @@ export const taskBoardRepository = {
       { method: "DELETE" });
   },
   /** 用选定的 CLI 工具开一个结构化会话；prompt 作为这次派发的首条消息。 */
-  dispatch(
+  async dispatch(
     id: string,
     agent: WandTaskAgent | null,
-    extra?: { prompt?: string; workspaceId?: string | null; subject?: TaskExecutionSubject; useEmployeeDefaults?: boolean },
+    extra?: { prompt?: string; workspaceId?: string | null; subject?: TaskExecutionSubject; useEmployeeDefaults?: boolean; purpose?: "execution" | "review" },
   ): Promise<IssueDispatchResult> {
+    if (extra?.purpose === "review") {
+      const task = await this.get(id);
+      if (task.workflowVersion !== 1 || task.id !== id) throw new HttpResponseError("服务端尚不支持验收派发；请更新服务并核对，不会改用普通执行。", 409);
+    }
     const requestId = dispatchRequests.get(id) ?? crypto.randomUUID();
     dispatchRequests.set(id, requestId);
     return mutateTask<IssueDispatchResult>(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
@@ -242,6 +267,7 @@ export const taskBoardRepository = {
       ...(agent ? { agent } : {}),
       ...(extra?.subject ? { subject: extra.subject } : {}),
       ...(extra?.useEmployeeDefaults ? { useEmployeeDefaults: true } : {}),
+      ...(extra?.purpose ? { purpose: extra.purpose } : {}),
       ...(extra?.prompt != null ? { prompt: extra.prompt } : {}),
       ...(extra && "workspaceId" in extra ? { workspaceId: extra.workspaceId ?? null } : {}),
     })).then(result => { dispatchRequests.delete(id); return result; }).catch(error => {

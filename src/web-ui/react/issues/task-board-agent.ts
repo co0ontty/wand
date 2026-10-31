@@ -13,6 +13,8 @@ import {
   DEFAULT_WAND_TASK_AGENT_KIND,
   DEFAULT_WAND_TASK_AGENT_MODE,
   isClosedWandTaskStatus,
+  taskWorkflowStage,
+  taskHumanAccepted,
   isWandTaskAgentEngine,
   isWandTaskAgentKind,
   normalizeWandTaskAgentMode,
@@ -120,7 +122,8 @@ export function issueAgentModeOptions(provider: IssueAgentProvider): WandSelectO
  * 工作流阶段表示等待用户确认；业务完成只由 acceptance.acceptedAt 表达，归档只是收纳。
  * 列名、概览指标、进度图例、过滤开关、状态标签都必须从这里取，不得再写第二份。
  */
-const ISSUE_DONE_LABEL = "等待验收";
+const ISSUE_REVIEW_LABEL = "待验收";
+const ISSUE_READY_LABEL = "待归档";
 
 export const ISSUE_COLUMNS: ReadonlyArray<{
   status: WandTaskStatus;
@@ -129,13 +132,14 @@ export const ISSUE_COLUMNS: ReadonlyArray<{
 }> = [
   { status: "backlog", label: "待立项", empty: "还没有待立项的任务" },
   { status: "todo", label: "等待认领", empty: "还没有等待认领的任务" },
-  { status: "doing", label: "处理中", empty: "暂无处理中的任务" },
-  { status: "done", label: ISSUE_DONE_LABEL, empty: `还没有${ISSUE_DONE_LABEL}的任务` },
+  { status: "doing", label: "执行中", empty: "暂无执行中的任务" },
+  { status: "review", label: ISSUE_REVIEW_LABEL, empty: `还没有${ISSUE_REVIEW_LABEL}的任务` },
+  { status: "ready", label: ISSUE_READY_LABEL, empty: `还没有${ISSUE_READY_LABEL}的任务` },
 ];
 
 /** 状态界面名的唯一出口；列名与「等待验收」相关的文案都从这里读。 */
 export function issueStatusLabel(status: WandTaskStatus): string {
-  return ISSUE_COLUMNS.find((column) => column.status === status)?.label
+  return ISSUE_COLUMNS.find((column) => column.status === taskWorkflowStage(status))?.label
     ?? (status === "archived" ? ISSUE_ARCHIVE_COLUMN.label : status);
 }
 
@@ -196,7 +200,7 @@ export function issueParentOptions(
         assertTaskHierarchy(tasks, childId, task.id, workspaceId === undefined ? task.workspaceId : workspaceId,
           task.id === currentParentId ? existing : undefined);
       } catch (error) { reason = error instanceof Error ? error.message : "父任务无效"; }
-      const status = ISSUE_COLUMNS.find(column => column.status === task.status)?.label ?? "归档";
+      const status = issueStatusLabel(task.status);
       const children = tasks.filter(child => child.parentTaskId === task.id).length;
       return {
         value: task.id,
@@ -523,14 +527,14 @@ export function normalizeIssueAgentDefaults(payload: unknown): WandTaskAgent {
 }
 
 export function emptyIssueGroups<T>(): Record<WandTaskStatus, T[]> {
-  return { backlog: [], todo: [], doing: [], done: [], archived: [] };
+  return { backlog: [], todo: [], doing: [], review: [], ready: [], done: [], archived: [] };
 }
 
 export function groupIssuesByStatus<T extends { status: WandTaskStatus }>(
   tasks: readonly T[],
 ): Record<WandTaskStatus, T[]> {
   const grouped = emptyIssueGroups<T>();
-  for (const task of tasks) grouped[task.status].push(task);
+  for (const task of tasks) grouped[taskWorkflowStage(task.status)].push(task);
   return grouped;
 }
 
@@ -571,7 +575,7 @@ export function issueWorkspaceIdFromSelect(value: string): string | null {
 }
 
 
-export type IssueBoardView = "dashboard" | "board" | "list" | "gantt";
+export type IssueBoardView = "dashboard" | "board" | "list" | "gantt" | "archive";
 
 export const ISSUE_BOARD_VIEWS: ReadonlyArray<{ value: IssueBoardView; label: string }> = [
   { value: "dashboard", label: "概览" },
@@ -614,11 +618,11 @@ export interface IssueBoardDisplay {
 
 export const DEFAULT_ISSUE_BOARD_DISPLAY: IssueBoardDisplay = {
   body: false,
-  mainStatuses: ["backlog", "todo", "doing", "done"],
+  mainStatuses: ["backlog", "todo", "doing", "review", "ready"],
 };
 
 const ISSUE_BOARD_DISPLAY_KEY = "wand.issue-board.display";
-const ISSUE_BOARD_DISPLAY_VERSION = 2;
+const ISSUE_BOARD_DISPLAY_VERSION = 3;
 const LEGACY_DEFAULT_MAIN_STATUSES: WandTaskStatus[] = ["todo", "doing", "done"];
 
 export function readIssueBoardDisplay(): IssueBoardDisplay {
@@ -629,12 +633,12 @@ export function readIssueBoardDisplay(): IssueBoardDisplay {
     const parsed = JSON.parse(raw) as Partial<IssueBoardDisplay> & { version?: number };
     const allowed = new Set(ISSUE_COLUMNS.map((column) => column.status));
     const parsedStatuses = Array.isArray(parsed.mainStatuses)
-      ? parsed.mainStatuses.filter((status): status is WandTaskStatus => allowed.has(status as WandTaskStatus))
+      ? parsed.mainStatuses.map(status => status === "done" ? "review" as const : status).filter(status => allowed.has(status))
       : [];
     const migratedLegacyDefault = parsed.version !== ISSUE_BOARD_DISPLAY_VERSION
       && Array.isArray(parsed.mainStatuses)
       && LEGACY_DEFAULT_MAIN_STATUSES.every((status) => parsed.mainStatuses!.includes(status))
-      && parsed.mainStatuses.length === LEGACY_DEFAULT_MAIN_STATUSES.length;
+      && (parsed.mainStatuses.length === LEGACY_DEFAULT_MAIN_STATUSES.length || parsed.mainStatuses.length === LEGACY_DEFAULT_MAIN_STATUSES.length + 1 && parsed.mainStatuses.includes("backlog"));
     const mainStatuses = migratedLegacyDefault
       ? DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses
       : parsedStatuses.length > 0 ? parsedStatuses : DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses;
@@ -732,7 +736,8 @@ export interface IssueBoardStats {
   backlog: number;
   todo: number;
   doing: number;
-  done: number;
+  review: number;
+  ready: number;
   overdue: number;
   high: number;
   remaining: number;
@@ -744,25 +749,28 @@ export function issueBoardStats<T extends {
   priority: WandTaskPriority;
   dueDate: string | null;
   acceptance?: WandTask["acceptance"];
+  deliveryRevision?: number;
 }>(tasks: readonly T[]): IssueBoardStats {
   const today = isoDate(new Date());
   let todo = 0;
   let doing = 0;
-  let done = 0;
+  let review = 0;
+  let ready = 0;
   let backlog = 0;
   let overdue = 0;
   let high = 0;
-  const accepted = tasks.filter(task => Boolean(task.acceptance?.acceptedAt)).length;
+  const accepted = tasks.filter(taskHumanAccepted).length;
   for (const task of tasks) {
     if (task.status === "archived") continue;
     if (task.status === "backlog") backlog += 1;
     else if (task.status === "todo") todo += 1;
     else if (task.status === "doing") doing += 1;
-    else if (task.status === "done") done += 1;
+    else if (taskWorkflowStage(task.status) === "review") review += 1;
+    else if (task.status === "ready") ready += 1;
     if (issueIsOverdue(task.dueDate, task.status, today)) overdue += 1;
     if (task.priority === "high" || task.priority === "urgent") high += 1;
   }
-  return { total: backlog + todo + doing + done, backlog, todo, doing, done, overdue, high, accepted, remaining: backlog + todo + doing };
+  return { total: tasks.length, backlog, todo, doing, review, ready, overdue, high, accepted, remaining: backlog + todo + doing + review + ready };
 }
 
 export interface IssueProgressPoint {
@@ -772,7 +780,7 @@ export interface IssueProgressPoint {
   completed: number;
 }
 
-export function issueProgressSeries<T extends { status: WandTaskStatus; createdAt: string; updatedAt: string; acceptance?: WandTask["acceptance"] }>(
+export function issueProgressSeries<T extends { status: WandTaskStatus; createdAt: string; updatedAt: string; acceptance?: WandTask["acceptance"]; deliveryRevision?: number }>(
   tasks: readonly T[],
 ): IssueProgressPoint[] {
   const now = Date.now();
@@ -792,7 +800,7 @@ export function issueProgressSeries<T extends { status: WandTaskStatus; createdA
         if (task.status === "todo" || task.status === "backlog") return false;
         return (Number.isNaN(updatedAt) ? createdAt : Math.max(createdAt, updatedAt)) <= timestamp;
       }).length,
-      completed: tasks.filter((task) => task.acceptance?.acceptedAt && new Date(task.acceptance.acceptedAt).getTime() <= timestamp).length,
+      completed: tasks.filter((task) => taskHumanAccepted(task) && new Date(task.acceptance!.acceptedAt!).getTime() <= timestamp).length,
     };
   });
 }
@@ -816,14 +824,11 @@ export function issueGanttSpan<T extends { createdAt: string; dueDate: string | 
   start: string,
   days: number,
 ): { offset: number; length: number } {
-  const created = isoDate(new Date(task.createdAt));
-  const finish = task.dueDate || (isClosedWandTaskStatus(task.status) ? isoDate(new Date(task.updatedAt)) : addIsoDays(created, 3));
+  if (!task.dueDate) return { offset: 0, length: 0 };
   const startMs = new Date(`${start}T12:00:00`).getTime();
-  const createdMs = new Date(`${created}T12:00:00`).getTime();
-  const finishMs = new Date(`${finish}T12:00:00`).getTime();
-  const offset = Math.max(0, Math.round((createdMs - startMs) / 86_400_000));
-  const end = Math.min(days, Math.max(offset + 1, Math.round((finishMs - startMs) / 86_400_000) + 1));
-  return { offset: Math.min(offset, days - 1), length: Math.max(1, end - Math.min(offset, days - 1)) };
+  const dueMs = new Date(`${task.dueDate}T12:00:00`).getTime();
+  const offset = Math.round((dueMs - startMs) / 86_400_000);
+  return Number.isFinite(offset) && offset >= 0 && offset < days ? { offset, length: 1 } : { offset: 0, length: 0 };
 }
 
 export function formatIssueStamp(value: string | null | undefined): string {

@@ -6,6 +6,7 @@ import { normalizeWandTaskAgentMode, type WandTaskAgent } from "../../../task-ty
 import { agentToolDisplayName } from "../../provider-identity.js";
 import { useSiliconEmployees } from "../agents/employee-repository";
 import { EmployeeAvatar } from "../agents/employee-avatar";
+import { ComposerEmployeeButton } from "../composer-sender/employee";
 import { teamChatComposer } from "../ai-teams/composer-bridge";
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
@@ -33,9 +34,9 @@ import type { NewSessionCreated, NewSessionCreateRequest, NewSessionDefaults, Ne
 import { installNewWorkStyles } from "./start-styles";
 import { hasAutomaticPermissions, modeHint } from "./permission-summary";
 import { NewWorkComposer, type NewWorkComposerHandle } from "./composer";
+import { pasteFilesInto } from "../composer-paste";
 import { TaskCreationPage } from "../issues/task-create";
 import { useImeGuard } from "../composer-sender/ime-guard";
-import { NewWorkIntent } from "./intent";
 
 export interface NewSessionHostProps { repository?: NewSessionRepository; }
 
@@ -251,6 +252,18 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
         : form?.specifiedCli ? { type: "cli" as const, id: form.provider } : undefined,
       agent: runtimeAgent } };
   const createTask = (): void => { newSessionController.open({ ...taskOptions, newTask: true }); };
+  // 粘贴与文件选择共用同一条附件入口：禁用态、5 个上限、10 MB 与图片预览只在这里判一次。
+  const addFiles = (incoming: readonly File[]): void => {
+    if (disabled) return;
+    const available = Math.max(0, 5 - teamChatComposer.read(key).attachments.length);
+    if (incoming.length > available) setError("一次最多添加 5 个附件。");
+    for (const [index, file] of incoming.slice(0, available).entries()) {
+      if (file.size > 10 * 1024 * 1024) { setError(`文件超过 10 MB：${file.name || "图片"}`); continue; }
+      const name = file.name && file.name !== "blob" ? file.name : `image-${Date.now()}-${index + 1}.${file.type.split("/")[1] || "png"}`;
+      teamChatComposer.edit(key, { addAttachment: { file, name, size: file.size,
+        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null } });
+    }
+  };
 
   const directoryPickerContent = defaults && form ? (
     <Flex vertical gap={12} className="new-work-paths"><Typography.Text strong>运行目录</Typography.Text>
@@ -294,7 +307,6 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   return <section className="new-work-page conversation-root" aria-label="新建工作">
     {loading || employeesLoading ? <Flex align="center" justify="center" flex={1}><Spin/><span>正在读取工作配置…</span></Flex> : form && defaults ? <>
       <div className="new-work-context">
-        {!controller.workspaceTaskId ? <NewWorkIntent task={false} options={taskOptions} disabled={disabled}/> : null}
         <h1>{form.kind === "structured" ? <>
           今天你想与
           <WandPopover ariaLabel="选择新工作员工" side="bottom" open={titleSubjectOpen} onOpenChange={setTitleSubjectOpen}
@@ -326,24 +338,6 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
         {submitStatus ? <Flex vertical gap={4} className="new-work-submit-status" id={submitStatusId}>
           <Typography.Text type={unknown ? "warning" : "secondary"} role="status">{submitStatus}</Typography.Text>
         </Flex> : null}
-        <div className="new-work-context-bar">
-          <div className="new-work-location">
-          <WandPopover ariaLabel="新工作运行目录" side="top" open={directoryOpen} onOpenChange={setDirectoryOpen}
-            trigger={<WandButton kind="ghost" disabled={disabled || !!form.workspaceTaskId} className="new-work-directory" title={form.cwd}><WandIcon name="folder"/><span>{projectName}</span><WandIcon name="chevronDown" size={12}/></WandButton>}>
-            {directoryPickerContent}
-          </WandPopover>
-          </div>
-          {form.kind === "structured" ? <><WandPopover ariaLabel="新工作执行对象" side="top" open={subjectOpen} onOpenChange={setSubjectOpen}
-            trigger={<WandButton kind="ghost" disabled={disabled} className="new-work-person">{employee ? <EmployeeAvatar employee={employee} size="sm"/> : <WandIcon name="spark"/>}<span className="new-work-person-name" title={employee?.name || team?.name}>{employee?.name || team?.name || (form.specifiedCli ? agentToolDisplayName(form.provider, form.engine) : "选择员工")}</span><WandIcon name="chevronDown" size={14}/></WandButton>}>
-            {subjectPickerContent}
-          </WandPopover></> : null}
-          <WandPopover ariaLabel="新工作界面设置" side="top" open={settingsOpen} onOpenChange={setSettingsOpen} trigger={<WandIconButton aria-label="新工作设置" disabled={disabled}><WandIcon name="gear"/></WandIconButton>}>
-            <Flex vertical gap={12}><Typography.Text strong>工作类型</Typography.Text>
-              <WandTabs ariaLabel="工作类型" value={form.kind} onValueChange={value => chooseKind(value as NewSessionKind)}
-                tabs={[{ value: "structured", label: "对话", content: null, disabled }, { value: "pty", label: "CLI 终端", content: null, disabled }, { value: "shell", label: "空白终端", content: null, disabled }]}/>
-            </Flex>
-          </WandPopover>
-        </div>
         {employeesError ? <Alert type="error" title={employeesError}/> : null}
         {error ? <Alert type="error" role="alert" title={error}/>: null}
         {accepted.current ? <WandButton onClick={() => {
@@ -356,11 +350,13 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
         }}>打开已创建的工作（本页草稿保留）</WandButton> : null}
           <NewWorkComposer ref={sender} text={draft.text} disabled={disabled} placeholder={placeholder}
             expanded={editor.expanded} onTextChange={text => teamChatComposer.edit(key, { text })} onSubmit={() => void submit()}
+            onPaste={pasteFilesInto(addFiles)}
             header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((item, index) => ({ index, name: item.name, sizeLabel: `${item.size} B`, previewUrl: item.previewUrl || null }))} onRemove={index => { if (!disabled) teamChatComposer.edit(key, { removeAttachment: index }); }}/> : null}
             footer={<Flex justify="space-between" align="center" className="conversation-action-row"><Flex gap={4} align="center" className="new-work-actions">
               <WandPopover ariaLabel="新工作更多选项" side="top" open={moreOpen} onOpenChange={setMoreOpen} trigger={<WandIconButton aria-label="更多新工作选项" disabled={disabled}><ConversationMorphIcon active={moreOpen} from="plus" to="close"/></WandIconButton>}>
                 <Flex vertical gap={12}>
-                  <WandButton disabled={disabled || form.kind === "shell"} onClick={() => { setMoreOpen(false); files.current?.click(); }}><WandIcon name="paperclip"/>添加附件</WandButton>
+                  <div className="composer-editor-menu">{editor.control}</div>
+                  {form.kind !== "shell" && runtimeAgent && !form.teamId ? <div className="composer-menu-runtime"><ConversationExecutionSelectors agent={form.kind === "pty" ? { ...runtimeAgent, engine: "cli" } : runtimeAgent} catalog={catalog} disabled={disabled} cliOnly={form.kind === "pty"} onChange={setPreference}/></div> : null}
                   {permission ? <Typography.Text type="secondary">{modeHint(permission)}</Typography.Text> : null}
                   {employee && (preference || form.specifiedCli) ? <WandButton aria-label="恢复员工默认执行配置" disabled={disabled} onClick={() => {
                     setPreference(undefined);
@@ -369,13 +365,30 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
                   }}>恢复员工默认执行配置</WandButton> : null}
                 </Flex>
               </WandPopover>
-              <span className="new-work-permission" data-automatic={!form.teamId && permission && hasAutomaticPermissions(permission)} title={form.teamId ? "团队成员分别使用各自的执行配置" : permission ? modeHint(permission) : undefined}><WandIcon name="shield" size={14}/>{form.teamId ? "团队配置" : permissionLabel}</span>
-              <span className="composer-edit-action">{editor.control}</span>
+              <WandIconButton aria-label="添加附件" className="new-work-attach" disabled={disabled || form.kind === "shell"} onClick={() => { setMoreOpen(false); files.current?.click(); }}><WandIcon name="paperclip" size={18}/></WandIconButton>
+              <WandButton kind="ghost" className="new-work-permission" data-automatic={!form.teamId && permission && hasAutomaticPermissions(permission)} disabled={disabled}
+                aria-label={`运行权限：${form.teamId ? "团队配置" : permissionLabel}`} title={form.teamId ? "团队成员分别使用各自的执行配置" : permission ? modeHint(permission) : undefined}
+                onClick={() => setMoreOpen(!moreOpen)}><WandIcon name="shield" size={14}/><span>{form.teamId ? "团队配置" : permissionLabel}</span></WandButton>
             </Flex><Flex gap={4} align="center" className="new-work-send-actions">
+            {form.kind === "structured" && employee ? <WandPopover ariaLabel="新工作执行对象" side="top" open={subjectOpen} onOpenChange={setSubjectOpen}
+              trigger={<ComposerEmployeeButton employee={employee} disabled={disabled} aria-label={`选择员工：${employee.name}`}/>}>{subjectPickerContent}</WandPopover> : null}
             {form.kind !== "shell" && runtimeAgent && !form.teamId ? <div className="conversation-runtime-summary"><ConversationExecutionSelectors agent={form.kind === "pty" ? { ...runtimeAgent, engine: "cli" } : runtimeAgent} catalog={catalog} disabled={disabled} cliOnly={form.kind === "pty"} onChange={setPreference}/></div> : null}
             <ConversationSubmitButton stops={false} phase={submitting ? "sending" : error ? "failed" : "idle"} label={form.kind === "structured" ? "开始工作" : "打开终端"} disabled={disabled || !valid} disabledReason={submitReason} descriptionId={submitStatus ? submitStatusId : undefined} onClick={() => void submit()}/></Flex></Flex>}/>
+        {/* 面板外只留真实上下文，和新任务页同一行位置；不占输入面高度。 */}
+        <div className="wand-composer-context">
+          <WandPopover ariaLabel="新工作运行目录" side="top" open={directoryOpen} onOpenChange={setDirectoryOpen}
+            trigger={<WandButton kind="ghost" disabled={disabled || !!form.workspaceTaskId} className="new-work-directory conversation-directory-trigger" title={form.cwd}><WandIcon name="folder" size={14}/><span>{projectName}</span><WandIcon name="chevronDown" size={12}/></WandButton>}>
+            {directoryPickerContent}
+          </WandPopover>
+          <WandPopover ariaLabel="新工作界面设置" side="top" open={settingsOpen} onOpenChange={setSettingsOpen} trigger={<WandIconButton aria-label="新工作设置" className="new-work-kind-settings" disabled={disabled}><WandIcon name="gear" size={14}/></WandIconButton>}>
+            <Flex vertical gap={12}><Typography.Text strong>工作类型</Typography.Text>
+              <WandTabs ariaLabel="工作类型" value={form.kind} onValueChange={value => chooseKind(value as NewSessionKind)}
+                tabs={[{ value: "structured", label: "对话", content: null, disabled }, { value: "pty", label: "CLI 终端", content: null, disabled }, { value: "shell", label: "空白终端", content: null, disabled }]}/>
+            </Flex>
+          </WandPopover>
+        </div>
         <input ref={files} hidden type="file" multiple onChange={event => {
-          if (!disabled) for (const file of Array.from(event.currentTarget.files || [])) teamChatComposer.edit(key, { addAttachment: { file, name: file.name, size: file.size } });
+          addFiles(Array.from(event.currentTarget.files || []));
           event.currentTarget.value = "";
         }}/>
       </div>

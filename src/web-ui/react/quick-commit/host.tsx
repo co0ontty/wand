@@ -1,7 +1,8 @@
 import "../issues/library-layout";
 import { TaskForm, TaskTextArea } from "../issues/task-form";
 import { WandInput } from "../ui";
-import { Alert, Card, Empty, Flex, Form, List, Radio, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Card, Empty, Flex, Form, List, Spin, Tag, Typography } from "antd";
+import { MagneticGitDock } from "./magnetic-dock";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -12,13 +13,12 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
-import { WandButton, WandDialogSurface, WandSwitch } from "../ui";
+import { WandButton, WandDialogSurface } from "../ui";
 import { quickCommitController, quickCommitStore } from "./controller";
 import {
   buildQuickCommitInput,
   buildQuickCommitOutcome,
   hasQuickCommitChanges,
-  QUICK_COMMIT_ACTIONS,
   quickCommitActionMeta,
   quickCommitStatusBadge,
 } from "./model";
@@ -124,7 +124,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const [status, setStatus] = useState<QuickCommitStatus | null>(null);
   const [form, setForm] = useState<QuickCommitForm>(EMPTY_FORM);
   const [action, setAction] = useState<QuickCommitAction>("commit");
-  const [includeSubmodule, setIncludeSubmodule] = useState(false);
   const [iterationContext, setIterationContext] = useState<QuickCommitIterationContext | null>(null);
   const [contextMode, setContextMode] = useState<QuickCommitContextMode>("iteration");
   // null = 用服务端给的默认勾选（上次提交以来的条目）；用户一动手就换成显式集合。
@@ -170,13 +169,14 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setResultNote("");
     setForm(EMPTY_FORM);
     setAction("commit");
-    setIncludeSubmodule(false);
     setIterationContext(null);
     setSelectedOverride(null);
     setIncludeDiff(false);
     setGeneratedFrom(null);
     setOutcome(null);
     setLoading(true);
+    setSubmitting(false);
+    setPushing(false);
     setGenerating(false);
     setError("");
     setPushError("");
@@ -215,7 +215,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     return () => window.cancelAnimationFrame(frame);
   }, [controller.open, loading, outcome, status]);
 
-  const selectedMeta = useMemo(() => quickCommitActionMeta(action), [action]);
   const busy = submitting || pushing;
   const canCommit = hasQuickCommitChanges(status) && !busy && !loading;
   const selectedEntryIds = useMemo<ReadonlySet<string>>(
@@ -281,7 +280,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   }
 
   async function generateSuggestion(): Promise<void> {
-    if (!context || generating || submitting) return;
+    if (!context || generating || busy) return;
     generationAbort.current?.abort();
     const abort = new AbortController();
     generationAbort.current = abort;
@@ -310,7 +309,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     }
   }
 
-  async function submit(event?: FormEvent<HTMLFormElement>): Promise<void> {
+  async function submit(event?: FormEvent<HTMLFormElement>, chosenAction = action, includeSubmodule = false): Promise<void> {
     event?.preventDefault();
     if (!context || !status || !canCommit || submitting || submitPhase === "pending" || submitPhase === "success") return;
     const operationSessionId = context.sessionId;
@@ -326,11 +325,11 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     try {
       const response = await repository.commit(
         operationSessionId,
-        buildQuickCommitInput(form, action, includeSubmodule, contextSelection(), includeDiff),
+        buildQuickCommitInput(form, chosenAction, includeSubmodule, contextSelection(), includeDiff),
       );
       if (!response.ok) throw new Error("快捷提交失败。");
       const nextOutcome = buildQuickCommitOutcome(
-        action,
+        chosenAction,
         includeSubmodule,
         form,
         status,
@@ -344,7 +343,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         if (ownsCurrentSurface()) {
           setSubmitResult(hash ? `已提交 ${hash}` : "已提交");
           // 原来只有 toast 承载的细节（submodule 数、tag、是否推送）改在页脚原位显示。
-          setResultNote(`${summary}${selectedMeta.push ? "，已推送" : ""}。`);
+          setResultNote(`${summary}${quickCommitActionMeta(chosenAction).push ? "，已推送" : ""}。`);
           setSubmitPhase("success");
           setSubmitting(false);
         }
@@ -413,7 +412,37 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     } catch (pushFailure) {
       if (ownsCurrentSurface()) setPushError(describeError(pushFailure, "推送失败。"));
     } finally {
-      setPushing(false);
+      if (ownsCurrentSurface()) setPushing(false);
+    }
+  }
+
+  async function runWorktreeOrPush(worktree: boolean): Promise<void> {
+    if (!context || !status || busy || submitPhase === "success") return;
+    const sessionId = context.sessionId;
+    const revision = controller.revision;
+    const owns = () => quickCommitController.isCurrentLifecycle(revision, sessionId);
+    setSubmitting(true);
+    setSubmitPhase("pending");
+    setSubmitResult(worktree ? "合并并推送中…" : "推送中…");
+    setError("");
+    try {
+      if (worktree) {
+        if (!repository.mergeWorktrees) throw new Error("服务端暂不支持合并 Worktree，请更新后重试。");
+        const response = await repository.mergeWorktrees(sessionId, { expectedBranch: status.branch, expectedHead: status.head });
+        if (!response.ok || !response.pushed) throw new Error(response.error || "合并或推送未完成。");
+        if (owns()) setResultNote(`已合并 ${response.mergedBranches.length} 个 Worktree 到 ${response.targetBranch} 并推送。`);
+      } else {
+        const response = await repository.push(sessionId, { pushCommits: true, pushTags: false, submodule: false, tag: "" });
+        if (!response.ok || response.error) throw new Error(response.error || "推送未完成。");
+        if (owns()) setResultNote("已推送当前分支。");
+      }
+      if (owns()) { setSubmitPhase("success"); setSubmitResult("已完成"); }
+      void reloadStatus(sessionId);
+    } catch (failure) {
+      if (owns()) { setError(describeError(failure, "操作失败。")); setSubmitPhase("error"); setSubmitResult("操作失败"); }
+      void reloadStatus(sessionId);
+    } finally {
+      if (owns()) setSubmitting(false);
     }
   }
 
@@ -477,28 +506,16 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
                   onChange={(event) => setForm({ ...form, tag: event.currentTarget.value, tagEdited: true })}/>
               </Form.Item>
             </Card>
-            <Card size="small" title="执行动作">
-              <Flex vertical gap={16}>
-                <Radio.Group className="wand-quick-action-grid" aria-label="执行动作" name="wand-quick-action" value={action} disabled={!hasQuickCommitChanges(status) || busy} onChange={(event) => setAction(event.target.value)}>
-                  <Space wrap>{QUICK_COMMIT_ACTIONS.map((item) => <Radio key={item.action} value={item.action}>{item.label}</Radio>)}</Space>
-                </Radio.Group>
-                {status.hasSubmodule ? <Flex justify="space-between" align="center" gap={12}>
-                  <Flex vertical><Typography.Text strong>包含 Submodule</Typography.Text><Typography.Text type="secondary">递归执行 commit、tag 和 push。</Typography.Text></Flex>
-                  <WandSwitch id="wand-quick-submodule" checked={includeSubmodule} disabled={busy} ariaLabel="包含 Submodule" onCheckedChange={setIncludeSubmodule}/>
-                </Flex> : null}
-
-              </Flex>
-            </Card>
+            <MagneticGitDock hasChanges={hasQuickCommitChanges(status)} hasSubmodule={status.hasSubmodule}
+              worktreeCount={status.worktreeCount ?? 0} ahead={status.ahead}
+              busy={busy || generating || submitPhase === "success"}
+              feedback={submitPhase === "idle" ? "" : submitResult || "执行中…"}
+              onAction={(nextAction, submodule) => { setAction(nextAction); void submit(undefined, nextAction, submodule); }}
+              onWorktree={() => void runWorktreeOrPush(true)} onPush={() => void runWorktreeOrPush(false)}/>
             {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
             <Flex component="footer" justify="space-between" gap={12} align="center" wrap className="wand-dialog-sticky-actions">
               <Typography.Text type="secondary">{resultNote || (hasQuickCommitChanges(status) ? "⌘/Ctrl + Enter 快速执行" : "工作区干净，无可提交改动")}</Typography.Text>
-              <Space>
-                <WandButton kind="ghost" onClick={() => quickCommitController.close()}>取消</WandButton>
-                <WandButton kind="primary" type="submit" aria-live="polite" disabled={!canCommit || submitting || submitPhase === "pending" || submitPhase === "success"}>
-                  {submitPhase === "pending" ? (form.message.trim() ? "执行中…" : "AI 生成 + 提交中…")
-                    : submitPhase === "success" || submitPhase === "error" ? submitResult : selectedMeta.verb}
-                </WandButton>
-              </Space>
+              <WandButton kind="ghost" onClick={() => quickCommitController.close()}>关闭</WandButton>
             </Flex>
           </Flex>
         </TaskForm>

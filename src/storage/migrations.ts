@@ -431,4 +431,60 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
       db.exec("ALTER TABLE wand_tasks ADD COLUMN retention_archive_version INTEGER");
     }
   } },
+  { version: 24, name: "task-two-level-workflow", up: db => {
+    const columns = new Set((db.prepare("PRAGMA table_info(wand_tasks)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!columns.has("verification_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN verification_json TEXT");
+    if (!columns.has("delivery_revision")) db.exec("ALTER TABLE wand_tasks ADD COLUMN delivery_revision INTEGER NOT NULL DEFAULT 0");
+    const dispatchColumns = new Set((db.prepare("PRAGMA table_info(wand_task_comment_dispatches)").all() as Array<{ name: string }>).map(column => column.name));
+    if (!dispatchColumns.has("purpose")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN purpose TEXT NOT NULL DEFAULT 'execution'");
+    if (!dispatchColumns.has("review_revision")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN review_revision INTEGER");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_workflow_events (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES wand_tasks(id) ON DELETE CASCADE,
+        request_id TEXT NOT NULL, signature TEXT NOT NULL, action TEXT NOT NULL,
+        actor_kind TEXT NOT NULL, actor_id TEXT, source_session_id TEXT,
+        evidence TEXT NOT NULL, blocker TEXT NOT NULL, created_at TEXT NOT NULL, result_json TEXT NOT NULL,
+        UNIQUE(task_id, request_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_workflow_history ON task_workflow_events(task_id, created_at);
+      CREATE TABLE IF NOT EXISTS task_workflow_access (
+        token_hash TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES wand_tasks(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+        employee_id TEXT, workspace_task_id TEXT NOT NULL, delivery_revision INTEGER NOT NULL, expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_workflow_access_session ON task_workflow_access(session_id);
+      CREATE TRIGGER IF NOT EXISTS revoke_task_workflow_access_on_binding
+      AFTER UPDATE OF workspace_id, workspace_task_id, session_options, automation_id ON command_sessions
+      WHEN OLD.workspace_id IS NOT NEW.workspace_id OR OLD.workspace_task_id IS NOT NEW.workspace_task_id
+        OR OLD.automation_id IS NOT NEW.automation_id
+        OR (CASE WHEN json_valid(OLD.session_options) THEN json_extract(OLD.session_options, '$.employeeId') END)
+          IS NOT (CASE WHEN json_valid(NEW.session_options) THEN json_extract(NEW.session_options, '$.employeeId') END)
+      BEGIN DELETE FROM task_workflow_access WHERE session_id = NEW.id; END;
+    `);
+  } },
+  { version: 25, name: "structured-input-acceptances", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS structured_input_acceptances (
+      session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+      idempotency_key TEXT NOT NULL, signature TEXT NOT NULL, receipt_json TEXT NOT NULL,
+      PRIMARY KEY(session_id, idempotency_key)
+    );
+    CREATE TRIGGER IF NOT EXISTS delete_structured_input_acceptances
+      AFTER DELETE ON command_sessions BEGIN
+        DELETE FROM structured_input_acceptances WHERE session_id = OLD.id;
+      END;
+  `) },
+  { version: 26, name: "global-knowledge", up: db => {
+    db.exec(`CREATE TABLE IF NOT EXISTS global_knowledge (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL CHECK(owner_id = 'global'),
+      title TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '', content TEXT NOT NULL,
+      content_hash TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, updated_at TEXT, UNIQUE(owner_id, content_hash)
+    )`);
+    const columns = db.prepare("PRAGMA table_info(knowledge_access)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "global_revision")) {
+      // Existing grants predate global access and must not silently acquire it.
+      db.exec("ALTER TABLE knowledge_access ADD COLUMN global_revision INTEGER NOT NULL DEFAULT -1");
+    }
+  } },
+  { version: 27, name: "workspace-session-sections", up: db => db.exec("ALTER TABLE workspace_tasks ADD COLUMN container_kind TEXT NOT NULL DEFAULT 'task'") },
 ];

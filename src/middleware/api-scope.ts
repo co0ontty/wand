@@ -124,6 +124,7 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   { prefix: "/api/wand-milestones", scope: "sessions" },
   { prefix: "/api/workspaces", scope: "sessions" },
   { prefix: "/api/workspace-tasks", scope: "sessions" },
+  { prefix: "/api/workspace-sections", scope: "sessions" },
   { prefix: "/api/inbox", scope: "sessions" },
   { prefix: "/api/missions", scope: "sessions" },
   { prefix: "/api/attention", scope: "sessions" },

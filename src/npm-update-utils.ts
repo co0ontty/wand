@@ -38,6 +38,7 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import type { WandBuildInfo } from "./build-info.js";
 import { buildChildEnv } from "./env-utils.js";
 import { whichSync } from "./path-repair.js";
 import { getErrorMessage } from "./error-utils.js";
@@ -162,26 +163,58 @@ export function selectPackageUpdateInfo(
   return { ...info, channel, stableVersion: stable, betaVersion: beta };
 }
 
+type UpdateBuildIdentity = Pick<WandBuildInfo, "version" | "commit">;
+
+function localDebugCommit(info: PackageUpdateInfo, build?: UpdateBuildIdentity): string | null {
+  if (!info.updateAvailable || !/^\d+\.\d+\.\d+-debug\./.test(info.current)
+    || !build?.commit || build.version === null || cleanVersion(build.version) !== info.current
+    || !/^[a-f0-9]{40}$/i.test(build.commit)) return null;
+  return build.commit.toLowerCase();
+}
+
+function applySourceCommit(info: PackageUpdateInfo, currentCommit: string, candidateCommit: string): PackageUpdateInfo {
+  // start.sh uses X.Y.Z-debug while CI uses X.Y.(Z+1)-beta, even for the same
+  // commit. A published copy must not replace local changes on that commit.
+  return candidateCommit.trim().toLowerCase() === currentCommit ? { ...info, updateAvailable: false } : info;
+}
+
 export async function checkPackageUpdateAsync(
   currentVersion: string,
   channel: UpdateChannel,
   timeoutMs = NPM_VIEW_TIMEOUT_MS,
+  build?: UpdateBuildIdentity,
 ): Promise<PackageUpdateInfo> {
   const [stable, beta] = await Promise.all([
     viewPackageVersionAsync("stable", timeoutMs),
     channel === "beta" ? viewPackageVersionAsync("beta", timeoutMs) : null,
   ]);
-  return selectPackageUpdateInfo(currentVersion, channel, stable, beta);
+  const info = selectPackageUpdateInfo(currentVersion, channel, stable, beta);
+  const commit = localDebugCommit(info, build);
+  if (!commit) return info;
+  try {
+    const { stdout } = await execFileAsync(npmBin(), ["view", info.installSpec, "gitHead"], {
+      timeout: timeoutMs, env: getChildEnv(), maxBuffer: INSTALL_MAX_BUFFER,
+    });
+    return applySourceCommit(info, commit, stdout);
+  } catch {
+    // Missing provenance does not prove equal source; retain version ordering.
+    return info;
+  }
 }
 
 export function checkPackageUpdateSync(
   currentVersion: string,
   channel: UpdateChannel,
   timeoutMs = NPM_VIEW_TIMEOUT_MS,
+  build?: UpdateBuildIdentity,
 ): PackageUpdateInfo {
   const stable = viewPackageVersionSync("stable", timeoutMs);
   const beta = channel === "beta" ? viewPackageVersionSync("beta", timeoutMs) : null;
-  return selectPackageUpdateInfo(currentVersion, channel, stable, beta);
+  const info = selectPackageUpdateInfo(currentVersion, channel, stable, beta);
+  const commit = localDebugCommit(info, build);
+  if (!commit) return info;
+  const result = runNpmSync(["view", info.installSpec, "gitHead"], timeoutMs);
+  return result.status === 0 ? applySourceCommit(info, commit, result.stdout ?? "") : info;
 }
 
 export function resolveInstalledNpmPrefix(

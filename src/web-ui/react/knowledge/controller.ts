@@ -63,7 +63,8 @@ export class KnowledgeController {
     try {
       const owners = await this.repository.owners();
       if (token !== this.reads) return;
-      const candidates = namespace.scope === "project" ? owners.projects : owners.employees;
+      const candidates = namespace.scope === "global" ? (owners.global ? [owners.global] : []) : namespace.scope === "project" ? owners.projects : owners.employees;
+      if (namespace.scope === "global" && !owners.global) throw new Error("服务器尚不支持全局知识库，请更新服务端。");
       if (!namespace.ownerId) namespace.ownerId = candidates[0]?.id ?? "";
       this.publish({ owners, ownerId: namespace.ownerId });
       if (!namespace.ownerId) { this.publish({ library: null, loading: false }); return; }
@@ -123,6 +124,7 @@ export class KnowledgeController {
       this.publish({ draft: null, selectedId: entry.id, notice: "已保存", library: state.library ? { ...state.library,
         entries: [entry, ...state.library.entries.filter(item => item.id !== entry.id)], total: state.library.total + (state.library.entries.some(item => item.id === entry.id) ? 0 : 1) } : null });
       if (this.snapshot.open) this.route({ knowledgeDocument: entry.id }, "replace");
+      if (state.scope === "global") await this.load();
     } catch (error) {
       if (namespaceKey(state) === namespaceKey(this.snapshot) && this.snapshot.draft === draft) this.publish({ error: errorText(error), conflict: (error as { status?: number }).status === 409 });
     } finally {
@@ -158,7 +160,8 @@ export function installKnowledgeHistory(): void {
   const restore = (): void => {
     const params = new URLSearchParams(pageSearch());
     if (params.get("view") !== "knowledge") { knowledgeController.restore(false); return; }
-    knowledgeController.restore(true, params.get("knowledgeScope") === "personal" ? "personal" : "project", params.get("knowledgeOwner") ?? "", params.get("knowledgeDocument") ?? "");
+    const scope = params.get("knowledgeScope");
+    knowledgeController.restore(true, scope === "global" || scope === "personal" ? scope : "project", params.get("knowledgeOwner") ?? "", params.get("knowledgeDocument") ?? "");
   };
   subscribePageRoute(restore); restore();
   subscribeKnowledgeChanges(namespace => {

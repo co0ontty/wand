@@ -36,10 +36,6 @@ URL 是导航和结果筛选的状态来源；直接访问显式 URL 时不合�
 
 ## 回归入口
 
-- `tests/web-ui-task-board-history.test.ts`：兼容链接、历史恢复、凭据过滤。
-- `tests/web-page-navigation.test.ts`：实体关系、无效目标、窗口/窗格、迟到恢复失效。
-- `tests/web-url-browser.test.ts`：实际 React 页面详情、搜索、视图、新标签、历史、设置和侧栏；以 `WAND_URL_BROWSER=1` 启用，`WAND_PLAYWRIGHT_MODULE` 可指定本机 Playwright 安装。
-- `tests/settings-navigation.test.ts`：设置与底层目标共存。
 - macOS `TaskBoardTests.testDesktopPageLinksKeepStableTargetsAndStripCredentials`。
 
 以上测试不需要真实模型。最终已安装服务的交付验收与本地资产覆盖开发验证必须分别报告。

@@ -158,18 +158,88 @@ export function iterationPromptTitle(prompt: string): string {
   return clip(summarizeSessionTitleFromInput(cleaned) || cleaned, WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH);
 }
 
-let writeChain: Promise<void> = Promise.resolve();
+interface IterationPromptQueue {
+  chain: Promise<void>;
+  accepting: boolean;
+  storageClosed: boolean;
+  pending: number;
+  failed: number;
+  firstError?: unknown;
+}
 
-/** 测试用：等待排队中的记录写入全部落地。 */
-export function whenIterationPromptsSettled(): Promise<void> {
-  return writeChain;
+const writeQueues = new WeakMap<WandStorage, IterationPromptQueue>();
+// Only used by the legacy no-argument test helper; scheduling is storage-local.
+const activeWriteQueues = new Set<IterationPromptQueue>();
+
+function iterationPromptQueue(storage: WandStorage): IterationPromptQueue {
+  let queue = writeQueues.get(storage);
+  if (!queue) {
+    queue = { chain: Promise.resolve(), accepting: true, storageClosed: false, pending: 0, failed: 0 };
+    writeQueues.set(storage, queue);
+    const owned = queue;
+    storage.onClose?.(() => {
+      owned.accepting = false;
+      owned.storageClosed = true;
+    });
+  }
+  return queue;
+}
+
+function assertIterationStorageOpen(queue: IterationPromptQueue): void {
+  if (queue.storageClosed) throw new Error("Iteration prompt storage closed before its queue drained");
+}
+
+function enqueueIterationPrompt(queue: IterationPromptQueue, run: () => Promise<void>, failure: string): void {
+  queue.pending += 1;
+  activeWriteQueues.add(queue);
+  const execute = async (): Promise<void> => {
+    try {
+      assertIterationStorageOpen(queue);
+      await run();
+    } catch (error) {
+      if (queue.failed === 0) queue.firstError = error;
+      queue.failed += 1;
+      console.error(failure, getErrorMessage(error));
+    } finally {
+      queue.pending -= 1;
+      if (queue.pending === 0) activeWriteQueues.delete(queue);
+    }
+  };
+  queue.chain = queue.chain.then(execute);
+}
+
+async function settleIterationPrompts(queue: IterationPromptQueue): Promise<void> {
+  await queue.chain;
+  if (queue.failed > 0) {
+    throw new Error(`Failed to record ${queue.failed} iteration prompt(s)`, { cause: queue.firstError });
+  }
+}
+
+/** Stop admission synchronously; accepted records must still drain before storage.close(). */
+export function stopIterationPrompts(storage: WandStorage): void {
+  iterationPromptQueue(storage).accepting = false;
+}
+
+/**
+ * Wait for this storage's accepted records and surface write failures. Call stop first
+ * during shutdown. Drain has no discard deadline: each Git attempt is bounded by
+ * REPO_KEY_TIMEOUT_MS (including the compatibility retry), and every accepted record
+ * is awaited before the DB closes. No argument is retained for existing test cleanup.
+ */
+export function whenIterationPromptsSettled(storage?: WandStorage): Promise<void> {
+  if (storage) {
+    const queue = writeQueues.get(storage);
+    return queue ? settleIterationPrompts(queue) : Promise.resolve();
+  }
+  return Promise.all([...activeWriteQueues].map(settleIterationPrompts)).then(() => {});
 }
 
 /**
  * 记录一条提示词。调用点都在用户提交输入的热路径上，所以它：
  *   - 同步过滤没信息量的输入（y / 单条命令 / 斜杠命令），不产生任何 IO；
  *   - 把真正的写入排进串行队列，不阻塞输入；
- *   - 永不抛错（记录失败不该影响会话）。
+ *   - 异步失败不打断会话，但会记录错误并使排空失败；
+ *   - 返回是否已接收，过滤或停止接收后返回 false。
  */
 export function recordIterationPrompt(
   storage: WandStorage,
@@ -177,12 +247,14 @@ export function recordIterationPrompt(
   prompt: string,
   source: WandIterationPromptSource = "session",
   options: { skipFilter?: boolean } = {},
-): void {
+): boolean {
   const raw = prompt?.trim();
-  if (!raw || explicitEmployeeMemoryContent(raw)) return;
+  if (!raw || explicitEmployeeMemoryContent(raw)) return false;
   // 明确记忆不是代码变更意图，不进入共享迭代/commit 摘要。
   // 与会话标题共用同一把尺子：太短的输入不值得进迭代记录。
-  if (!options.skipFilter && !shouldGenerateSessionTopicFromInput(raw)) return;
+  if (!options.skipFilter && !shouldGenerateSessionTopicFromInput(raw)) return false;
+  const queue = iterationPromptQueue(storage);
+  if (!queue.accepting) return false;
   // Only real interactive user prompts; never learn from team-generated instructions or shell input.
   if (((!session.sessionSource || session.sessionSource === "interactive") && !session.automationId
     || session.automationId?.startsWith("wand-task:"))
@@ -191,37 +263,35 @@ export function recordIterationPrompt(
     recordUserMemory(storage, "session.prompt", raw, session.id);
   }
   const run = async (): Promise<void> => {
-    try {
-      const detail = clip(cleanIterationPromptText(raw), WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH);
-      const title = iterationPromptTitle(raw) || clip(detail, WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH);
-      if (!title) return;
-      const previous = storage.latestIterationPromptForSession(session.id);
-      if (
-        previous
-        && previous.title === title
-        && previous.detail === detail
-        && Date.now() - Date.parse(previous.createdAt) < DUPLICATE_WINDOW_MS
-      ) {
-        return;
-      }
-      const target = resolveIterationPromptTarget(storage, session);
-      const repoKey = await repoKeyForCwd(session.cwd);
-      storage.createIterationPrompt({
-        milestoneId: target.milestoneId,
-        workspaceId: target.workspaceId,
-        sessionId: session.id,
-        taskId: target.taskId,
-        repoKey,
-        cwd: session.cwd ?? "",
-        title,
-        detail,
-        source,
-      });
-    } catch (error) {
-      console.error(`[Iteration] Failed to record prompt for session ${session.id}:`, getErrorMessage(error));
+    const detail = clip(cleanIterationPromptText(raw), WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH);
+    const title = iterationPromptTitle(raw) || clip(detail, WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH);
+    if (!title) return;
+    const previous = storage.latestIterationPromptForSession(session.id);
+    if (
+      previous
+      && previous.title === title
+      && previous.detail === detail
+      && Date.now() - Date.parse(previous.createdAt) < DUPLICATE_WINDOW_MS
+    ) {
+      return;
     }
+    const target = resolveIterationPromptTarget(storage, session);
+    const repoKey = await repoKeyForCwd(session.cwd);
+    assertIterationStorageOpen(queue);
+    storage.createIterationPrompt({
+      milestoneId: target.milestoneId,
+      workspaceId: target.workspaceId,
+      sessionId: session.id,
+      taskId: target.taskId,
+      repoKey,
+      cwd: session.cwd ?? "",
+      title,
+      detail,
+      source,
+    });
   };
-  writeChain = writeChain.then(run, run);
+  enqueueIterationPrompt(queue, run, `[Iteration] Failed to record prompt for session ${session.id}:`);
+  return true;
 }
 
 /** 任务 / 派发这类没有会话输入的入口：直接用任务标题当记录。 */
@@ -237,32 +307,32 @@ export function recordIterationPromptForTask(
     detail?: string;
     source: WandIterationPromptSource;
   },
-): void {
+): boolean {
   const raw = input.detail?.trim() || input.title.trim();
-  if (!raw) return;
+  if (!raw) return false;
+  const queue = iterationPromptQueue(storage);
+  if (!queue.accepting) return false;
   const run = async (): Promise<void> => {
-    try {
-      const milestone = input.milestoneId
-        ? storage.getWandMilestone(input.milestoneId)
-        : null;
-      const fallback = milestone ?? storage.ensureDefaultWandMilestone();
-      const repoKey = await repoKeyForCwd(input.cwd);
-      storage.createIterationPrompt({
-        milestoneId: fallback.id,
-        workspaceId: input.workspaceId ?? null,
-        sessionId: input.sessionId ?? null,
-        taskId: input.taskId ?? null,
-        repoKey,
-        cwd: input.cwd ?? "",
-        title: clip(cleanIterationPromptText(input.title), WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH),
-        detail: clip(cleanIterationPromptText(raw), WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH),
-        source: input.source,
-      });
-    } catch (error) {
-      console.error("[Iteration] Failed to record task prompt:", getErrorMessage(error));
-    }
+    const milestone = input.milestoneId
+      ? storage.getWandMilestone(input.milestoneId)
+      : null;
+    const fallback = milestone ?? storage.ensureDefaultWandMilestone();
+    const repoKey = await repoKeyForCwd(input.cwd);
+    assertIterationStorageOpen(queue);
+    storage.createIterationPrompt({
+      milestoneId: fallback.id,
+      workspaceId: input.workspaceId ?? null,
+      sessionId: input.sessionId ?? null,
+      taskId: input.taskId ?? null,
+      repoKey,
+      cwd: input.cwd ?? "",
+      title: clip(cleanIterationPromptText(input.title), WAND_ITERATION_PROMPT_TITLE_MAX_LENGTH),
+      detail: clip(cleanIterationPromptText(raw), WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH),
+      source: input.source,
+    });
   };
-  writeChain = writeChain.then(run, run);
+  enqueueIterationPrompt(queue, run, "[Iteration] Failed to record task prompt:");
+  return true;
 }
 
 /** `2026-02-14T09:05:00.000Z` → `02-14 09:05`（UTC，稳定可测）。 */

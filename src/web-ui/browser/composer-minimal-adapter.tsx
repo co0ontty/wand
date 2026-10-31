@@ -8,7 +8,6 @@ import { closePlusPopover } from "./session-engine.js";
 import { ptyInputState } from "../pty-input-state.js";
 import { PtyModifierButtons } from "../react/composer-rail/modifiers.js";
 import { composer, state } from "./state.js";
-import { WandButton, WandIcon } from "../react/ui/index.js";
 import type { ResizeInput } from "../react/composer-sender/host.js";
 
 const mounts = new Map<HTMLElement, { root: Root; chrome: HTMLElement }>();
@@ -16,18 +15,6 @@ function MinimalComposer({ host, input, resize }: { host: HTMLElement; input: HT
   const [, refresh] = React.useReducer(value => value + 1, 0);
   React.useEffect(() => composer.subscribe(refresh), []);
   React.useEffect(() => ptyInputState.subscribe(refresh), []);
-  React.useLayoutEffect(() => {
-    const runtime = host.querySelector<HTMLElement>(".composer-inline-config");
-    if (!runtime) return;
-    const measure = (): void => {
-      const rect = runtime.getBoundingClientRect();
-      host.style.setProperty("--composer-runtime-width", `${Math.ceil(rect.width)}px`);
-      host.style.setProperty("--composer-runtime-height", `${Math.ceil(rect.height)}px`);
-    };
-    measure();
-    const observer = new ResizeObserver(measure); observer.observe(runtime);
-    return () => observer.disconnect();
-  }, [host]);
   React.useEffect(() => {
     const observer = new MutationObserver(refresh);
     const action = host.querySelector("#send-input-button");
@@ -60,7 +47,7 @@ function MinimalComposer({ host, input, resize }: { host: HTMLElement; input: HT
   React.useEffect(() => { if (terminal && failed) ptyInputState.update(owner, { mode: "keyboard" }); }, [owner, terminal, failed]);
   const minimal = useMinimalComposer({ owner, input: () => input, surface: () => host,
     phase, pending: !!draft.text || !!draft.attachments.length, locked,
-    forceExpanded: terminal && mode === "keyboard",
+    forceExpanded: terminal && mode === "keyboard", defaultExpanded: !terminal,
     onDismiss: reason => {
       if (!terminal) return;
       rememberSelection(); ptyInputState.update(owner, { mode: "shortcuts" });
@@ -115,7 +102,6 @@ function MinimalComposer({ host, input, resize }: { host: HTMLElement; input: HT
       <PtyModifierButtons ctrl={choice.ctrl} shift={choice.shift} disabled={state.composerComposing}
         onToggle={key => { if (!state.composerComposing) ptyInputState.toggle(owner, key); }}/></> : null}
   </>, host.querySelector(".composer-main-row")!)}
-    {!terminal && createPortal(<WandButton kind="ghost" className="composer-manual-collapse" title="收起输入框" aria-label="收起输入框" disabled={locked || phase === "sending"} style={{ visibility: minimal.expanded ? "visible" : "hidden" }} onClick={minimal.close}><WandIcon name="chevronDown" size={16}/></WandButton>, host.querySelector(".composer-actions-right")!)}
     {createPortal(<MinimalComposerEntry text={draft.text} attachments={draft.attachments.length}
       placeholder={input.placeholder} disabled={input.disabled} onOpen={minimal.open}/>, host.querySelector(".composer-actions-left")!)}
   </>;

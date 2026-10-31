@@ -495,20 +495,20 @@ export function renderAppShell() {
           '<div class="input-composer-row" data-pi-composer="">' +
           '<span data-pi-settings-host=""></span>' +
           '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + (state.terminalInteractive ? ' is-terminal-interactive' : '') + '" role="group" aria-label="消息编辑器">' +
+            '<div class="wand-composer-context composer-session-context"><span data-composer-avatar-host></span></div>' +
             // Independent normal-flow summaries; Popover owns the portalled details.
             '<div class="composer-top-row">' +
               '<div id="todo-progress" class="todo-progress hidden"></div>' +
-              // 待发摘要与 Todo 共用输入面上沿；展开列表不挤动编辑器或身份状态行。
+              // 待发摘要、Todo 与子 Agent 共用输入面上沿的一排胶囊；展开详情不挤动编辑器或发送按钮。
               // 队列动作仍由 input.ts 委托，React 只投影当前会话快照。
+              '<div id="composer-agent-capsule-host" class="composer-capsule-host"></div>' +
               '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
             '</div>' +
-            '<div class="composer-input-divider" aria-hidden="true"></div>' +
+            '<div class="composer-surface">' +
             '<div class="composer-main-row">' +
               '<div id="terminal-shortcuts" class="terminal-shortcuts" hidden></div>' +
               '<div class="composer-input-wrap">' +
-                '<span data-composer-avatar-host></span>' +
-                // 附件与正文共用布局起点；浮动头像/状态锚在它们上方，
-                // 不随附件高度落入预览区域。附件仍由 React portal 渲染。
+                // 附件与正文共用布局起点；上下文与胶囊各自处于面板外的正常文档流。
                 '<span class="composer-attachments-host" data-composer-attachments-host="main"></span>' +
                 '<div data-composer-sender><textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div>' +
               '</div>' +
@@ -517,9 +517,7 @@ export function renderAppShell() {
                 '<button id="attach-btn" data-antd-control class="composer-attach-trigger" type="button" title="附件与执行选项（思考深度、模型和权限）" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                 '</button>' +
-                '<div class="composer-inline-config">' +
-                  '<span class="composer-config-host" data-composer-config-host="runtime"></span>' +
-                '</div>' +
+                '<button id="composer-attach-file" data-composer-control data-antd-control class="composer-file-trigger" type="button" title="添加附件" aria-label="添加附件">' + iconSvg("paperclip", { size: 18 }) + '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                 '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
                 // Pi 会话设置图标（React portal，见 pi-settings 组件）：只在 Pi 结构化会话
@@ -542,6 +540,8 @@ export function renderAppShell() {
                 '</div>' +
               '</div>' +
               '<div class="composer-actions-right" role="group" aria-label="模型与发送">' +
+                '<span data-composer-employee-host></span>' +
+                '<div class="composer-inline-config"><span class="composer-config-host" data-composer-config-host="runtime"></span></div>' +
                 // 直通模式的 Appica 发送按钮挂在这里（其余 legacy 按钮在直通下收起）。
                 '<span class="composer-rail-host" data-pty-extra-keys-host></span>' +
                 '<span class="composer-rail-host" data-composer-rail-host="pty"></span>' +
@@ -549,6 +549,7 @@ export function renderAppShell() {
                 // 输入控制器只更新data-phase；Ant投影单个发送/停止/结果图标。
                 '<button id="send-input-button" data-antd-control="primary" type="button" data-phase="idle" title="发送" aria-label="发送消息"></button>' +
               '</div>' +
+            '</div>' +
             '</div>' +
           '</div>' +
           '</div>' +
@@ -559,6 +560,7 @@ export function renderAppShell() {
             // 两个条目（上传附件 / 终端交互）由 React portal 渲染（见 composer-popover
             // 组件），宿主常驻；容器本身的开关与键盘导航仍然归 legacy。
             '<span class="plus-popover-items-host" data-composer-popover-host="items"></span>' +
+            '<div class="composer-editor-menu" data-composer-editor-control></div>' +
             '<button data-antd-control class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
               iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
               '<span class="prompt-optimize-label">优化提示词</span>' +

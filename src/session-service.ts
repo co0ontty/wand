@@ -72,7 +72,7 @@ export function getInputErrorResponse(error: unknown, sessionId: string) {
   }
 
   const errorCode = (error as { code?: string } | null | undefined)?.code;
-  if (errorCode === "duplicate_queued_message" || errorCode === "duplicate_idempotency_key") {
+  if (errorCode === "duplicate_queued_message" || errorCode === "duplicate_idempotency_key" || errorCode === "idempotency_key_conflict") {
     return {
       statusCode: 409,
       payload: {

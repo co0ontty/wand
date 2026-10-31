@@ -1,0 +1,12 @@
+html,body,#root { min-height:100%; margin:0; background:var(--bg-primary); color:var(--text-primary); }
+.composer-preview { width:min(1120px,100%); margin:auto; padding:24px; box-sizing:border-box; font:14px/1.6 system-ui,sans-serif; }
+.composer-preview > header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.composer-preview > nav { display:flex; flex-direction:column; gap:8px; margin-top:16px; }
+.preview-stage.conversation-root { position:relative; inset:auto; z-index:auto; overflow:visible; margin-top:24px; display:flex; flex-direction:column; min-height:460px; }
+.preview-stage.preview-compact { width:min(360px,100%); margin-inline:auto; }
+.preview-message { padding:24px 0; max-width:600px; }
+.preview-message .ant-typography { font-size:14px; }
+.preview-composer { margin-top:auto; width:100%; min-width:0; }
+.preview-feedback { font-size:12px; color:var(--error); padding:8px 4px; }
+.preview-context-tail { margin-left:auto; font-size:12px; }
+@media(max-width:640px) { .composer-preview { padding:12px; } .preview-stage { min-height:450px; } .composer-preview > header { flex-wrap:wrap; } }

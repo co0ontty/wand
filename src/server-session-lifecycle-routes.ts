@@ -39,6 +39,21 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
   app.post("/api/sessions", asyncRoute(async (req, res) => {
     const body = req.body as CommandRequest & { kind?: unknown; prompt?: string; runner?: SessionRunner; engine?: string; employeeId?: unknown; teamId?: unknown; subject?: { type?: unknown }; overrideCli?: unknown; sessionSource?: unknown; automationId?: unknown };
     try {
+      const isWorktreeMergeRequest = !body.employeeId && (
+        (typeof body.systemPrompt === "string" && body.systemPrompt.includes("Worktree 合并 Agent"))
+        || (typeof body.initialInput === "string" && body.initialInput.includes("Worktree 合并 Agent"))
+        || (typeof body.prompt === "string" && body.prompt.includes("Worktree 合并 Agent"))
+      );
+      if (isWorktreeMergeRequest) {
+        body.kind = "structured";
+        body.employeeId = "e_wand_ops";
+        if (body.initialInput && !body.prompt) {
+          body.prompt = body.initialInput;
+          delete body.initialInput;
+        }
+        delete body.command;
+        delete (body as Record<string, unknown>).provider;
+      }
       if (body.kind !== "structured" && body.kind !== "pty") throw badRequest("kind 必须是 structured 或 pty。");
       if (body.prompt !== undefined && typeof body.prompt !== "string") throw badRequest("prompt 必须是字符串。");
       if (body.initialInput !== undefined && typeof body.initialInput !== "string") throw badRequest("initialInput 必须是字符串。");
@@ -208,7 +223,8 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
       }
       res.status(201).json(sessionResponseDTO(structured.get(snapshot.id) ?? snapshot, req));
     } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /Wand Agent|harness|core/i) ?? error, "无法启动结构化会话。");
+      sendRouteError(res, surfaceDomainError(error, /Wand Agent|harness|core/i) ?? error,
+        body.kind === "pty" ? "无法启动终端会话。" : "无法启动结构化会话。");
     }
   }));
 

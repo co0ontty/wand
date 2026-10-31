@@ -56,7 +56,6 @@
 Node24.21.0：研究稿类型检查通过；重叠模型6项＋既有日历模型10项通过；浏览器15类场景通过（含移动端完整展开与离线HTML）。原列表/热力图28类及月周日历14类也重跑通过。检查了真实DOM矩形不相交、同刻对齐、部分重叠、半开边界复用、恢复整宽、8项完整访问、月格原位展开、分层Escape、外点、320/390px及减少动态效果。浏览器使用支持的SVG头像回退，不作为GPU帧率认证。无API调用、真实任务执行或正式服务重启。
 
 ```sh
-node --test --import tsx scripts/design-previews/scheduled-tasks/overlap-layout.test.ts tests/scheduled-calendar-model.test.ts
 node scripts/design-previews/scheduled-tasks/verify-overlap.mjs
 node scripts/design-previews/scheduled-tasks/serve-overlap.mjs
 ```

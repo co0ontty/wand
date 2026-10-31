@@ -32,6 +32,8 @@ export interface StructuredCompactionNotice {
 export interface StructuredRunnerTurnState {
   blocks: ContentBlock[];
   result: string;
+  /** Native Pi segment identity, also retained in replay checkpoints. */
+  inputMessageId?: string;
   sessionId: string | null;
   model?: string;
   usage?: ConversationTurn["usage"];
@@ -55,6 +57,8 @@ export interface StructuredRunnerContext {
   modelGroupModels?: readonly string[];
   /** Core-only: synchronously persist one queued user turn and the preceding assistant segment. */
   takeSteering?(state: StructuredRunnerTurnState): string | null;
+  /** Native CLI control events, before the provider reducer mutates its segment. */
+  onPiInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
 }
 
 export interface StructuredRunnerObserver {
@@ -73,6 +77,8 @@ export interface StructuredRunnerResult {
   signal: NodeJS.Signals | null;
   stderr: string;
   primaryError: string | null;
+  /** false means only observation settled; the CLI still owns its execution. */
+  processExited?: boolean;
   errors?: string[];
   stdoutTail?: string;
   stopReason?: "ask-user-question";

@@ -12,6 +12,7 @@ import {
 } from "./git-quick-commit.js";
 import { checkSessionWorktreeMergeabilityAsync, cleanupSessionWorktreeAsync, mergeSessionWorktreeAsync } from "./git-worktree.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
+import { listGitWorktrees, mergeAllWorktreesAndPush, withGitRepositoryOperation } from "./git-worktree-batch.js";
 
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
@@ -19,12 +20,14 @@ import { buildIterationCommitContext, COMMIT_CONTEXT_MODE_PREF_KEY, isCommitCont
 import { sendRouteError } from "./server-request.js";
 
 import type { SessionRouteContext } from "./server-session-context.js";
-import { commitModeForRead, iterationCommitInput, commitMessageFromIteration, requireWorktreeSession, saveWorktreeMergeState, getWorktreeMergeResponseStatus, getWorktreeMergePayload, canMergeSession, isMergeActionAllowed } from "./session-service.js";
+import { commitModeForRead, iterationCommitInput, commitMessageFromIteration, requireWorktreeSession, saveWorktreeMergeState, getWorktreeMergeResponseStatus, getWorktreeMergePayload, canMergeSession, isMergeActionAllowed, getInputDebugMeta } from "./session-service.js";
+import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
+import { resolveExplicitOrFallbackModel } from "./session-model.js";
 
 /** Worktree merge/cleanup, git status/commit/push and iteration context routes. */
 export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteContext): void {
   const {
-    storage, config, sessions, free,
+    storage, config, sessions, free, structured, onSessionCreated,
     wantsCompactTools, sessionResponseDTO,
   } = ctx;
 
@@ -69,10 +72,10 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
         lastError: undefined,
         conflict: false,
       });
-      const result = await mergeSessionWorktreeAsync({
+      const result = await withGitRepositoryOperation(merging.worktree!.repoRoot ?? merging.cwd!, () => mergeSessionWorktreeAsync({
         worktree: merging.worktree as NonNullable<SessionSnapshot["worktree"]>,
         targetBranch: current.worktreeMergeInfo?.targetBranch,
-      });
+      }));
       const updated = saveWorktreeMergeState(sessions, merging, "merged", {
         targetBranch: result.targetBranch,
         mergedAt: result.mergedAt,
@@ -111,9 +114,28 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
       return;
     }
     try {
-      res.json(await getGitStatusAsync(snapshot.cwd));
+      const status = await getGitStatusAsync(snapshot.cwd);
+      const worktreeCount = status.isGit ? Math.max(0, (await listGitWorktrees(snapshot.cwd)).length - 1) : 0;
+      res.json({ ...status, worktreeCount });
     } catch (error) {
       res.json({ isGit: false, error: getErrorMessage(error, "无法读取 git 状态。") });
+    }
+  }));
+
+  app.post("/api/sessions/:id/git/merge-worktrees", asyncRoute(async (req, res) => {
+    const snapshot = sessions.getLatest(req.params.id);
+    if (!snapshot) { res.status(404).json({ error: "未找到该会话。" }); return; }
+    if (!snapshot.cwd) { res.status(400).json({ error: "会话没有工作目录。" }); return; }
+    const { expectedBranch, expectedHead } = req.body ?? {};
+    if (typeof expectedBranch !== "string" || !expectedBranch.trim()
+      || typeof expectedHead !== "string" || !/^[a-f0-9]{40,64}$/.test(expectedHead)) {
+      res.status(400).json({ error: "请先刷新 Git 状态，确认当前分支与提交。" });
+      return;
+    }
+    try {
+      res.json(await mergeAllWorktreesAndPush({ cwd: snapshot.cwd, expectedBranch, expectedHead }));
+    } catch (error) {
+      sendRouteError(res, error, "无法合并 Worktree。");
     }
   }));
 
@@ -137,7 +159,7 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
       const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage });
       // 自动 message + 迭代模式：拿本轮提示词当输入；提交成功后标记已用掉。
       const context = await iterationCommitInput(storage, snapshot, body);
-      const result = await runQuickCommitWithFallback({
+      const result = await withGitRepositoryOperation(snapshot.cwd, () => runQuickCommitWithFallback({
         cwd: snapshot.cwd,
         language: config.language ?? "",
         ...ai,
@@ -149,7 +171,7 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
         submodule: !!body.submodule,
         iterationDigest: commitMessageFromIteration(body) ? context.digest : "",
         includeDiff: !!body.includeDiff,
-      });
+      }));
       const consumed = result.ok && result.commit?.hash && context.entryIds.length > 0
         ? storage.markIterationPromptsConsumed(context.entryIds, result.commit.hash)
         : 0;
@@ -259,14 +281,14 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
       const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage });
-      const result = await runTagHead({
+      const result = await withGitRepositoryOperation(snapshot.cwd, () => runTagHead({
         cwd: snapshot.cwd,
         language: config.language ?? "",
         ...ai,
         tag: typeof body.tag === "string" ? body.tag : undefined,
         autoTag: !!body.autoTag,
         push: !!body.push,
-      });
+      }));
       res.json(result);
     } catch (error) {
       if (error instanceof QuickCommitError) {
@@ -290,13 +312,13 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
     }
     const body = (req.body ?? {}) as { pushCommits?: boolean; pushTags?: boolean; submodule?: boolean; tag?: string };
     try {
-      const result = await runPush({
+      const result = await withGitRepositoryOperation(snapshot.cwd, () => runPush({
         cwd: snapshot.cwd,
         pushCommits: body.pushCommits !== false,
         pushTags: !!body.pushTags,
         submodule: !!body.submodule,
         tagName: typeof body.tag === "string" ? body.tag : undefined,
-      });
+      }));
       res.json(result);
     } catch (error) {
       if (error instanceof QuickCommitError) {
@@ -314,7 +336,7 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
         res.status(400).json({ error: "当前 worktree 无需补偿清理。", errorCode: "WORKTREE_CLEANUP_NOT_NEEDED" });
         return;
       }
-      await cleanupSessionWorktreeAsync({ worktree: current.worktree as NonNullable<SessionSnapshot["worktree"]> });
+      await withGitRepositoryOperation(current.worktree!.repoRoot ?? current.cwd!, () => cleanupSessionWorktreeAsync({ worktree: current.worktree as NonNullable<SessionSnapshot["worktree"]> }));
       const updated = saveWorktreeMergeState(sessions, current, "merged", {
         ...(current.worktreeMergeInfo ?? null),
         cleanupDone: true,
@@ -325,5 +347,76 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
     } catch (error) {
       res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法清理 worktree。"));
     }
+  }));
+
+  app.post("/api/workspaces/:id/worktree-merge-agent", asyncRoute(async (req, res) => {
+    const workspace = storage.getWorkspace(req.params.id);
+    if (!workspace) {
+      res.status(404).json({ error: "未找到该项目。" });
+      return;
+    }
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+    if (!prompt) {
+      res.status(400).json({ error: "请输入合并任务书内容。" });
+      return;
+    }
+    const systemPromptOverride = typeof req.body?.systemPrompt === "string" ? req.body.systemPrompt.trim() : "";
+
+    // 所有系统自动发起的系统功能调用（包含 Worktree 合并）统一使用「勤劳的初二」
+    const employee = storage.getSystemSiliconEmployee() ?? storage.ensureSystemSiliconEmployee();
+    const candidate = selectEmployeeCandidate(employee);
+    const agent = candidate.agent;
+    const provider = agent.provider;
+    const mode = agent.mode ?? "managed";
+    const requestedEngine = agent.engine;
+    const model = agent.model && agent.model !== "default"
+      ? agent.model
+      : resolveExplicitOrFallbackModel(config, provider, agent.model);
+
+    const baseSystemPrompt = systemPromptOverride || [
+      `你是 Wand 为项目「${workspace.name}」启动的 Worktree 合并 Agent。`,
+      `项目主工作区：${workspace.cwd}`,
+      "",
+      employee.prompt,
+    ].join("\n");
+
+    const engineDecision = requestedEngine ? await structured.resolveNewSessionPiEngine(requestedEngine) : null;
+
+    const snapshot = structured.createSession({
+      cwd: workspace.cwd,
+      mode,
+      provider,
+      runner: undefined,
+      worktreeEnabled: false,
+      model,
+      thinkingEffort: agent.thinkingEffort ?? config.defaultThinkingEffort,
+      sessionSource: "interactive",
+      workspaceId: workspace.id,
+      systemPrompt: baseSystemPrompt,
+      employeeId: employee.id,
+      employeeName: employee.name,
+      employeeAvatar: employee.avatar,
+      employeeCandidates: employee.agents,
+      employeeCandidateIndex: candidate.index,
+      title: `合并 Worktree - ${workspace.name}`,
+      ...(engineDecision ? { engine: engineDecision.engine } : {}),
+    });
+
+    onSessionCreated?.(snapshot.cwd);
+    try {
+      Promise.resolve(structured.sendMessage(snapshot.id, prompt, { source: "user" })).catch((error) => {
+        console.error("[wand] Accepted merge agent prompt later failed", {
+          sessionId: snapshot.id,
+          error: getInputDebugMeta(error),
+        });
+      });
+    } catch (error) {
+      console.error("[wand] Accepted merge agent prompt later failed", {
+        sessionId: snapshot.id,
+        error: getInputDebugMeta(error),
+      });
+    }
+
+    res.status(201).json(wantsCompactTools(req) ? sessionResponseDTO(snapshot, req) : snapshot);
   }));
 }

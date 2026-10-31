@@ -1,18 +1,18 @@
 {
   "findings": [
     {
-      "category": "violation",
-      "file": "src/web-ui/react/composer-rail/terminal-shortcuts.tsx",
-      "line": 74,
-      "message": "Enabled literal button has no detectable action or submit behavior.",
-      "remediation": "Connect the button to a real action, make it a submit button, or disable/remove it.",
-      "ruleId": "affordance.actionless-button",
+      "category": "unresolved",
+      "file": "DESIGN.md",
+      "line": null,
+      "message": "The configured UX contract has no Canonical UI Map with the required columns.",
+      "remediation": "Add the exact Capability, Canonical owner, Source of truth, Allowed variants, and Verification columns.",
+      "ruleId": "canonical.map-missing",
       "severity": "error"
     },
     {
       "category": "violation",
-      "file": "src/web-ui/react/composer-work-panel.tsx",
-      "line": 9,
+      "file": "src/web-ui/react/composer-rail/terminal-shortcuts.tsx",
+      "line": 74,
       "message": "Enabled literal button has no detectable action or submit behavior.",
       "remediation": "Connect the button to a real action, make it a submit button, or disable/remove it.",
       "ruleId": "affordance.actionless-button",
@@ -43,6 +43,24 @@
       "message": "Enabled literal button has no detectable action or submit behavior.",
       "remediation": "Connect the button to a real action, make it a submit button, or disable/remove it.",
       "ruleId": "affordance.actionless-button",
+      "severity": "error"
+    },
+    {
+      "category": "violation",
+      "file": "premium-ui.json",
+      "line": null,
+      "message": "Declared CRUD full-flow evidence is missing.",
+      "remediation": "Point evidence.crudFullFlow to an existing project-owned test or report and run its command separately.",
+      "ruleId": "evidence.crud-flow-missing",
+      "severity": "error"
+    },
+    {
+      "category": "violation",
+      "file": "premium-ui.json",
+      "line": null,
+      "message": "Declared failure-path evidence is missing.",
+      "remediation": "Point evidence.failurePaths to an existing project-owned test or report and run its command separately.",
+      "ruleId": "evidence.failure-path-missing",
       "severity": "error"
     },
     {
@@ -84,7 +102,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-board-host.tsx",
-      "line": 1325,
+      "line": 1341,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -93,7 +111,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-create.tsx",
-      "line": 271,
+      "line": 273,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -102,7 +120,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-create.tsx",
-      "line": 274,
+      "line": 276,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -111,7 +129,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-create.tsx",
-      "line": 289,
+      "line": 291,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -210,7 +228,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/quick-commit/host.tsx",
-      "line": 466,
+      "line": 495,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -219,7 +237,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/quick-commit/host.tsx",
-      "line": 474,
+      "line": 503,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -371,6 +389,15 @@
     },
     {
       "category": "violation",
+      "file": "src/web-ui/react/conversations/list-filter-panel.tsx",
+      "line": 19,
+      "message": "Native select conflicts with recorded Select/Listbox ownership: authored.",
+      "remediation": "Record Select/Listbox as native or reuse the authored canonical owner.",
+      "ruleId": "ownership.native-select-conflict",
+      "severity": "error"
+    },
+    {
+      "category": "violation",
       "file": "src/web-ui/react/ui/multi-select.tsx",
       "line": 17,
       "message": "Native select conflicts with recorded Select/Listbox ownership: authored.",
@@ -383,10 +410,10 @@
   "projectRoot": "/Users/co0ontty/Self/vibe_coding/wand",
   "schemaVersion": 1,
   "summary": {
-    "errors": 42,
-    "total": 42,
-    "unresolved": 0,
-    "violations": 42,
+    "errors": 45,
+    "total": 45,
+    "unresolved": 1,
+    "violations": 44,
     "warnings": 0
   }
 }

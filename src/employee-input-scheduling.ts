@@ -7,6 +7,10 @@ export interface EmployeeInputScheduling {
   enqueuedAt: string;
   /** Stable tie-breaker for inputs accepted in the same millisecond. */
   sequence?: number;
+  /** Private native Pi reservation; retained in the durable queue until commit. */
+  handoff?: import("./pi-native-input.js").PiInputHandoff;
+  /** Durable identity used to remove exactly the accepted queue item at dispatch. */
+  acceptanceId?: string;
   /** In-memory correlation only; JSON persistence deliberately omits functions. */
   teamRequestStarted?: (sessionId: string, requestId: string) => void;
 }

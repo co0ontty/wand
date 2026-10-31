@@ -448,10 +448,11 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
       switch (request.method) {
         case "hello":
           result = { protocolVersion: TERMINAL_DAEMON_PROTOCOL_VERSION, pid: process.pid,
-            buildId: TERMINAL_DAEMON_BUILD_ID, shutdownIfIdle: true };
+            buildId: TERMINAL_DAEMON_BUILD_ID, shutdownIfIdle: true, ...(tmux ? { detachTmuxOnShutdown: true } : {}) };
           break;
         case "shutdownIfIdle": {
-          const busy = pendingStarts.size > 0 || [...sessions.values(), ...structuredRuns.values()].some((entry) => entry.status === "running");
+          const busy = pendingStarts.size > 0 || [...structuredRuns.values()].some(entry => entry.status === "running")
+            || (!tmux && [...sessions.values()].some(entry => entry.status === "running"));
           result = { accepted: !busy };
           if (!busy && !retiring) {
             // The idle check and admission closure happen in the same event-loop turn.
@@ -593,7 +594,13 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     retiring = true;
     await Promise.allSettled(pendingStarts.values());
     stopSocketKeepalive();
-    for (const sessionId of Array.from(sessions.keys())) forget(sessionId);
+    for (const [sessionId, session] of sessions) {
+      if (tmux && session.process?.detach) {
+        session.process.detach();
+        session.terminalState.dispose();
+        sessions.delete(sessionId);
+      } else forget(sessionId);
+    }
     for (const runId of Array.from(structuredRuns.keys())) structuredForget(runId);
     for (const client of clients) client.socket.destroy();
     server.close(() => process.exit(0));

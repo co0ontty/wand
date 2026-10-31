@@ -5,6 +5,8 @@
 ## 使用与协作
 
 - [招聘与入职](employee-onboarding.md)：手动创建员工、HR 起草与确认边界。
+- [全局知识库](global-knowledge.md)：跨员工、项目与 CLI 的长期约定、同步和生效范围。
+- [Repo Wiki 接入知识库的可行性与成本](repo-wiki-feasibility.md)：调研结论、呈现与使用逻辑、分阶段成本。
 
 ## 会话与执行
 

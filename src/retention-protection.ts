@@ -1,14 +1,14 @@
 import { AI_TEAM_ACTIVE_RUN_STATUSES } from "./ai-team-types.js";
 import { isArchiveBlocked } from "./archive-policy.js";
 import type { WandStorage } from "./storage.js";
-import type { WandTask } from "./task-types.js";
+import { taskHumanAccepted, type WandTask } from "./task-types.js";
 import { TASK_RETENTION_ARCHIVE_VERSION } from "./task-retention.js";
 import { parseTimestampMs } from "./time-utils.js";
 import type { SessionSnapshot } from "./types.js";
 
 function acceptedTask(task: WandTask): boolean {
   const acceptance = task.acceptance;
-  return (task.status === "done" || task.status === "archived")
+  return taskHumanAccepted(task) && (task.status === "ready" || task.status === "archived")
     && typeof acceptance?.acceptedAt === "string" && parseTimestampMs(acceptance.acceptedAt) !== null
     && typeof acceptance.evidence === "string" && !!acceptance.evidence.trim()
     && typeof acceptance.blocker === "string" && !acceptance.blocker.trim();
@@ -112,7 +112,7 @@ export function createRetentionProtection(
   const unfinishedAncestors = spread(ancestors, unfinished);
   return {
     tasks, runs, teamSessionIds,
-    canArchiveTask: (task: WandTask): boolean => task.status === "done" && acceptedTask(task)
+    canArchiveTask: (task: WandTask): boolean => task.status === "ready" && taskHumanAccepted(task)
       && !executionHeld.has(taskNode(task.id)) && !unfinishedAncestors.has(taskNode(task.id)),
     canPurgeTask: (id: string): boolean => !purgeHeld.has(taskNode(id)),
     canArchiveSession: (id: string): boolean => !archiveHeld.has(sessionNode(id)),

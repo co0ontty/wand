@@ -36,6 +36,7 @@ export interface QuickCommitStatus {
   };
   latestTag: string;
   hasSubmodule: boolean;
+  worktreeCount?: number;
   error?: string;
 }
 
@@ -150,6 +151,7 @@ export interface QuickCommitRepository {
   ): Promise<QuickCommitSuggestion>;
   commit(sessionId: string, input: QuickCommitInput): Promise<QuickCommitResponse>;
   push(sessionId: string, input: QuickCommitPushInput): Promise<QuickCommitPushResponse>;
+  mergeWorktrees?(sessionId: string, input: { expectedBranch: string; expectedHead: string }): Promise<{ ok: boolean; pushed: boolean; targetBranch: string; mergedBranches: string[]; error?: string }>;
 }
 
 type QuickCommitToastTone = "success" | "error" | "info";

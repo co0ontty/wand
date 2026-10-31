@@ -26,5 +26,3 @@ Claude/Codex/OpenCode 的配置根跟随 CLI 的有效子进程环境；Pi 的�
 ## 客户端与验证
 
 删除接口与响应未改变。Web、macOS、Android、iOS 原有 `DELETE /api/sessions/:id` / `POST /api/sessions/batch-delete` 统一获得此服务端行为，无需客户端额外清理本机文件。
-
-回归入口：`tests/session-artifact-cleanup.test.ts`、`tests/session-registry.test.ts`、`tests/provider-history-scanner.test.ts`、`tests/structured-exec-pump-lifecycle.test.ts`、`tests/process-manager-start-lifecycle.test.ts`、`tests/structured-session-concurrency.test.ts`。测试只使用临时会话文件与本地模拟模型，不对已有用户会话做清扫。

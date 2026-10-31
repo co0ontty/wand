@@ -66,6 +66,7 @@ export function normalizeQuickCommitStatus(value: unknown): QuickCommitStatus {
     lastCommit,
     latestTag: stringValue(record.latestTag),
     hasSubmodule: record.hasSubmodule === true || files.some((file) => file.isSubmodule),
+    worktreeCount: Math.max(0, finiteNumber(record.worktreeCount)),
     error: typeof record.error === "string" ? record.error : undefined,
   };
 }
@@ -120,6 +121,15 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
   constructor(
     private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init),
   ) {}
+
+  async mergeWorktrees(sessionId: string, input: { expectedBranch: string; expectedHead: string }) {
+    const response = await this.fetchImpl(`/api/sessions/${encodeURIComponent(sessionId)}/git/merge-worktrees`, {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+    });
+    const data = await readRecord(response, "合并 Worktree 失败。");
+    return { ok: data.ok === true, pushed: data.pushed === true, targetBranch: stringValue(data.targetBranch),
+      mergedBranches: stringList(data.mergedBranches), error: stringValue(data.error) };
+  }
 
   async loadStatus(
     sessionId: string,

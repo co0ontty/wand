@@ -18,7 +18,7 @@ swift macos/scripts/generate-icons.swift macos/Wand/Assets.xcassets/AppIcon.appi
 `sync:brand-assets` 生成 Web 共享几何、SVG、浏览器扩展 PNG、Android 通知单色变体、
 原生 asset catalog 和本地构建快照。`generate-icons.swift` 是共享渲染模板，脚本将其
 复制到两个原生子仓库并设置平台参数；原生构建脚本会重新生成 AppIcon PNG。
-不要手工修改这些生成资源。`npm test` 会验证图案、颜色、资源同步和图标尺寸。
+不要手工修改这些生成资源。使用品牌资源检查核对图案、颜色、资源同步和图标尺寸。
 
 ## 平台差异
 

@@ -323,6 +323,20 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     await parseJsonResponse(await this.fetchImpl(`/api/sessions/auto-organize/${encodeURIComponent(id)}/cancel`, { method: "POST", credentials: "same-origin" }));
   }
 
+  async createSection(request: { name: string; cwd: string; workspaceId?: string; sessionId?: string }): Promise<WorkspaceTaskDetail> {
+    return parseJsonResponse<WorkspaceTaskDetail>(await this.fetchImpl("/api/workspace-sections", {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+      body: JSON.stringify(request),
+    }));
+  }
+
+  async unassignSession(sessionId: string): Promise<void> {
+    await parseJsonResponse(await this.fetchImpl("/api/workspace-sections/unassign", {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+      body: JSON.stringify({ sessionId }),
+    }));
+  }
+
   async moveSession(taskId: string, sessionId: string): Promise<void> {
     await parseTaskMutation(await this.fetchImpl(
       `/api/workspace-tasks/${encodeURIComponent(taskId)}/sessions`,

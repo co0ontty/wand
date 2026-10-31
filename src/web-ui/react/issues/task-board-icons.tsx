@@ -43,7 +43,8 @@ export function TaskBoardStatusIcon({
       <path d="m10.01 3.87 2.4 2.12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>;
   }
-  if (status === "done") {
+  if (status === "ready") return <svg {...props}><path d="m3 8 3 3 7-7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+  if (status === "review" || status === "done") {
     return <svg {...props} viewBox="0 0 13.836 11.236">
       <path fillRule="evenodd" d="M9.026 5.618a2.108 2.108 0 1 1-4.216 0 2.108 2.108 0 0 1 4.216 0Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
       <path fillRule="evenodd" d="M.75 5.618c0 2.187 2.761 4.868 6.168 4.868s6.168-2.679 6.168-4.868S10.324.75 6.918.75.75 3.431.75 5.618Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>

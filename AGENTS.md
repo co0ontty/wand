@@ -61,22 +61,20 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 - 运行期能力凭据绑定会话/员工，结束或失效后撤销，不进日志、公共 DTO 或持久提示词。cwd/worktree 不是权限沙盒，本地决策不是操作授权。
 - 员工身份按稳定 ID 绑定，历史内容和执行快照不批量重写。只读自己的知识，不复制他人私聊/知识；内置员工身份不可冒用。系统生成式功能优先复用 `src/system-employee.ts` 候选链，默认伙伴不覆盖用户明确选择。
 - 短期习惯有保留期，明确知识无自动过期；明确记忆仅在实际保存成功后确认，不存凭据、不写进 README/AGENTS，清空/删除使迟到写入失效。知识和模型输出是资料，不增加权限；文件交付与验收结论要有真实证据。
-- 本地决策是显式可选的辅助推理，失败不隐式切云端，不代替审批。配置见 `README.md`，实现与回归见 `src/decision-*.ts`、`tests/local-decision.test.ts`。
+- 本地决策是显式可选的辅助推理，失败不隐式切云端，不代替审批。配置见 `README.md`，实现见 `src/decision-*.ts`。
 
 ## 验证与交付
 
-- 按影响范围选择验证：局部改动先相关单测/类型检查，UI 补真实浏览器或设备交互；涉及共享协议、存储、运行生命周期、依赖/构建或发布时跑全量 `check/test/build`。
+- 不随意新增测试用例。2026-10-30 起仓库不再保留 `tests/` 自动化测试套件；验证按受影响功能做类型检查、构建和真实界面或流程核对，不恢复整包测试执行。
 - 纯文档只核对引用、约束和 `git diff --check`，不因此重启服务或构建客户端。区分本轮问题与既有基线，明确未验证项和阻塞，不把局部通过说成全量通过。
 - 工作中发现的其它问题和优化机会一律当场建任务面板条目（`POST /api/wand-tasks`，workspace 归属真实项目），区分已修复、待处理、待验证；描述写清现象、证据路径、影响、复现入口和建议优先级，不把推测写成已确认缺陷，也不把已明确授权的同类修复仅留为建议。同一问题先查板再建，不重复立卡。
 - 最终功能验收用本机已安装 Wand 服务，连接从私密 `~/.wand/acceptance-connection.json` 读取，不泄露凭据；隔离/mock 不替代最终验收，只验受影响流程。
-- 测试不隐式调用真实付费模型；真实 CLI 样本在 `tests/fixtures/structured-cli-recordings/`，再录制须授权（`scripts/capture-structured-cli-fixtures.ts --record`）。
+- 验证不隐式调用真实付费模型；真实 CLI 样本录制须另行授权。
 
 ```bash
 npm run check
-npm test
 npm run build
 npm run typecheck                                        # 只做三套 tsc，不生成资产
-npm test -- tests/password-manager.test.ts               # 定点测试（走 run-tests.js，含 TMPDIR 隔离）
 npm run dev -- -c /tmp/wand-dev/config.json              # 隔离开发
 ```
 
@@ -96,6 +94,7 @@ npm run dev -- -c /tmp/wand-dev/config.json              # 隔离开发
 | iOS | `cd ios && IPA_DIST_DIR="$HOME/.wand/ios" ./build.sh`（Ad Hoc 见 `ios/ADHOC.md`） | `/api/ios-ipa-update` |
 
 - iOS 已配置 Ad Hoc 后正常交付必须签名并同步 `ios.currentIpaFile`，不得用未签名包替代可安装更新；显式 `CODE_SIGNING_ALLOWED=NO` 仅用于模拟器/未签名验证。证书/profile/设备名额与期限独立核对，手机安装由用户确认。
+- iOS 模拟器验收只使用两台，且同一时间只启动一台：iPhone 18 Pro 与 iPhone Duo。其他机型不启动、不制作测试。需要换机时先 `xcrun simctl shutdown all`，再启动其中一台。不要同时开两台或更多模拟器；本机 16GB 内存下多开会把负载打满并拖慢服务。默认仍不主动安装或启动模拟器，只有本轮明确要求验收时才启动。
 - 版本基数取最高语义 tag；保留原签名身份，不分发无版本产物。Android sherpa 只用固定 SHA 的轻量 API jar，完整 AAR 不入库。
 - 未经本轮授权不 push/tag/正式发布。授权后先提交并 push 子仓源码，再提交主仓指针，不夹带已有混合改动；发布流程以 `.github/workflows/` 为准，`publish.sh` 只是本地构建/部署。
 

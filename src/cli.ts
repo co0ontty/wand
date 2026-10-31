@@ -313,6 +313,11 @@ async function main(): Promise<void> {
       await runDecisionCli(args.slice(1));
       break;
     }
+    case "task:workflow": {
+      const { runTaskWorkflowCli } = await import("./task-workflow-cli.js");
+      await runTaskWorkflowCli(args.slice(1));
+      break;
+    }
     case "knowledge:remember":
     case "knowledge:search":
     case "knowledge:read":
@@ -372,6 +377,7 @@ Agent runtime:
   wand session:resume <id> --stdin  Continue the exact structured session with JSON input
   wand schedule:list [--include-cancelled]
   wand task:context <task-id> [comment-id]  Read task facts and source reference
+  wand task:workflow <task-id> --stdin     Write a scoped delivery/AI-review receipt
   wand schedule:read <id>    Read schedule and execution history
   wand schedule:create --stdin  Create a schedule from JSON (requestId required)
   wand schedule:update <id> --stdin  Edit/pause/cancel (revision required)
@@ -391,10 +397,10 @@ Agent runtime:
   wand decision:skills [--providers pi,claude,...]  Install managed user-level skills
   wand knowledge:remember <text> | --stdin
   wand knowledge:search [query]
-  wand knowledge:read <document-id> [--scope personal|project]
+  wand knowledge:read <document-id> [--scope global|personal|project]
   wand knowledge:update <document-id> --revision <version> <text> | --stdin
   wand knowledge:forget <document-id> --revision <version>
-    All knowledge commands accept --scope personal|project (default personal).
+    All knowledge commands accept --scope global|personal|project (default personal).
     Bound to the current Wand employee/project execution environment.
 
 System service (default = system-wide; pass --user for user-level):

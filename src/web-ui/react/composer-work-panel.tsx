@@ -3,10 +3,10 @@ import { Button, Typography } from "antd";
 import { WandIcon, type WandIconName } from "./ui/icons.js";
 
 /** Same bounded summary geometry for progress and pending input; never a second state owner. */
-export function ComposerWorkSummary({ label, count, preview, icon, expanded, id, className }: {
-  label: string; count: string; preview: string; icon: WandIconName; expanded: boolean; id?: string; className?: string;
+export function ComposerWorkSummary({ label, count, preview, icon, expanded, id, className, onClick, buttonRef }: {
+  label: string; count: string; preview: string; icon: WandIconName; expanded: boolean; id?: string; className?: string; onClick?(): void; buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
-  return <Button id={id} type="default" className={`composer-work-trigger ${className ?? ""}`}
+  return <Button ref={buttonRef} id={id} type="default" className={`composer-work-trigger ${className ?? ""}`} onClick={onClick}
     aria-expanded={expanded} aria-label={`${label}，${count}`} title={preview}>
     <span className="composer-work-summary"><WandIcon name={icon} size={16}/>
       <span className="composer-work-label">{label}<span className="composer-work-count">{count}</span></span>

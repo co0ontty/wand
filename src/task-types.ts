@@ -1,19 +1,37 @@
-export type WandTaskStatus = "backlog" | "todo" | "doing" | "done" | "archived";
+export type WandTaskStatus = "backlog" | "todo" | "doing" | "review" | "ready" | "done" | "archived";
 
-export const WAND_TASK_STATUSES: readonly WandTaskStatus[] = ["backlog", "todo", "doing", "done", "archived"];
+/** done is retained for historical storage/older callers, never proof of AI approval. */
+export const WAND_TASK_STATUSES: readonly WandTaskStatus[] = ["backlog", "todo", "doing", "review", "ready", "done", "archived"];
+
+export function taskWorkflowStage(status: WandTaskStatus): Exclude<WandTaskStatus, "done"> {
+  return status === "done" ? "review" : status;
+}
+
+export function taskAiVerified(task: Pick<WandTask, "verification" | "deliveryRevision">): boolean {
+  return task.verification?.verdict === "passed" && task.verification.revision === (task.deliveryRevision ?? 0)
+    && typeof task.verification.evidence === "string" && Boolean(task.verification.evidence.trim())
+    && typeof task.verification.blocker === "string" && !task.verification.blocker.trim();
+}
+
+export function taskHumanAccepted(task: Pick<WandTask, "acceptance" | "deliveryRevision">): boolean {
+  return Boolean(task.acceptance?.acceptedAt) && task.acceptance?.confirmedRevision === (task.deliveryRevision ?? 0)
+    && typeof task.acceptance?.evidence === "string" && Boolean(task.acceptance.evidence.trim())
+    && typeof task.acceptance?.blocker === "string" && !task.acceptance.blocker.trim();
+}
 
 export function isWandTaskStatus(value: unknown): value is WandTaskStatus {
   return typeof value === "string" && WAND_TASK_STATUSES.includes(value as WandTaskStatus);
 }
 
-/** An explicit execution transition promotes backlog work to doing. */
+/** A new execution returns work to doing; explicit review dispatches preserve review separately. */
 export function statusAfterWandTaskDispatch(status: WandTaskStatus): WandTaskStatus {
-  return status === "backlog" || status === "todo" ? "doing" : status;
+  if (status === "archived") throw new Error("归档任务需要先恢复再执行。");
+  return "doing";
 }
 
-/** 已确认或已归档：不再算未完成，也不会被未分组会话同步重新打开。 */
+/** 仅归档关闭活动阶段；待 AI 验收与待人工确认仍属于未完成工作。 */
 export function isClosedWandTaskStatus(status: WandTaskStatus): boolean {
-  return status === "done" || status === "archived";
+  return status === "archived";
 }
 export type WandTaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
@@ -221,6 +239,9 @@ export interface TaskCommentDispatch {
 }
 
 export interface WandTaskComment {
+  purpose?: "execution" | "review";
+  reviewRevision?: number | null;
+  reviewWritebackPending?: boolean;
   requestId?: string;
   sourceCommentId?: string | null;
   taskVersion?: string;
@@ -241,11 +262,37 @@ export interface TaskAcceptance {
   evidence: string;
   blocker: string;
   acceptedAt: string | null;
+  confirmedRevision?: number;
+}
+
+export interface TaskVerification {
+  verdict: "passed" | "failed" | "unverified";
+  evidence: string;
+  blocker: string;
+  reviewedAt: string;
+  revision: number;
+  sourceSessionId: string | null;
+  reviewerId: string | null;
+}
+
+export type TaskWorkflowAction = "submit" | "pass" | "fail" | "return" | "accept";
+export interface TaskWorkflowInput {
+  action: TaskWorkflowAction;
+  requestId: string;
+  expectedUpdatedAt: string;
+  evidence: string;
+  blocker: string;
 }
 
 export interface WandTask {
   /** Explicit user acceptance, independent of sessions and archival. */
   acceptance?: TaskAcceptance | null;
+  verification?: TaskVerification | null;
+  deliveryRevision?: number;
+  /** DTO-only compatibility flag; a historical done is projected to review without a write. */
+  legacyReview?: boolean;
+  /** Server advertises atomic two-level workflow support; absent on older servers. */
+  workflowVersion?: 1;
   id: string;
   workspaceId: string | null;
   /** 关联的侧栏工作任务；归档/新建时用来对账，不随 WorkspaceTask 删除而消失。 */

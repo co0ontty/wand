@@ -3,13 +3,15 @@ import { agentToolDisplayName } from "../../provider-identity";
 import { compareRecentEntries, type SidebarRecentEntry } from "../workspaces/sidebar-recent";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
 import { workspaceSessionProvider } from "../workspaces/session-order";
-import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "../workspaces/types";
+import type { TaskDirectoryGroup, TaskSummary, WorkspaceSessionSummary } from "../workspaces/types";
 import type { ConversationListFilter } from "./state";
 import { isSessionActive } from "../workspaces/sidebar-display-mode";
 import { isSystemAiCall } from "../../../system-ai-call.js";
+import { matchesConversationFacets, type ConversationListFacets } from "./list-filters";
 
 export interface PersonSessionEntry extends SidebarRecentEntry {
   readonly archived: boolean;
+  readonly task?: TaskSummary;
 }
 export type PersonSessionIndex = ReadonlyMap<string, readonly PersonSessionEntry[]>;
 
@@ -17,17 +19,17 @@ export type PersonSessionIndex = ReadonlyMap<string, readonly PersonSessionEntry
 export function indexPersonSessions(groups: readonly TaskDirectoryGroup[], systemSessions: readonly WorkspaceSessionSummary[] = []): PersonSessionIndex {
   const index = new Map<string, PersonSessionEntry[]>();
   const seen = new Set<string>();
-  const push = (group: TaskDirectoryGroup, session: WorkspaceSessionSummary, taskName: string | null, archived = false): void => {
+  const push = (group: TaskDirectoryGroup, session: WorkspaceSessionSummary, taskName: string | null, archived = false, task?: TaskSummary): void => {
     if (!session.employeeId || session.teamChat || seen.has(session.id)) return;
     seen.add(session.id);
     const entries = index.get(session.employeeId) ?? [];
-    entries.push({ group, session, taskName, archived: archived || session.archived === true });
+    entries.push({ group, session, taskName, task, archived: archived || session.archived === true });
     index.set(session.employeeId, entries);
   };
   for (const group of groups) {
     for (const task of group.tasks) {
-      for (const session of task.sessions) push(group, session, task.name, task.archived === true);
-      for (const session of task.archivedSessions ?? []) push(group, session, task.name, true);
+      for (const session of task.sessions) push(group, session, task.name, task.archived === true, task);
+      for (const session of task.archivedSessions ?? []) push(group, session, task.name, true, task);
     }
     for (const session of group.standaloneSessions) push(group, session, null);
     for (const session of group.archivedSessions ?? []) push(group, session, null, true);
@@ -47,15 +49,15 @@ export function indexPersonSessions(groups: readonly TaskDirectoryGroup[], syste
 export function collectUnboundSessions(groups: readonly TaskDirectoryGroup[]): PersonSessionEntry[] {
   const entries: PersonSessionEntry[] = [];
   const seen = new Set<string>();
-  const push = (group: TaskDirectoryGroup, session: WorkspaceSessionSummary, taskName: string | null, archived = false): void => {
+  const push = (group: TaskDirectoryGroup, session: WorkspaceSessionSummary, taskName: string | null, archived = false, task?: TaskSummary): void => {
     if (session.employeeId || session.teamChat || session.sessionSource === "quick-terminal" || seen.has(session.id)) return;
     seen.add(session.id);
-    entries.push({ group, session, taskName, archived: archived || session.archived === true });
+    entries.push({ group, session, taskName, task, archived: archived || session.archived === true });
   };
   for (const group of groups) {
     for (const task of group.tasks) {
-      for (const session of task.sessions) push(group, session, task.name, task.archived === true);
-      for (const session of task.archivedSessions ?? []) push(group, session, task.name, true);
+      for (const session of task.sessions) push(group, session, task.name, task.archived === true, task);
+      for (const session of task.archivedSessions ?? []) push(group, session, task.name, true, task);
     }
     for (const session of group.standaloneSessions) push(group, session, null);
     for (const session of group.archivedSessions ?? []) push(group, session, null, true);
@@ -69,10 +71,12 @@ export function filterUnboundSessions(
   query: string,
   liveTitles: Readonly<Record<string, string>> = {},
   activityOnly = false,
+  facets?: ConversationListFacets,
 ): PersonSessionEntry[] {
   return entries.filter(entry => {
+    if (facets && !matchesConversationFacets(entry, facets)) return false;
     if (filter === "archived" ? !entry.archived : filter === "active" ? entry.archived : false) return false;
-    if (activityOnly && !isSessionActive(entry.session)) return false;
+    if (activityOnly && (entry.archived || !isSessionActive(entry.session))) return false;
     return sidebarSearchMatches(query, entry.session.title ?? "", liveTitles[entry.session.id] ?? "", entry.taskName ?? "",
       entry.group.workspaceName, entry.session.cwd ?? "", entry.session.provider ?? "");
   });
@@ -124,11 +128,13 @@ export function filterPersonSessions(
   liveTitles: Readonly<Record<string, string>> = {},
   activityOnly = false,
   _selectedSessionId: string | null = null,
+  facets?: ConversationListFacets,
 ): PersonSessionEntry[] {
   if (item.kind !== "dm" || !item.peerEmployeeId) return [];
   return (index.get(item.peerEmployeeId) ?? []).filter(entry => {
+    if (facets && !matchesConversationFacets(entry, facets)) return false;
     if (filter === "archived" ? !entry.archived : filter === "active" ? entry.archived : false) return false;
-    if (activityOnly && !isSessionActive(entry.session)) return false;
+    if (activityOnly && (entry.archived || !isSessionActive(entry.session))) return false;
     return sidebarSearchMatches(query, item.title, item.name, ...sessionSearchValues(entry, liveTitles));
   });
 }

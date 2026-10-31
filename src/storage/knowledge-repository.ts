@@ -1,21 +1,27 @@
 import crypto from "node:crypto";
+import { formatGlobalKnowledge, isGlobalKnowledgeInstallation, readGlobalKnowledgeSync, syncGlobalKnowledgeFiles } from "../global-knowledge.js";
 import type { DatabaseSync } from "node:sqlite";
 import type { WandStorage } from "../storage.js";
 import { isGlobalWorkspace } from "../workspace-binding.js";
 import { normalizeEmployeeKnowledge } from "../employee-knowledge-content.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "../employee-knowledge-types.js";
-import { KnowledgeError, type KnowledgeAccess, type KnowledgeDocument, type KnowledgeDocumentInput, type KnowledgeLibrary, type KnowledgeScope } from "../knowledge-types.js";
+import { GLOBAL_KNOWLEDGE_MAX_BYTES, GLOBAL_KNOWLEDGE_OWNER_ID, KnowledgeError, type KnowledgeAccess, type KnowledgeDocument, type KnowledgeDocumentInput, type KnowledgeLibrary, type KnowledgeScope } from "../knowledge-types.js";
 
 type Row = { id: string; content: string; title: string; folder: string; revision: number; created_at: string; updated_at: string | null };
 const hash = (value: string): string => crypto.createHash("sha256").update(value).digest("hex");
-const spec = (scope: KnowledgeScope) => scope === "personal"
-  ? { table: "employee_knowledge", owner: "employee_id" }
+const spec = (scope: KnowledgeScope) => scope === "global"
+  ? { table: "global_knowledge", owner: "owner_id" }
+  : scope === "personal" ? { table: "employee_knowledge", owner: "employee_id" }
   : { table: "project_knowledge", owner: "workspace_id" };
 
 export class KnowledgeRepository {
   constructor(private readonly db: DatabaseSync, private readonly s: WandStorage) {}
 
   #owner(scope: KnowledgeScope, ownerId: string): { name: string; readOnly: boolean } {
+    if (scope === "global") {
+      if (ownerId !== GLOBAL_KNOWLEDGE_OWNER_ID) throw new KnowledgeError("全局知识库归属无效。", 400);
+      return { name: "全局知识库", readOnly: false };
+    }
     if (scope === "personal") {
       const employee = this.s.getSiliconEmployeeDefinition(ownerId);
       if (!employee) throw new KnowledgeError("员工已删除或不存在，不能改存到其他员工。", 404);
@@ -30,13 +36,14 @@ export class KnowledgeRepository {
     throw new KnowledgeError("项目不存在，或当前空间不是项目知识库。", 404);
   }
 
-  knowledgeOwners(): { employees: Array<{ id: string; name: string }>; projects: Array<{ id: string; name: string; readOnly: boolean }> } {
+  knowledgeOwners(): { global: { id: string; name: string }; employees: Array<{ id: string; name: string }>; projects: Array<{ id: string; name: string; readOnly: boolean }> } {
     const projects = this.s.listWorkspaces().filter(workspace => !isGlobalWorkspace(workspace))
       .map(workspace => ({ id: workspace.id, name: workspace.name, readOnly: false }));
     const orphans = this.db.prepare(`SELECT workspace_id, MAX(project_name) AS project_name FROM project_knowledge
       WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = workspace_id) GROUP BY workspace_id`).all();
     for (const row of orphans) projects.push({ id: String(row.workspace_id), name: `${String(row.project_name)}（已移除项目）`, readOnly: true });
-    return { employees: this.s.listSiliconEmployees({ includeArchived: true }).map(employee => ({ id: employee.id, name: employee.name })), projects };
+    return { global: { id: GLOBAL_KNOWLEDGE_OWNER_ID, name: "全局知识库" },
+      employees: this.s.listSiliconEmployees({ includeArchived: true }).map(employee => ({ id: employee.id, name: employee.name })), projects };
   }
 
   #project(row: Row, scope: KnowledgeScope, ownerId: string): KnowledgeDocument {
@@ -53,7 +60,10 @@ export class KnowledgeRepository {
     const normalizedQuery = query.trim().slice(0, 200).toLocaleLowerCase();
     const entries = rows.map(row => this.#project(row, scope, ownerId))
       .filter(entry => `${entry.title}\n${entry.content}\n${entry.folder}`.toLocaleLowerCase().includes(normalizedQuery));
-    return { scope, ownerId, ownerName: owner.name, readOnly: owner.readOnly, entries, total: rows.length, limit: EMPLOYEE_KNOWLEDGE_MAX_ENTRIES };
+    return { scope, ownerId, ownerName: owner.name, readOnly: owner.readOnly, entries, total: rows.length, limit: EMPLOYEE_KNOWLEDGE_MAX_ENTRIES,
+      ...(scope === "global" ? { totalBytes: Buffer.byteLength(formatGlobalKnowledge(rows.map(row => this.#project(row, scope, ownerId)))),
+        maxTotalBytes: GLOBAL_KNOWLEDGE_MAX_BYTES,
+        ...(isGlobalKnowledgeInstallation(this.s.databasePath()) ? { cliSync: this.s.getPreference("pref:globalKnowledgeSync", readGlobalKnowledgeSync()) } : {}) } : {}) };
   }
 
   getKnowledgeDocument(scope: KnowledgeScope, ownerId: string, id: string, accessToken?: string): KnowledgeDocument {
@@ -78,9 +88,37 @@ export class KnowledgeRepository {
     return { content, title, folder };
   }
 
+  #checkGlobalBudget(scope: KnowledgeScope, input: Required<KnowledgeDocumentInput>, replacingId = ""): void {
+    if (scope !== "global") return;
+    const entries = this.readKnowledgeLibrary("global", GLOBAL_KNOWLEDGE_OWNER_ID).entries.filter(entry => entry.id !== replacingId);
+    const next = { ...input, title: input.title || input.content.split(/\r?\n/).find(line => line.trim())?.trim().slice(0, 100) || "无标题文档",
+      folder: input.folder || "未分类", id: replacingId || `gk_${"0".repeat(32)}`, revision: 9999999999 };
+    const total = Buffer.byteLength(formatGlobalKnowledge([...entries, next]));
+    if (total > GLOBAL_KNOWLEDGE_MAX_BYTES) throw new KnowledgeError("全局约定每轮完整加载，合计最多 24 KB（含标题与目录）。请精简后保存；已有内容不会被截断或删除。");
+  }
+
+  syncGlobalKnowledge(): void {
+    if (!isGlobalKnowledgeInstallation(this.s.databasePath())) return;
+    try {
+      // Serialize snapshots and file writes with other CLI processes using the same database.
+      this.s.transaction(() => {
+        const library = this.readKnowledgeLibrary("global", GLOBAL_KNOWLEDGE_OWNER_ID);
+        // Do not create rule files until a global library has been used at least once.
+        if (!library.total && !readGlobalKnowledgeSync().length) return;
+        const results = syncGlobalKnowledgeFiles(formatGlobalKnowledge(library.entries));
+        this.s.setPreference("pref:globalKnowledgeSync", results);
+        for (const result of results) if (result.error) console.warn(`[knowledge] ${result.provider}: ${result.error}`);
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      this.s.setPreference("pref:globalKnowledgeSync", [{ provider: "全部 CLI", path: "", error: message }]);
+      console.warn(`[knowledge] CLI 同步未完成：${message}`);
+    }
+  }
+
   createKnowledgeDocument(scope: KnowledgeScope, ownerId: string, input: KnowledgeDocumentInput, accessToken?: string): { entry: KnowledgeDocument; created: boolean } {
     const values = this.#normalize(input);
-    return this.s.transaction(() => {
+    const result = this.s.transaction(() => {
       if (accessToken) this.#requireAccess(accessToken, scope, ownerId);
       const owner = this.#owner(scope, ownerId);
       if (owner.readOnly) throw new KnowledgeError("项目已移除，知识保留供查看和删除，不能新增或编辑。", 409);
@@ -90,19 +128,24 @@ export class KnowledgeRepository {
       if (existing) return { entry: this.#project(existing, scope, ownerId), created: false };
       const count = Number(this.db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`).get(ownerId)?.count ?? 0);
       if (count >= EMPLOYEE_KNOWLEDGE_MAX_ENTRIES) throw new KnowledgeError("知识库已满，请先删除不需要的文档；不会自动丢弃旧知识。");
-      const id = `${scope === "personal" ? "k" : "pk"}_${crypto.randomUUID().replace(/-/g, "")}`;
+      this.#checkGlobalBudget(scope, values);
+      const id = `${scope === "global" ? "gk" : scope === "personal" ? "k" : "pk"}_${crypto.randomUUID().replace(/-/g, "")}`;
       const now = new Date().toISOString();
-      if (scope === "personal") this.db.prepare(`INSERT INTO employee_knowledge (id, employee_id, title, folder, content, content_hash, created_at, updated_at)
+      if (scope === "global") this.db.prepare(`INSERT INTO global_knowledge (id, owner_id, title, folder, content, content_hash, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, ownerId, values.title, values.folder, values.content, contentHash, now, now);
+      else if (scope === "personal") this.db.prepare(`INSERT INTO employee_knowledge (id, employee_id, title, folder, content, content_hash, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, ownerId, values.title, values.folder, values.content, contentHash, now, now);
       else this.db.prepare(`INSERT INTO project_knowledge (id, workspace_id, project_name, title, folder, content, content_hash, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, ownerId, owner.name, values.title, values.folder, values.content, contentHash, now, now);
       return { entry: this.getKnowledgeDocument(scope, ownerId, id), created: true };
     });
+    if (scope === "global") this.syncGlobalKnowledge();
+    return result;
   }
 
   updateKnowledgeDocument(scope: KnowledgeScope, ownerId: string, id: string, revision: number, input: KnowledgeDocumentInput, accessToken?: string): KnowledgeDocument {
     const values = this.#normalize(input);
-    return this.s.transaction(() => {
+    const result = this.s.transaction(() => {
       if (accessToken) this.#requireAccess(accessToken, scope, ownerId);
       const owner = this.#owner(scope, ownerId);
       if (owner.readOnly) throw new KnowledgeError("项目已移除，知识保留供查看和删除，不能新增或编辑。", 409);
@@ -112,12 +155,15 @@ export class KnowledgeRepository {
       const contentHash = hash(values.content);
       const duplicate = this.db.prepare(`SELECT id FROM ${table} WHERE ${column} = ? AND content_hash = ? AND id != ?`).get(ownerId, contentHash, id);
       if (duplicate) throw new KnowledgeError("当前知识库已有相同正文，请核对后保留一篇。");
+      this.#checkGlobalBudget(scope, values, id);
       this.db.prepare(`UPDATE ${table} SET title = ?, folder = ?, content = ?, content_hash = ?, updated_at = ?, revision = revision + 1
         WHERE ${column} = ? AND id = ? AND revision = ?`).run(values.title, values.folder, values.content, contentHash, new Date().toISOString(), ownerId, id, revision);
       // An older execution must not recreate the previous fact after the user corrected it.
       this.invalidateKnowledgeNamespace(scope, ownerId);
       return this.getKnowledgeDocument(scope, ownerId, id);
     });
+    if (scope === "global") this.syncGlobalKnowledge();
+    return result;
   }
 
   deleteKnowledgeDocument(scope: KnowledgeScope, ownerId: string, id: string, revision: number, accessToken?: string): void {
@@ -129,6 +175,7 @@ export class KnowledgeRepository {
       this.db.prepare(`DELETE FROM ${table} WHERE ${owner} = ? AND id = ?`).run(ownerId, id);
       this.invalidateKnowledgeNamespace(scope, ownerId);
     });
+    if (scope === "global") this.syncGlobalKnowledge();
   }
 
   invalidateKnowledgeNamespace(scope: KnowledgeScope, ownerId: string): void {
@@ -152,17 +199,18 @@ export class KnowledgeRepository {
     const task = binding?.workspaceTaskId ? this.s.getWorkspaceTask(binding.workspaceTaskId) : null;
     const workspace = binding?.workspaceId ? this.s.getWorkspace(binding.workspaceId) : null;
     const workspaceId = workspace && !isGlobalWorkspace(workspace) && (!binding?.workspaceTaskId || task?.workspaceId === workspace.id) ? workspace.id : null;
-    return employeeId || workspaceId ? { sessionId, employeeId, workspaceId } : null;
+    return { sessionId, employeeId, workspaceId };
   }
 
   issueKnowledgeAccess(sessionId: string, now = Date.now()): string {
     const scope = this.knowledgeSessionScope(sessionId);
-    if (!scope) throw new KnowledgeError("当前会话未绑定可用员工或项目，知识库能力不可用。", 403);
+    if (!scope) throw new KnowledgeError("当前会话不存在或不允许访问知识库。", 403);
     this.db.prepare("DELETE FROM knowledge_access WHERE expires_at <= ?").run(now);
     const token = crypto.randomBytes(32).toString("base64url");
-    this.db.prepare(`INSERT INTO knowledge_access (token_hash, session_id, employee_id, workspace_id, employee_revision, project_revision, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(hash(token), sessionId, scope.employeeId, scope.workspaceId,
-        this.#namespaceRevision("personal", scope.employeeId), this.#namespaceRevision("project", scope.workspaceId), now + 6 * 3600_000);
+    this.db.prepare(`INSERT INTO knowledge_access (token_hash, session_id, employee_id, workspace_id, employee_revision, project_revision, global_revision, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(hash(token), sessionId, scope.employeeId, scope.workspaceId,
+        this.#namespaceRevision("personal", scope.employeeId), this.#namespaceRevision("project", scope.workspaceId),
+        this.#namespaceRevision("global", GLOBAL_KNOWLEDGE_OWNER_ID), now + 6 * 3600_000);
     return token;
   }
 
@@ -173,7 +221,8 @@ export class KnowledgeRepository {
     const current = this.knowledgeSessionScope(String(row.session_id));
     if (!current || current.employeeId !== row.employee_id || current.workspaceId !== row.workspace_id
       || this.#namespaceRevision("personal", current.employeeId) !== row.employee_revision
-      || this.#namespaceRevision("project", current.workspaceId) !== row.project_revision) return null;
+      || this.#namespaceRevision("project", current.workspaceId) !== row.project_revision
+      || this.#namespaceRevision("global", GLOBAL_KNOWLEDGE_OWNER_ID) !== row.global_revision) return null;
     return current;
   }
 
@@ -182,6 +231,8 @@ export class KnowledgeRepository {
 
   #requireAccess(token: string, scope: KnowledgeScope, ownerId: string): void {
     const access = this.resolveKnowledgeAccess(token);
-    if ((scope === "personal" ? access?.employeeId : access?.workspaceId) !== ownerId) throw new KnowledgeError("知识库归属已变化或访问已失效，请等待新的会话执行。", 403);
+    if (!access || (scope === "global" ? GLOBAL_KNOWLEDGE_OWNER_ID : scope === "personal" ? access.employeeId : access.workspaceId) !== ownerId) {
+      throw new KnowledgeError("知识库归属已变化或访问已失效，请等待新的会话执行。", 403);
+    }
   }
 }

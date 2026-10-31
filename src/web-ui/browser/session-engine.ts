@@ -607,7 +607,7 @@ function sessionProjectionSignature(session: any): string {
               options: thinkingOptions,
               ariaLabel: "思考深度",
               placeholder: thinkingLabel,
-              displayValue: scope === "runtime" ? "思考：" + thinkingLabel : thinkingLabel,
+              displayValue: thinkingLabel,
             };
           },
           onValueChange: function(control, value, scope) {
