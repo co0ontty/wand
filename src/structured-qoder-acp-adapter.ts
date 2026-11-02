@@ -194,7 +194,7 @@ export class QoderAcpRunner implements StructuredRunnerAdapter {
                 target: escalation.target,
                 reason: escalation.reason,
                 toolName: escalation.toolName,
-              }).then((decision: any) => {
+              }).then((decision) => {
                 if (decision) {
                   void sendQoderControl(session.id, activeRequestId, {
                     type: "permission_resolution",

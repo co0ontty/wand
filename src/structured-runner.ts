@@ -1,4 +1,4 @@
-import type { ContentBlock, ConversationTurn, SessionSnapshot } from "./types.js";
+import type { ContentBlock, ConversationTurn, EscalationRequest, SessionSnapshot } from "./types.js";
 
 /** core 引擎回报的上下文占用；CLI runner 无此能力时省略。 */
 export interface StructuredContextUsage {
@@ -49,7 +49,15 @@ export interface StructuredRunnerTurnState {
   harnessExtensionState?: SessionSnapshot["harnessExtensionState"];
 }
 
-export type StructuredPermissionDecision = "approve" | "approve_turn" | "deny" | string;
+export type StructuredPermissionDecision = Exclude<NonNullable<EscalationRequest["resolution"]>, "fallback_manual">;
+
+export interface StructuredPermissionRequest {
+  id: string;
+  scope: EscalationRequest["scope"];
+  target?: string;
+  reason: string;
+  toolName: string;
+}
 
 export interface StructuredRunnerContext {
   session: SessionSnapshot;
@@ -62,7 +70,7 @@ export interface StructuredRunnerContext {
   /** Native CLI control events, before the provider reducer mutates its segment. */
   onPiInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
   onQoderInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
-  requestPermission?(decision: unknown): Promise<unknown>;
+  requestPermission?(request: StructuredPermissionRequest): Promise<StructuredPermissionDecision | null>;
 }
 
 export interface StructuredRunnerObserver {
