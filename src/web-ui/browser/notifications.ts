@@ -216,34 +216,39 @@ export function showNotificationBubble(opts: any) {
   bubble.className = "notification-bubble";
   bubble.setAttribute("data-nid", String(id));
 
-  document.body.appendChild(bubble);
-  paintNotificationNotice(bubble, opts);
+  var dismissed = false;
+  function handleDismiss() {
+    if (dismissed) return;
+    dismissed = true;
+    dismissNotification(id);
+  }
 
   // Stack position
   var entry = { id: id, el: bubble };
   notificationStack.push(entry);
   repositionNotifications();
 
-  // Wire close button
-  var closeBtn = bubble.querySelector(".notification-bubble-close") as HTMLElement | null;
-  if (closeBtn) closeBtn.onclick = function() { dismissNotification(id); };
-
-  // Wire action button
-  if (opts.actionLabel && opts.action) {
-    var actionBtn = bubble.querySelector(".notification-bubble-actions button") as HTMLElement | null;
-    if (actionBtn) actionBtn.onclick = function() {
-      opts.action();
-      dismissNotification(id);
-    };
-  }
+  paintNotificationNotice(bubble, {
+    title: opts.title,
+    body: opts.body,
+    type: type,
+    actionLabel: opts.actionLabel,
+    onAction: function() {
+      if (typeof opts.action === "function") opts.action();
+    },
+    onClose: handleDismiss,
+    onLayoutChange: function() {
+      repositionNotifications();
+    },
+  });
 
   // Auto-dismiss
   if (duration > 0) {
-    setTimeout(function() { dismissNotification(id); }, duration);
+    setTimeout(handleDismiss, duration);
   }
 
   return {
-    dismiss: function() { dismissNotification(id); }
+    dismiss: handleDismiss,
   };
 }
 
@@ -260,7 +265,7 @@ function dismissNotification(id: number) {
   setTimeout(function() {
     clearNoticeView(entry.el);
     if (entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
-  }, 300);
+  }, 200);
 }
 
 function repositionNotifications() {
@@ -753,111 +758,33 @@ function showUpdateBubble(currentVer: string, latestVer: string) {
   card.setAttribute("data-nid", String(id));
 
   document.body.appendChild(card);
-  paintUpdateNotice(card, currentVer, latestVer);
 
   var entry = { id: id, el: card };
   notificationStack.push(entry);
   repositionNotifications();
 
-  var closeBtn = card.querySelector(".update-card-close") as HTMLElement | null;
-  if (closeBtn) closeBtn.onclick = function() {
+  var dismissed = false;
+  function handleClose() {
+    if (dismissed) return;
+    dismissed = true;
     dismissNotification(id);
     state._updateBubbleShown = false;
-  };
-
-  var actionBtn = card.querySelector("#update-bubble-action") as HTMLButtonElement | null;
-  var actionLabel = card.querySelector(".update-card-action-label") as HTMLElement | null;
-  var subtitleEl = card.querySelector("#update-card-subtitle") as HTMLElement | null;
-  var statusEl = card.querySelector("#update-card-status") as HTMLElement | null;
-  var progressEl = card.querySelector("#update-card-progress") as HTMLElement | null;
-
-  function setStatus(text: string, kind?: string) {
-    if (!statusEl) return;
-    statusEl.textContent = text || "";
-    statusEl.classList.remove("hidden", "error", "success");
-    if (!text) { statusEl.classList.add("hidden"); return; }
-    if (kind) statusEl.classList.add(kind);
-  }
-  function setSubtitle(text: string) {
-    if (subtitleEl) subtitleEl.textContent = text || "";
-  }
-  function setProgress(active: boolean) {
-    if (!progressEl) return;
-    progressEl.classList.toggle("active", !!active);
-  }
-  // 所有失败分支共用：复位进度 / 忙碌态 / 成功态与按钮，并显示可读错误。
-  function setUpdateFailed(message: string) {
-    setProgress(false);
-    card.classList.remove("is-busy", "is-success");
-    setSubtitle("更新未完成");
-    setStatus(message, "error");
-    actionBtn!.disabled = false;
-    if (actionLabel) actionLabel.textContent = "重试";
   }
 
-  if (actionBtn) actionBtn.onclick = function() {
-    // Phase 1: Performing update
-    actionBtn!.disabled = true;
-    card.classList.add("is-busy");
-    if (actionLabel) actionLabel.textContent = "更新中…";
-    setSubtitle("正在下载并安装新版本…");
-    setProgress(true);
-    setStatus("");
-
-    fetch("/api/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin"
-    })
-    .then(function(res) { return parseJsonResponse<any>(res); })
-    .then(function(data: any) {
-      // Phase 2: 安装成功，自动调用 /api/restart，由 restart overlay 接管 UX。
-      card.classList.add("is-success");
-      setSubtitle((data.message || "更新完成") + "，正在重启服务…");
-      setStatus("");
-      if (actionLabel) actionLabel.textContent = "正在重启…";
-      if (data.detachedUpdate) {
-        showRestartOverlay(data.previousInstanceId || null, data.version || null);
-        return;
+  paintUpdateNotice(card, {
+    current: currentVer,
+    latest: latestVer,
+    onClose: handleClose,
+    onRestart: function(detached, previousInstanceId, version) {
+      if (detached) {
+        showRestartOverlay(previousInstanceId || null, version || null);
+      } else {
+        showRestartOverlay();
       }
-      if (data.restartRequired === false) {
-        setProgress(false);
-        card.classList.remove("is-busy");
-        actionBtn!.disabled = false;
-        if (actionLabel) actionLabel.textContent = "已完成";
-        return;
-      }
-      performRestartCard(setUpdateFailed);
-    })
-    .catch(function(error: unknown) {
-      reportClientError("update_failed", error);
-      // 非 2xx（含非 JSON 的 5xx）不再伪装成成功；纯网络中断沿用既有文案。
-      setUpdateFailed(error instanceof HttpResponseError
-        ? getErrorMessage(error, "更新失败，请重试。")
-        : "请检查网络连接后重试");
-    });
-  };
-}
-
-// Restart driver used by the new update card.
-function performRestartCard(onFailure: (message: string) => void) {
-  fetch("/api/restart", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin"
-  })
-  .then(function(res) { return parseJsonResponse<any>(res); })
-  .then(function() {
-    showRestartOverlay();
-  })
-  .catch(function(error: unknown) {
-    // 服务端明确回错（仍在运行、拒绝重启）时停在更新卡片上，复位后允许重试；
-    // 网络中断更可能是服务已经退出，仍然交给重启遮罩继续探测。
-    if (error instanceof HttpResponseError && error.status > 0) {
-      onFailure(getErrorMessage(error, "重启失败，请重试。"));
-      return;
-    }
-    showRestartOverlay();
+    },
+    onLayoutChange: function() {
+      repositionNotifications();
+    },
   });
 }
 

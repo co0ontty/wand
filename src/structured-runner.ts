@@ -49,6 +49,8 @@ export interface StructuredRunnerTurnState {
   harnessExtensionState?: SessionSnapshot["harnessExtensionState"];
 }
 
+export type StructuredPermissionDecision = "approve" | "approve_turn" | "deny" | string;
+
 export interface StructuredRunnerContext {
   session: SessionSnapshot;
   prompt: string;
@@ -59,6 +61,8 @@ export interface StructuredRunnerContext {
   takeSteering?(state: StructuredRunnerTurnState): string | null;
   /** Native CLI control events, before the provider reducer mutates its segment. */
   onPiInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
+  onQoderInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
+  requestPermission?(decision: unknown): Promise<unknown>;
 }
 
 export interface StructuredRunnerObserver {

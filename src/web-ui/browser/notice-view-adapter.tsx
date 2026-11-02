@@ -53,10 +53,19 @@ export function paintBootNotice(host: HTMLElement, error?: string, message?: str
   paintNotice(host, module => module.paintBootNotice(host, error, message));
 }
 
-export function paintNotificationNotice(host: HTMLElement, options: { title: string; body?: string; type?: string; actionLabel?: string }): void {
+export type { NotificationNoticeOptions, UpdateNoticeOptions } from "./notice-view";
+
+export function paintNotificationNotice(
+  host: HTMLElement,
+  options: import("./notice-view").NotificationNoticeOptions
+): void {
   paintNotice(host, module => module.paintNotificationNotice(host, options));
 }
 
-export function paintUpdateNotice(host: HTMLElement, current: string, latest: string): void {
-  paintNotice(host, module => module.paintUpdateNotice(host, current, latest));
+export function paintUpdateNotice(
+  host: HTMLElement,
+  optionsOrCurrent: import("./notice-view").UpdateNoticeOptions | string,
+  latest?: string
+): void {
+  paintNotice(host, module => module.paintUpdateNotice(host, optionsOrCurrent, latest));
 }

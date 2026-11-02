@@ -1,5 +1,5 @@
 import { asRecord } from "./structured-content.js";
-import { CodexProtocolReducer } from "./structured-codex-protocol.js";
+import { CodexProtocolReducer, type CodexTurnState } from "./structured-codex-protocol.js";
 import type { SessionSnapshot } from "./types.js";
 
 /** App Server projection shared by live observation and persistent-host replay. */
@@ -8,7 +8,7 @@ export class CodexAppProtocolReducer {
   private readonly items = new Map<string, Record<string, any>>();
   private readonly textPrefixes = new Map<string, string>();
   constructor(session: SessionSnapshot) { this.reducer = new CodexProtocolReducer(session); }
-  get state() { return this.reducer.state; }
+  get state(): CodexTurnState { return this.reducer.state; }
   get primaryError() { return this.reducer.primaryError; }
   get errors() { return this.reducer.errors; }
 

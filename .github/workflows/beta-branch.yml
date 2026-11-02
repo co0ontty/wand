@@ -7,8 +7,7 @@ name: Beta NPM Publish
 #   beta   → npm @beta（下一补丁版本的预发布）
 
 on:
-  push:
-    branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: read

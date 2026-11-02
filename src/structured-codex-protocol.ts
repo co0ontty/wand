@@ -343,7 +343,7 @@ function refreshEstimatedCodexUsage(turnState: CodexTurnState): void {
   };
 }
 
-interface CodexTurnState extends StructuredRunnerTurnState {
+export interface CodexTurnState extends StructuredRunnerTurnState {
   codexBlockIndex: Map<string, number>;
   codexFileSnapshots: CodexFileSnapshotMap;
   cwd: string;

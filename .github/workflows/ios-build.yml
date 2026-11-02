@@ -1,9 +1,7 @@
 name: iOS IPA Build
 
-# 云端生成未签名 IPA（不需要本地 Mac；iOS submodule 未变化时复用上一版）。两种触发：
-#   1) 手动 workflow_dispatch：日常出包用这个，产物作为 Actions artifact 下载，
-#      不打 tag、不发 release，不会触发 npm/android/macos 的正式发布。
-#   2) push tag v*：对称其它平台，把 IPA 一并上传到对应 GitHub Release（不动 release body）。
+# 云端生成未签名 IPA（不需要本地 Mac；iOS submodule 未变化时复用上一版）。
+# 现改为纯手动触发（workflow_dispatch），不随每次 tag 自动运行，避免昂贵构建。
 on:
   workflow_dispatch:
     inputs:
@@ -16,9 +14,6 @@ on:
         required: false
         type: boolean
         default: false
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write

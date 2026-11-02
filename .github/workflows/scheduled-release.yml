@@ -10,9 +10,7 @@ name: Scheduled Stable Release
 # - 与 beta-branch.yml 共用 npm-publish 并发组，避免同一时间写 packument
 
 on:
-  schedule:
-    - cron: '0 2 * * *'  # 每天 UTC 02:00（北京时间 10:00）运行
-  workflow_dispatch:       # 也支持手动触发
+  workflow_dispatch:       # 手动触发检测发布（已取消自动定时，避免非预期发版）
 
 permissions:
   contents: write  # 需要推 tag
