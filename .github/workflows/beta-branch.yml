@@ -1,6 +1,6 @@
 name: Beta NPM Publish
 
-# 每次 push 到 master，基于最新正式 tag 发布一个 npm beta 版本。
+# 仅手动触发，基于最新正式 tag 发布一个 npm beta 版本；普通 master push 只运行 CI。
 # 版本形态：<next-patch>-beta.<run>.<attempt>.g<sha>，按序递增且高于上个正式版。
 # 正式版与 Beta 版都走同一条 npm 全局安装链路；区别仅是 dist-tag：
 #   stable → npm @latest（纯 tag）
@@ -22,6 +22,7 @@ jobs:
       group: npm-publish
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -7,21 +7,45 @@ const PACKAGE = "@co0ontty/wand";
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 
 export async function readPublication(version, tag, fetchImpl = fetch) {
-  // A unique public metadata request avoids polling the same CDN representation.
-  // Do not send NODE_AUTH_TOKEN to this read-only endpoint or cache credentials.
-  const url = new URL(`https://registry.npmjs.org/${encodeURIComponent(PACKAGE)}`);
-  url.searchParams.set("wand-verification", randomUUID());
-  const response = await fetchImpl(url, {
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
-    cache: "no-store", signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`Registry verification returned HTTP ${response.status}`);
-  const document = await response.json();
-  if (document.name !== PACKAGE) throw new Error("Registry verification returned the wrong package");
-  return {
-    exists: document.versions?.[version]?.version === version,
-    tagged: document["dist-tags"]?.[tag] === version,
+  // Version and channel endpoints avoid depending on a cached full packument.
+  // These anonymous requests never send NODE_AUTH_TOKEN.
+  const request = path => {
+    const url = new URL(path, "https://registry.npmjs.org");
+    url.searchParams.set("wand-verification", randomUUID());
+    return fetchImpl(url, {
+      headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+      cache: "no-store", signal: AbortSignal.timeout(15_000),
+    });
   };
+  const packagePath = PACKAGE.replace("/", "%2f");
+  const [versionResponse, tagsResponse] = await Promise.all([
+    request(`/${packagePath}/${encodeURIComponent(version)}`),
+    request(`/-/package/${packagePath}/dist-tags`),
+  ]);
+  if (!versionResponse.ok && versionResponse.status !== 404) {
+    throw new Error(`Registry version verification returned HTTP ${versionResponse.status}`);
+  }
+  if (!tagsResponse.ok) throw new Error(`Registry channel verification returned HTTP ${tagsResponse.status}`);
+  const [document, tags] = await Promise.all([
+    versionResponse.ok ? versionResponse.json() : null,
+    tagsResponse.json(),
+  ]);
+  if (document && (document.name !== PACKAGE || document.version !== version)) {
+    throw new Error("Registry verification returned the wrong package version");
+  }
+  const taggedVersion = typeof tags[tag] === "string" ? tags[tag] : null;
+  return { exists: document?.version === version, tagged: taggedVersion === version, taggedVersion };
+}
+
+function newerStableVersion(actual, expected) {
+  const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+  if (typeof actual !== "string" || !stable.test(actual) || !stable.test(expected)) return false;
+  const left = actual.split(".").map(BigInt);
+  const right = expected.split(".").map(BigInt);
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) return left[index] > right[index];
+  }
+  return false;
 }
 
 function npm(args) {
@@ -44,20 +68,35 @@ export async function publish(version, tag, overrides = {}) {
     try { return await deps.read(version, tag); }
     catch { deps.log("Registry verification is temporarily unavailable; retrying."); return { exists: false, tagged: false }; }
   };
+  const superseded = state => tag === "latest" && newerStableVersion(state.taggedVersion, version);
+  const confirmed = state => {
+    if (!state.exists) return false;
+    if (state.tagged) return true;
+    if (superseded(state)) {
+      deps.log(`${PACKAGE}@${version} is published; keeping newer latest ${state.taggedVersion}.`);
+      return true;
+    }
+    return false;
+  };
   const wait = async () => {
     const deadline = deps.now() + 360_000;
     while (true) {
       const state = await read();
-      if (state.exists && state.tagged) return true;
+      if (confirmed(state)) return true;
       if (deps.now() >= deadline) return false;
-      deps.log(`Waiting for ${PACKAGE}@${version} and ${tag} to become visible...`);
+      deps.log(`Waiting for ${PACKAGE}@${version}: version visible=${state.exists}, ${tag}=${state.taggedVersion ?? "unavailable"}...`);
       await deps.sleep(Math.min(10_000, deadline - deps.now()));
     }
   };
   const existing = await read();
+  if (confirmed(existing)) return true;
+  if (superseded(existing)) {
+    deps.log(`Refusing to publish ${version} over newer latest ${existing.taggedVersion}. Use a newer stable version.`);
+    return false;
+  }
   if (existing.exists) {
-    if (!existing.tagged && !await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
-    return existing.tagged || await wait();
+    if (!await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
+    return await wait();
   }
   for (let attempt = 1; attempt <= 5; attempt++) {
     if (await deps.npm(["publish", "--ignore-scripts", "--access", "public", "--tag", tag])) {
@@ -65,9 +104,14 @@ export async function publish(version, tag, overrides = {}) {
       return await wait();
     }
     const state = await read();
+    if (confirmed(state)) return true;
+    if (superseded(state)) {
+      deps.log(`A newer latest ${state.taggedVersion} appeared; not retrying publication of ${version}.`);
+      return false;
+    }
     if (state.exists) {
-      if (!state.tagged && !await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
-      return state.tagged || await wait();
+      if (!await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
+      return await wait();
     }
     if (attempt < 5) await deps.sleep(attempt * 30_000);
   }

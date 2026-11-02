@@ -411,7 +411,7 @@ git submodule update --init -- render-bin
 # 按需：git submodule update --init -- android  # 或 ios、macos、render
 ```
 
-跨端检查前另检出 `android ios macos render`。品牌资源检查会读 iOS/macOS 的 AppIcon PNG（生成物），在 macOS 上先跑 `npm run sync:brand-assets`，再用 `swift <平台>/scripts/generate-icons.swift` 生成（CI 的 `.github/workflows/ci.yml` 做同样的事）。
+日常 `CI / verify` 在 Linux 上只检出 `render-bin`，检查 npm 构建、三套 TypeScript、Web bundle 预算与固定 Render 产物。跨端检查另按需检出 `android ios macos render`；需要校验原生品牌图标时，在 macOS 上先跑 `npm run sync:brand-assets`，再用 `swift <平台>/scripts/generate-icons.swift` 生成。各工作流触发范围见 [CI 说明](docs/ci-performance.md)。
 `npm run clean:build-cache` 预览可清理的编译缓存，追加 `-- --apply` 才执行删除；
 保留分发包、Release Render 二进制、签名、依赖和会话数据。
 macOS 每日清理历史归档编译中间物（保留7天）用 `npm run clean:build-cache:install -- --install`；
