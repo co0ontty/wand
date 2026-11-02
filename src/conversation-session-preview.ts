@@ -11,10 +11,10 @@ export const conversationSessionPreviewLabels: Record<ConversationSessionPreview
   failed: "执行失败", stopped: "已停止", unavailable: "会话不可用",
 };
 
-/** The session owns the transcript. IM only reads a bounded tail; never copies it into message history. */
+/** IM reads a bounded tail of the live session or its preserved read-only transcript. */
 export function conversationSessionPreview(session: SessionSnapshot | null,
   startup?: { startup?: "pending" | "started" | "failed"; error?: string }): ConversationSessionPreview {
-  if (!session) return { status: "unavailable", text: "会话已不可用，原消息保留。" };
+  if (!session) return { status: "unavailable", text: "源会话已删除，未找到保全的回复正文。" };
   const state = session.structuredState;
   const turns = session.messages ?? [];
   const last = turns.at(-1);
@@ -26,10 +26,10 @@ export function conversationSessionPreview(session: SessionSnapshot | null,
   const continued = startup?.startup === "failed" && turns.some(turn =>
     turn.role === "user" && turn.content.some(block => block.type === "text" && block.text.trim()) && ++userInputs > 1);
   // A failed initial delivery receipt remains immutable evidence, but must not mask an explicit later turn.
-  const startupFailed = startup?.startup === "failed" && !active && !continued && !last?.completedAt;
+  const startupFailed = !session.historyOnly && startup?.startup === "failed" && !active && !continued && !last?.completedAt;
   const status: ConversationSessionPreview["status"] = session.status === "stopped" ? "stopped"
     : session.status === "failed" || !!state?.lastError || startupFailed ? "failed"
-    : session.pendingEscalation || question ? "waiting_user"
+    : !session.historyOnly && (session.pendingEscalation || question) ? "waiting_user"
     : active ? "running" : startup?.startup === "pending" ? "starting" : "done";
   // Walk backwards and stop as soon as the viewport budget is filled. Large sessions stay bounded.
   let text = "";
@@ -48,5 +48,5 @@ export function conversationSessionPreview(session: SessionSnapshot | null,
       || (status === "starting" ? "消息已接收，正在启动独立会话。" : status === "running" ? "正在思考…"
         : status === "stopped" ? "本轮已停止。" : "本轮已结束，打开会话查看完整过程。");
   }
-  return { status, text: text.slice(-CONVERSATION_PREVIEW_LIMIT) };
+  return { status, text: text.slice(-CONVERSATION_PREVIEW_LIMIT), ...(session.historyOnly ? { historyOnly: true } : {}) };
 }

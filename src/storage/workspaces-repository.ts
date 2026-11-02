@@ -116,9 +116,10 @@ export class WorkspaceRepository {
         WHERE workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`)
         .all(id) as Array<Record<string, unknown>>;
       if (options.cascade) {
-        this.db.prepare(`DELETE FROM command_sessions WHERE workspace_id = ?
+        const sessions = this.db.prepare(`SELECT id FROM command_sessions WHERE workspace_id = ?
           OR workspace_task_id IN (SELECT id FROM workspace_tasks WHERE workspace_id = ?)`)
-          .run(id, id);
+          .all(id, id) as Array<{ id: string }>;
+        for (const session of sessions) this.s.deleteSession(session.id, undefined, "workspace-cascade");
       } else {
         this.db.prepare(`UPDATE command_sessions SET workspace_id = NULL, workspace_task_id = NULL
           WHERE workspace_id = ? OR workspace_task_id IN
@@ -402,7 +403,8 @@ export class WorkspaceRepository {
       this.db.prepare(`UPDATE wand_tasks SET workspace_task_id = NULL, status = 'archived', updated_at = ?
         WHERE workspace_task_id = ?`).run(nowIso(), id);
       if (options.cascade) {
-        this.db.prepare("DELETE FROM command_sessions WHERE workspace_task_id = ?").run(id);
+        const sessions = this.db.prepare("SELECT id FROM command_sessions WHERE workspace_task_id = ?").all(id) as Array<{ id: string }>;
+        for (const session of sessions) this.s.deleteSession(session.id, undefined, "workspace-task-cascade");
       } else {
         this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?").run(id);
       }

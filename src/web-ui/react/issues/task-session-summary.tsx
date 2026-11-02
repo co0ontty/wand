@@ -1,8 +1,10 @@
 import * as React from "react";
 import { Collapse, Flex, List, Tag, Typography } from "antd";
 import { WandButton } from "../ui";
+import { SessionMoveButton } from "../workspaces/session-move-button";
 import { issueAgentLabel } from "./task-board-agent";
 import { taskAcceptanceLabel, taskSessionActivity, taskSessionSummary } from "./task-delivery-state";
+import { TaskExpandableText } from "./task-expandable-text";
 import type { WandTaskListed } from "./task-board-repository";
 
 export function TaskSessionSummary({ task, onOpenSession, onNewParallel }: {
@@ -18,10 +20,13 @@ export function TaskSessionSummary({ task, onOpenSession, onNewParallel }: {
       children: <List size="small" dataSource={task.sessions} locale={{ emptyText: "尚无会话；需要执行时再新建。" }} renderItem={session =>
         <List.Item><Flex vertical gap="small" style={{ minWidth: 0, width: "100%" }}>
           <Flex wrap align="center" gap="small"><Typography.Text strong>{session.title || session.id}</Typography.Text><Tag>{taskSessionActivity(session)}</Tag></Flex>
-          <Typography.Paragraph style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }} ellipsis={{ rows: 3, expandable: true, symbol: "展开范围" }}>目的与范围：{session.purpose || session.title || "未记录，请在原会话核对"}</Typography.Paragraph>
+          <TaskExpandableText plain lines={3}>目的与范围：{session.purpose || session.title || "未记录，请在原会话核对"}</TaskExpandableText>
           <Typography.Text type="secondary" style={{ overflowWrap: "anywhere" }}>{session.employeeName || issueAgentLabel(session.provider, session.engine)} · {session.cwd || "目录未记录"}</Typography.Text>
           <Typography.Text type="secondary">{session.taskCommentId ? "产物与本轮结果见对应评论执行记录；继续不会重放原派发。" : "产物请在原会话核对后由负责人汇总；空闲或结束不代表已交付。"}</Typography.Text>
-          <WandButton kind="ghost" style={{ alignSelf: "flex-start" }} onClick={() => onOpenSession?.(session.id)} disabled={!onOpenSession} aria-label={`继续已有会话：${session.title || session.id}`}>继续已有会话</WandButton>
+          <Flex wrap align="center" gap="small">
+            <WandButton kind="ghost" onClick={() => onOpenSession?.(session.id)} disabled={!onOpenSession} aria-label={`继续已有会话：${session.title || session.id}`}>继续已有会话</WandButton>
+            <SessionMoveButton sessionId={session.id} taskId={task.workspaceTaskId ?? undefined}/>
+          </Flex>
         </Flex></List.Item>}/>,
     }]}/>
     <WandButton style={{ alignSelf: "flex-start" }} disabled={task.status === "archived"} onClick={onNewParallel}>新建并行会话</WandButton>

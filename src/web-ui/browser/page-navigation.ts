@@ -75,7 +75,13 @@ export async function restorePageNavigation(): Promise<boolean> {
     const workspaceId = params.get("workspace");
     const windowId = params.get("window");
     const tabId = params.get("tab");
-    const session = sessionId ? state.sessions.find(item => item.id === sessionId) : null;
+    let session = sessionId ? state.sessions.find(item => item.id === sessionId) : null;
+    if (sessionId && !session) {
+      // Preserved history is intentionally absent from the runnable session list.
+      await selectSession(sessionId, { focusInput: false, updateRoute: false });
+      if (!current()) return true;
+      session = state.sessions.find(item => item.id === sessionId);
+    }
     if (sessionId && !session) throw new Error("链接中的会话不存在、已删除或无权访问。");
     const taskId = params.get("workspaceTask") || session?.workspaceTaskId;
     if ((windowId || tabId) && !taskId) throw new Error("窗口链接缺少所属任务，请返回工作区重新选择。");

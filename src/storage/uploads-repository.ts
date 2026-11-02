@@ -53,6 +53,15 @@ export class UploadRepository {
       OR instr(COALESCE(messages,''),?)>0 OR instr(COALESCE(queued_messages,''),?)>0
       OR instr(COALESCE(queued_messages,''),?)>0 LIMIT 1`).get(upload.sessionId, upload.cwd, upload.canonicalCwd,
       upload.filePath, upload.canonicalPath, escaped, canonical, escaped, canonical)) return true;
+    // Cleanup can inspect an older installed database without running migrations.
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_history_heads'").get()) {
+      if (this.db.prepare(`SELECT 1 FROM session_history_heads WHERE session_id=?
+        OR instr(snapshot_json,?)>0 OR instr(snapshot_json,?)>0 LIMIT 1`).get(upload.sessionId, escaped, canonical)) return true;
+      if (this.db.prepare(`SELECT 1 FROM wand_upload_references r JOIN session_history_heads h ON h.session_id=r.session_id
+        WHERE r.file_path=? LIMIT 1`).get(upload.filePath)) return true;
+      if (this.db.prepare(`SELECT 1 FROM session_history_blocks WHERE instr(raw_json,?)>0 OR instr(raw_json,?)>0 LIMIT 1`)
+        .get(escaped, canonical)) return true;
+    }
     if (this.db.prepare("SELECT 1 FROM workspace_tasks WHERE cwd IN (?,?) LIMIT 1").get(upload.cwd, upload.canonicalCwd)) return true;
     if (this.db.prepare("SELECT 1 FROM conversation_messages WHERE instr(turn_json,?)>0 OR instr(turn_json,?)>0 LIMIT 1").get(escaped, canonical)) return true;
     // The team run stores delivered reports/attachment references even after its relay session is gone.

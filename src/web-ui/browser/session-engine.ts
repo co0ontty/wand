@@ -27,7 +27,7 @@ import { clearActivityDetailState, ensureChatMessagesContainer, renderChat, sche
 import { extractToolResultText } from "./tool-result-display.js";
 import { parseMessages } from "./pty-chat-parser.js";
 import { hasPageRoute } from "../page-route";
-import { notifyPageSelection } from "./page-selection";
+import { capturePageSelection, notifyPageSelection } from "./page-selection";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble, setChatHistoryLoadState } from "./chat-scroll";
 import "./events";
 import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";
@@ -318,6 +318,7 @@ function sessionProjectionSignature(session: any): string {
 
       export function getComposerPlaceholder(session, terminalInteractive) {        // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
+        if (session?.historyOnly) return "历史回复只读，执行会话已回收";
         if (isSystemAiCall(session)) return SYSTEM_AI_READ_ONLY;
         if (terminalInteractive) return "键盘输入直通终端 · Enter 提交";
         // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。
@@ -542,7 +543,7 @@ function sessionProjectionSignature(session: any): string {
         const toolSwitch = sessionToolSwitches.get(session?.id);
         const canSwitchTool = canSwitchSessionTool(session, state.currentMessages?.length);
         const toolVisible = !!session || canSwitchTool;
-        const toolDisabled = !!toolSwitch?.pending;
+        const toolDisabled = !!toolSwitch?.pending || !!session?.historyOnly;
         var modelOptions = getChatModelSelectOptions(model, session);
         var normalizedModel = normalizeComposerModelValue(model);
         var thinkingOptions = getThinkingSelectOptions(thinking, session);
@@ -1130,7 +1131,7 @@ function sessionProjectionSignature(session: any): string {
         // 但状态/标题/归档没变时不该反复惊动 React 投影。
         var projectedAfter = sessionProjectionSignature(state.sessions.find(function(session) { return session.id === snapshot.id; }));
         if (projectedAfter !== projectedBefore) {
-          publishSessionList(projectSessionSummaries(state.sessions));
+          publishSessionList(projectSessionSummaries(state.sessions.filter(session => !session.historyOnly)));
         }
         var updatedSession = state.sessions.find(function(session) { return session.id === normalizedSnapshot.id; }) || normalizedSnapshot;
         if (updatedSession && Array.isArray(updatedSession.queuedMessages) && normalizedSnapshot.id === state.selectedId) {
@@ -1152,7 +1153,8 @@ function sessionProjectionSignature(session: any): string {
       }
 
       export function subscribeToSession(sessionId) {
-        if (!sessionId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        if (!sessionId || state.sessions.some(session => session.id === sessionId && session.historyOnly)
+          || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
         state.ws.send(JSON.stringify({
           type: "subscribe",
           mode: hasPooledTerminal(sessionId) ? "add" : "replace",
@@ -1290,7 +1292,8 @@ function sessionProjectionSignature(session: any): string {
             var serverSessions = sessions.slice();
             // A push/create received after this read began must not disappear from an older list.
             state.sessions.forEach(function(session) {
-              if (read.changed(session.id) && !serverSessions.some(function(s) { return s.id === session.id; })) {
+              if ((read.changed(session.id) || (session.historyOnly && session.id === state.selectedId))
+                && !serverSessions.some(function(s) { return s.id === session.id; })) {
                 serverSessions.push(session);
               }
             });
@@ -1310,7 +1313,7 @@ function sessionProjectionSignature(session: any): string {
             });
             // 引擎是会话列表的唯一 owner：合并后的列表就是共享快照的当前值，
             // React 侧不必再单独拉一次全量 /api/sessions。
-            publishSessionList(projectSessionSummaries(state.sessions));
+            publishSessionList(projectSessionSummaries(state.sessions.filter(session => !session.historyOnly)));
 
             // Destructive refreshes must preserve an explicit return to Home;
             // ordinary boot/list reads retain the existing preferred selection.
@@ -1627,11 +1630,20 @@ function sessionProjectionSignature(session: any): string {
       }
 
       let activeSessionSelection: { id: string; epoch: number; promise: Promise<void> } | null = null;
+      let sessionSelectionRevision = 0;
 
       export function selectSession(id, options?: { focusInput?: boolean; updateRoute?: boolean }) {
+        const selectionRevision = ++sessionSelectionRevision;
         var foundSession = state.sessions.find(function(item) { return item.id === id; });
         if (!foundSession) {
-          return;
+          const selectionCurrent = capturePageSelection();
+          return compactSessionFetch("/api/sessions/" + encodeURIComponent(id) + "?format=chat&output=omit&blockBudget="
+            + CHAT_HISTORY_BLOCK_BUDGET + "&byteBudget=" + CHAT_HISTORY_BYTE_BUDGET)
+            .then(response => parseJsonResponse<any>(response)).then(snapshot => {
+              if (selectionRevision !== sessionSelectionRevision || !selectionCurrent() || !snapshot.historyOnly || snapshot.id !== id) return;
+              updateSessionSnapshot(snapshot);
+              return selectSession(id, options);
+            }).catch(error => showToast(getErrorMessage(error, "无法读取历史回复。"), "error"));
         }
         if (activeSessionSelection?.id === id && state.selectedId === id
           && activeSessionSelection.epoch === (state.chatRenderEpoch || 0)
@@ -1701,7 +1713,7 @@ function sessionProjectionSignature(session: any): string {
         if (state.filePanelOpen) {
           updateFilePanelCwd(session);
         }
-        const canAwaitSnapshot = state.ws && typeof state.ws.readyState === "number" && shouldRequestChatFormat(session)
+        const canAwaitSnapshot = !session.historyOnly && state.ws && typeof state.ws.readyState === "number" && shouldRequestChatFormat(session)
           && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING);
         const snapshotWait = canAwaitSnapshot ? waitForSnapshot(id) : null;
         subscribeToSession(id);
@@ -1720,6 +1732,7 @@ function sessionProjectionSignature(session: any): string {
 
       /** DOM-free home navigation used by the React shell command port. */
       export function goHome(options?: { updateRoute?: boolean }) {
+        sessionSelectionRevision++;
         activeSessionSelection = null;
         completionViewIntent.clear();
         if (options?.updateRoute !== false) notifyPageSelection();
@@ -2850,7 +2863,8 @@ function sessionProjectionSignature(session: any): string {
 
       export function canSendComposer(value, sessionId?) {
         var id = sessionId === undefined ? state.selectedId : sessionId;
-        if (isSystemAiCall(state.sessions.find(session => session.id === id))) return false;
+        const session = state.sessions.find(session => session.id === id);
+        if (session?.historyOnly || isSystemAiCall(session)) return false;
         if (sessionToolSwitches.get(id)?.pending) return false;
         return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
       }

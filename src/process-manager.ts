@@ -1873,11 +1873,15 @@ export class ProcessManager extends EventEmitter {
     return barrier;
   }
 
-  delete(id: string): void {
+  delete(id: string, reason = "session-delete"): void {
     if (this.unknownTerminalOwners.has(id)) throw new Error("Terminal ownership is unknown; deletion was not delivered. Retry after recovery.");
     const record = this.mustGet(id);
+    // Fail before cancelling timers/processes if referenced history cannot be committed.
+    this.storage.deleteSession(id, this.getOwned(id) ?? undefined, reason);
     const termination = this.nativeHistoryCleanupBarrier(id);
     if (termination) void termination.catch(() => {});
+    // Synchronous exit/data callbacks must not recreate the just-deleted execution row.
+    this.sessions.delete(id);
     const start = this.startingSessions.get(id);
     if (start) start.cancelled = true;
 
@@ -1928,14 +1932,10 @@ export class ProcessManager extends EventEmitter {
       void barrier.then(forget, forget);
     } else this.terminalHost.forget(id);
 
-    // Delete from persistent storage BEFORE removing from in-memory map,
-    // so a storage failure doesn't leave orphan records in the database.
-    this.storage.deleteSession(id);
     this.logger.deleteSession(id);
     if (record.provider === "claude") {
       this.deleteClaudeCache(record);
     }
-    this.sessions.delete(id);
     this.lastPersistedMessageState.delete(id);
     this.dirtySessions.delete(id);
     if (record.claudeSessionId) {

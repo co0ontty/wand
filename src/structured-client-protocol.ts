@@ -258,6 +258,7 @@ export function enrichStructuredMessages(messages: ConversationTurn[], sessionId
   };
   const enriched = stampDerivedSubagents(messages).map((turn) => ({
     ...turn,
+    ...(turn.role === "user" && !turn.notice && !turn.readAt && turn.createdAt ? { readAt: turn.createdAt } : {}),
     content: turn.content.map((block) => {
       if (block.type !== "tool_use" || !block.piExecutionRef) return block;
       const { piExecutionRef: _hostReference, ...publicBlock } = block;

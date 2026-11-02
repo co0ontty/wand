@@ -170,7 +170,7 @@ export function issueCreateDispatches(status: WandTaskStatus): boolean {
 }
 
 /**
- * 拖进「处理中」是否要顺带派发 Agent。
+ * 拖进「执行中」是否要顺带派发 Agent。
  * 换列只改状态，任何执行必须经显式派发入口。
  */
 export function issueDropDispatches(status: WandTaskStatus, sessionCount: number): boolean {
@@ -321,6 +321,25 @@ export interface IssueWorkspace {
   name: string;
   cwd: string;
   kind?: string;
+}
+
+/**
+ * 任务没绑定项目（挂在「全局任务」下）但会话实际跑在某个项目目录里时，按会话 cwd 推断它属于哪个项目。
+ * 只用于筛选与展示，不写回数据；取最外层的匹配项目（worktree/子目录归到仓库本身）。
+ */
+export function inferTaskWorkspace(
+  task: { workspaceId: string | null; sessions: ReadonlyArray<{ cwd?: string }> },
+  workspaces: readonly IssueWorkspace[],
+): IssueWorkspace | null {
+  if (task.workspaceId) return null;
+  let best: IssueWorkspace | null = null;
+  for (const workspace of workspaces) {
+    if (workspace.kind === "global" || !workspace.cwd) continue;
+    const root = workspace.cwd.replace(/\/+$/, "");
+    if (!task.sessions.some(session => !!session.cwd && (session.cwd === root || session.cwd.startsWith(`${root}/`)))) continue;
+    if (!best || root.length < best.cwd.replace(/\/+$/, "").length) best = workspace;
+  }
+  return best;
 }
 
 /**
@@ -661,6 +680,7 @@ export function writeIssueBoardDisplay(display: IssueBoardDisplay): void {
   }
 }
 export function filterIssues<T extends {
+  id?: string;
   title: string;
   identifier: string;
   description: string;
@@ -684,6 +704,7 @@ export function filterIssues<T extends {
     if (filters.labels.length > 0 && !filters.labels.some((label) => task.labels.includes(label))) return false;
     if (!needle) return true;
     const haystack = [
+      task.id ?? "",
       task.title,
       task.identifier,
       task.description,

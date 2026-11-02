@@ -15,6 +15,7 @@ import { taskBoardRepository } from "./task-board-repository";
 import { ChatMessage } from "../chat/message";
 import { statusLabels } from "../../../task-comment-status.js";
 import { taskReviewLabel, taskWorkLabel } from "./task-delivery-state";
+import { TaskPersonAvatar } from "./task-person-avatar.js";
 
 function RowDisclosure({ id, summary, children, expanded, onExpanded, rowRef }: { id: string; summary: React.ReactNode; children: React.ReactNode; expanded?: boolean; onExpanded?(value: boolean): void; rowRef?: React.Ref<HTMLDivElement> }): React.ReactElement {
   const [localOpen, setLocalOpen] = React.useState(false);
@@ -22,7 +23,7 @@ function RowDisclosure({ id, summary, children, expanded, onExpanded, rowRef }: 
   const toggle = (value: boolean): void => { setLocalOpen(value); onExpanded?.(value); };
   return <div ref={rowRef} className="task-stream-row" data-stream-row={id}>
     <button type="button" className="task-stream-row-summary" aria-expanded={open} aria-controls={`detail-${id}`} onClick={() => toggle(!open)}>
-      <WandIcon name={open ? "chevron" : "chevronLeft"} size={12} className="task-stream-row-chevron"/>{summary}
+      <WandIcon name="chevron" size={12} className={open ? "task-stream-row-chevron is-open" : "task-stream-row-chevron"}/>{summary}
     </button>
     {open && <div className="task-stream-row-detail" id={`detail-${id}`}>{children}</div>}
   </div>;
@@ -115,6 +116,7 @@ export const TaskCommentStreamRow = React.forwardRef<HTMLDivElement, {
   onOpenTask?(identifier: string): void;
 }>(function TaskCommentStreamRow({ comment, sourceComment, onReply, onViewDispatch, expanded, onExpanded, onOpenTask }, ref): React.ReactElement {
   return <RowDisclosure id={`comment-${comment.id}`} summary={<Flex align="center" gap="small" wrap className="task-stream-row-line">
+    <TaskPersonAvatar name={comment.authorName || "用户"}/>
     <Typography.Text strong>{comment.authorName || "用户"}</Typography.Text>
     {comment.purpose === "review" && <Tag color="blue">AI 验收</Tag>}
     {comment.reviewWritebackPending && <Tag color="warning">验收结论待回填</Tag>}
@@ -193,7 +195,7 @@ export function TaskChildStreamRow({ task, onOpen, onOpenSession }: {
   task: WandTaskListed; onOpen(id: string): void; onOpenSession?: (id: string) => void;
 }): React.ReactElement {
   return <RowDisclosure id={`child-${task.id}`} summary={<Flex vertical gap={4} className="task-stream-row-line">
-    <Flex align="baseline" gap="small"><Typography.Text type="secondary" style={{ flexShrink: 0 }}>{task.identifier}</Typography.Text><Typography.Text strong style={{ minWidth: 0 }}>{task.title}</Typography.Text></Flex>
+    <Flex align="baseline" gap="small"><Typography.Text type="secondary" style={{ flexShrink: 0 }}>{task.identifier}</Typography.Text><Typography.Text strong ellipsis={{ tooltip: task.title }} style={{ minWidth: 0, flex: 1 }}>{task.title}</Typography.Text></Flex>
     <Flex align="center" gap="small" wrap aria-label={`${task.identifier} 的工作与验收状态`}>
       <Typography.Text>工作：{taskWorkLabel(task)}</Typography.Text>
       <Typography.Text type={task.acceptance?.acceptedAt ? "success" : "secondary"}>验收：{taskReviewLabel(task)}</Typography.Text>

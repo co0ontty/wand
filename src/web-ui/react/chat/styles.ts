@@ -33,7 +33,7 @@ const CHAT_SURFACE_STYLES = String.raw`
 
     .chat-message[data-x-presentation="bubble"], .chat-activity[data-x-presentation] { display:block; width:100%; min-width:0; padding:0; }
     .chat-message.assistant-reply-collapsed > :not(.assistant-reply-host) { display:none; }
-    .chat-message-text, .chat-activity-thinking-content { white-space:pre-wrap; overflow-wrap:anywhere; }
+    .chat-message-text, .chat-message.user .chat-message-content, .chat-activity-thinking-content { white-space:pre-wrap; overflow-wrap:anywhere; }
     .chat-process-summary.chat-disclosure-trigger { height:auto; min-height:36px; padding:6px 0; border-radius:0; border-bottom:1px solid var(--border-subtle); background:transparent; text-align:left; justify-content:flex-start; white-space:normal; color:var(--text-secondary); font-size:var(--font-size-xs); }
     .chat-process-summary.chat-disclosure-trigger > div { flex:1; min-width:0; }
     .chat-process-summary:not(button) { display:inline-flex; align-items:center; gap:6px; min-width:0; }

@@ -10,7 +10,7 @@ export function taskWorkLabel(task: TaskDeliveryState): string {
   if (task.status === "ready") return "等待人工确认";
   if (task.status === "doing") return "执行中";
   if (task.status === "backlog") return "待立项";
-  if (task.status === "todo") return "未开始";
+  if (task.status === "todo") return "等待认领";
   return "未确认";
 }
 
@@ -42,6 +42,11 @@ export function taskSessionActivity(session: IssueSessionSummary): string {
   if (session.executionStatus === "queued" || session.status === "queued") return "排队中";
   if (session.status === "idle") return "空闲";
   return "状态未确认";
+}
+
+/** 判定会话是否正在运行；不要拿展示文案做字符串比较。 */
+export function taskSessionIsRunning(session: IssueSessionSummary): boolean {
+  return taskSessionActivity(session) === "运行中";
 }
 
 export function taskSessionSummary(sessions: readonly IssueSessionSummary[]): string {

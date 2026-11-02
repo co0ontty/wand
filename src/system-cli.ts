@@ -47,6 +47,21 @@ export async function parseSystemCliCommand(
     if (args.length < 1 || args.length > 2 || args.some(arg => !arg || arg.startsWith("-"))) throw new Error("用法：wand task:context <task-id> [comment-id]");
     return api => api.get(`/api/wand-tasks/${encodeURIComponent(args[0]!)}/context${args[1] ? `?commentId=${encodeURIComponent(args[1])}` : ""}`);
   }
+  if (command === "task:comments") {
+    const [id, flag, cursor] = args;
+    if (!id || id.startsWith("-") || !(args.length === 1 || (args.length === 3 && flag === "--before" && cursor && cursor.length <= 4096))) {
+      throw new Error("用法：wand task:comments <task-id> [--before <nextCursor>]");
+    }
+    const query = new URLSearchParams({ limit: "50" });
+    if (cursor) query.set("before", cursor);
+    return api => api.get(`/api/wand-tasks/${encodeURIComponent(id)}/comments?${query}`);
+  }
+  if (command === "task:maintain") {
+    if (args.length !== 2 || !args[0] || args[0].startsWith("-") || args[1] !== "--stdin") throw new Error("用法：wand task:maintain <task-id> --stdin");
+    const { parseTaskMaintenanceInput } = await import("./task-maintenance.js");
+    const body = parseTaskMaintenanceInput(await jsonInput(input));
+    return api => api.post(`/api/wand-tasks/${encodeURIComponent(args[0]!)}/maintenance`, body);
+  }
   if (command === "schedule:read") {
     if (args.length !== 1 || !args[0] || args[0].startsWith("-")) throw new Error("用法：wand schedule:read <id>");
     return api => api.get(`/api/scheduled-tasks/${encodeURIComponent(args[0]!)}`);

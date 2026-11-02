@@ -119,6 +119,7 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   { prefix: "/api/team-dispatch", scope: "sessions" },
   { prefix: "/api/tasks", scope: "sessions" },
   { prefix: "/api/wand-tasks", scope: "sessions" },
+  { prefix: "/api/reference", scope: "sessions" },
   { prefix: "/api/wand-task-actions", scope: "sessions" },
   { prefix: "/api/wand-task-agent-defaults", scope: "sessions" },
   { prefix: "/api/wand-milestones", scope: "sessions" },

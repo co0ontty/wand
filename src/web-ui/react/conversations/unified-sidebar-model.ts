@@ -1,9 +1,10 @@
+import { taskWorkflowStage } from "../../../task-types.js";
 import * as React from "react";
 import type { ConversationSummary } from "../../../conversation-types.js";
 import { isSidebarConversationVisible } from "../../group-chat-visibility.js";
 import { agentToolDisplayName } from "../../provider-identity";
 import { sessionWorktree } from "../workspaces/worktree-presentation";
-import { matchesSessionRuntime, isSessionNeedsConfirmation } from "./runtime-filter";
+import { matchesSessionRuntime, runtimeSelections, isSessionNeedsConfirmation } from "./runtime-filter";
 import { workspaceSessionProvider } from "../workspaces/session-order";
 import { isSessionActive, isSessionAttention } from "../workspaces/sidebar-display-mode";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
@@ -13,6 +14,8 @@ import {
   DEFAULT_CONVERSATION_FILTERS,
   conversationWorkspaceOptions,
   conversationEmployeeOptions,
+  matchesWorkspaceSelection,
+  matchesEmployeeSelection,
   matchesConversationFacets,
   type ConversationListFilters,
 } from "./list-filters";
@@ -109,15 +112,36 @@ export function useUnifiedSidebar(enabled: boolean, titles: Readonly<Record<stri
       entry.conversation?.title ?? "",
       agentToolDisplayName(workspaceSessionProvider(entry.session), entry.session.engine),
     )), [entries, facets, ui.listWorktree, query, titles]);
+  const queuedTasks = groups.groups.flatMap(group => group.tasks.flatMap(task => {
+    const count = task.queuedDispatchCount ?? (task.executionStatus === "queued" ? task.queuedExecutionCount ?? 0 : 0);
+    if (!task.boardTaskId || task.archived || count <= 0) return [];
+    const runtime = facets.runtime ?? "all";
+    if ((runtime !== "all" && !runtimeSelections(runtime).includes("queued"))
+      || (facets.taskStage !== "all" && (!task.boardTaskStatus || taskWorkflowStage(task.boardTaskStatus) !== facets.taskStage))
+      || facets.archive === "archived"
+      || !matchesWorkspaceSelection(facets.workspace, !group.userAdded || group.synthetic || group.global ? "none" : `id:${group.worktree?.parentWorkspaceId ?? group.workspaceId}`)
+      || !matchesEmployeeSelection(facets.employee, task.assignedExecutor?.id ?? "none")
+      || (ui.listWorktree && sessionWorktree(group, task)?.path !== ui.listWorktree)
+      || !sidebarSearchMatches(query, task.name, task.boardTaskIdentifier ?? "", group.workspaceName, task.assignedExecutor?.name ?? "")) return [];
+    return [{ group, task, count }];
+  }));
+  const employees = conversationEmployeeOptions(entries);
+  for (const group of groups.groups) for (const task of group.tasks) {
+    const assignee = task.assignedExecutor;
+    if ((task.queuedDispatchCount ?? 0) > 0 && assignee && !employees.some(option => option.value === assignee.id)) {
+      employees.push({ value: assignee.id, label: assignee.name, avatar: assignee.avatar });
+    }
+  }
   const orderedRows = React.useMemo(() => orderUnifiedSidebarRows(rows), [rows]);
   return {
     entries,
     rows,
     orderedRows,
+    queuedTasks,
     worktree: ui.listWorktree,
     groups: groups.groups,
     workspaces: conversationWorkspaceOptions(groups.groups),
-    employees: conversationEmployeeOptions(entries),
+    employees,
     facets,
     query,
     loading: groups.loading && !groups.groups.length,

@@ -1,3 +1,4 @@
+import { updatePageRoute } from "../../page-route";
 import { isSessionAttention } from "../workspaces/sidebar-display-mode";
 import { agentToolDisplayName } from "../../provider-identity";
 import { WorktreeDirectoryPicker, WorkspaceWorktreeLaunchDialog } from "../workspaces/worktree-directory-picker";
@@ -19,6 +20,7 @@ import { SidebarSurfacesContext } from "../workspaces/sidebar-popup-owner";
 import { SidebarSessionMenu } from "../workspaces/sidebar-session-menu";
 import { archiveSidebarSession } from "../workspaces/sidebar-session-actions";
 import { taskGroupsStore } from "../workspaces/task-groups-store";
+import { requestAddWorkspace } from "../workspaces/controller";
 import { DEFAULT_CONVERSATION_FILTERS,
   workspaceSelections, employeeSelections, toggleWorkspaceSelection, toggleEmployeeSelection, type ConversationEmployeeOption, type ConversationListFilters } from "./list-filters";
 import { cachedSiliconEmployee } from "../agents/employee-repository";
@@ -152,6 +154,10 @@ export function SidebarFilterCapsules({ model, enabled }: { model: UnifiedSideba
     </>)}
     <span className="sidebar-capsule-label">工作区</span>
     {capsule("workspaces", <>
+      {expanded === "workspaces" || search === "workspaces" ? <WandHintButton iconOnly aria-label="添加工作区" hint="添加工作区：填写目录和别名"
+        onClick={() => { setSearch(null); requestAddWorkspace("", undefined, "sidebar-filter-capsules"); }}>
+        <WandIcon name="plus" size={18}/>
+      </WandHintButton> : null}
       {workspaceButton({ value: "all", label: "全部工作区" })}
       {visibleWorkspaces.map(workspaceButton)}
       {expanded === "workspaces" || search === "workspaces" ? <div className="sidebar-capsule-rest">
@@ -253,13 +259,22 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
         <WandIcon name="branch" size={14}/><span>Worktree · {ui.listWorktree.split("/").filter(Boolean).at(-1)}</span><WandIcon name="close" size={12}/>
       </WandButton> : null}
       <ConversationListFilterSummary value={model.facets} workspaces={model.workspaces} employees={model.employees} onClear={() => conversationUi.listFacets(DEFAULT_CONVERSATION_FILTERS)}/>
-      <Typography.Text type="secondary" role="status">{model.loading ? "正在读取会话…" : `${model.rows.length + historyCount} 个会话`}</Typography.Text>
+      <Typography.Text type="secondary" role="status">{model.loading ? "正在读取会话…" : `${model.rows.length + historyCount} 个会话${model.queuedTasks.length ? ` · ${model.queuedTasks.reduce((sum, entry) => sum + entry.count, 0)} 条任务派发排队中` : ""}`}</Typography.Text>
       {model.error ? <Flex vertical><Typography.Text type="danger" role="alert">{model.error}</Typography.Text><WandButton onClick={model.refresh}>重新读取</WandButton></Flex> : null}
       {outside ? <div className="unified-sidebar-current" role="status"><span>当前会话不在筛选结果中</span><WandButton kind="ghost" size="small" onClick={() => {
         conversationUi.listFacets(DEFAULT_CONVERSATION_FILTERS); conversationUi.clearWorktree(); conversationUi.filter("list-query", ""); setLocate(true);
       }}>定位当前会话</WandButton></div> : null}
     </div>
     <div className="unified-sidebar-rows" ref={list}>
+      {model.queuedTasks.length ? <details key={model.facets.runtime} open={runtimeSelections(model.facets.runtime).includes("queued") || undefined}>
+        <summary className="unified-sidebar-section">排队任务 <span>{model.queuedTasks.length}</span></summary>
+        {model.queuedTasks.map(({ group, task, count }) => <div className="unified-sidebar-row" data-queued-task={task.boardTaskId} key={`queued-task:${task.id}`}>
+          <ImSidebarItem id={`queued-task:${task.id}`} title={task.name} avatarNode={<WandIcon name="task" size={13}/>}
+            state={{ label: "排队中", icon: "clock", tone: "muted" }} glow="queued"
+            summary={[task.boardTaskIdentifier, task.assignedExecutor?.name, group.workspaceName, `${count} 条派发排队中`].filter(Boolean).join(" · ")}
+            onClick={() => updatePageRoute({ view: "issues", task: task.boardTaskId!, directory: group.workspaceId })}/>
+        </div>)}
+      </details> : null}
       {orderedRows.map((entry, index) => {
         const session = entry.session;
         const title = sidebarSessionLabel(session, model.entries.indexOf(entry), titles[session.id]);
@@ -285,7 +300,7 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
         </React.Fragment>;
       })}
       {historyRows}
-      {!model.loading && !model.rows.length && !historyCount && !model.error ? <Flex vertical gap={8} className="unified-sidebar-empty" role="status"><Typography.Text type="secondary">{model.entries.length ? "没有符合条件的会话" : "还没有会话"}</Typography.Text>
+      {!model.loading && !model.rows.length && !model.queuedTasks.length && !historyCount && !model.error ? <Flex vertical gap={8} className="unified-sidebar-empty" role="status"><Typography.Text type="secondary">{model.entries.length ? "没有符合条件的会话" : "还没有会话"}</Typography.Text>
         <WandButton kind="ghost" onClick={() => { conversationUi.listFacets(DEFAULT_CONVERSATION_FILTERS); conversationUi.clearWorktree(); conversationUi.filter("list-query", ""); }}>清除筛选与搜索</WandButton>
         <WandButton onClick={onCreate}>新建会话</WandButton></Flex> : null}
     </div>

@@ -70,6 +70,7 @@ export function resolveSessionDisplayTitle(
 function sessionBase(snapshot: SessionSnapshot, avatarMode: "full" | "compact" = "full"): SessionBaseDTO {
   return {
     id: snapshot.id,
+    historyOnly: snapshot.historyOnly,
     sessionSource: snapshot.sessionSource,
     automationId: snapshot.automationId,
     employeeId: snapshot.employeeId,

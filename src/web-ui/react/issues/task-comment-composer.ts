@@ -1,4 +1,4 @@
-import type { WandTaskComment } from "../../../task-types";
+import type { WandTaskAgent, WandTaskComment } from "../../../task-types";
 import { createRequestId, HttpResponseError } from "../http-adapter";
 import { sha256Hex } from "../sha256";
 // 任务引用（`#TASK-133`）的解析与插入规则与三端共享契约一致，Web 直接复用同一份实现。
@@ -49,7 +49,7 @@ export function commentMentionHeld(body: string, name: string): boolean {
   return new RegExp(`(?:^|\\s)@${escaped}(?=\\s|$)`).test(body);
 }
 
-export interface CommentDraft { body: string; employeeId: string; sourceCommentId: string | null; revision: number; }
+export interface CommentDraft { agent?: WandTaskAgent | null; body: string; employeeId: string; sourceCommentId: string | null; revision: number; }
 const drafts = new Map<string, CommentDraft>();
 export function commentDraft(taskId: string): CommentDraft {
   return drafts.get(taskId) ?? { body: "", employeeId: "", sourceCommentId: null, revision: 0 };
@@ -60,11 +60,11 @@ export function editCommentDraft(taskId: string, patch: Partial<Omit<CommentDraf
 }
 export function acceptCommentDraft(taskId: string, submitted: CommentDraft): CommentDraft {
   if (commentDraft(taskId).revision !== submitted.revision) return commentDraft(taskId);
-  return editCommentDraft(taskId, { body: "", employeeId: "", sourceCommentId: null });
+  return editCommentDraft(taskId, { body: "", employeeId: "", sourceCommentId: null, agent: null });
 }
 /** Store only a content digest and request ID, never the submitted instruction. Unknown delivery is safe across refresh. */
 export async function commentRequestIdentity(taskId: string, draft: CommentDraft, purpose: "execution" | "review" = "execution"): Promise<{ requestId: string; purpose: "execution" | "review"; forget(): void }> {
-  const digest = await sha256Hex(JSON.stringify([draft.body.trim(), draft.employeeId, draft.sourceCommentId]));
+  const digest = await sha256Hex(JSON.stringify([draft.body.trim(), draft.employeeId, draft.sourceCommentId, draft.agent ?? null]));
   const key = `wand:task-comment-request:${taskId}:${digest}`;
   // Fail closed if persistent identity cannot be saved: starting anyway would break restart idempotency.
   const saved = localStorage.getItem(key);

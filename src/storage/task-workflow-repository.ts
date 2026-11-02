@@ -7,11 +7,114 @@ import { isArchiveBlocked } from "../archive-policy.js";
 import { AI_TEAM_ACTIVE_RUN_STATUSES } from "../ai-team-types.js";
 import { parseTaskWorkflowInput, taskWorkflowPatch, type TaskWorkflowActor } from "../task-workflow.js";
 import { type WandTask } from "../task-types.js";
+import { parseTaskMaintenanceInput } from "../task-maintenance.js";
 const hash = (value: string): string => crypto.createHash("sha256").update(value).digest("hex");
 type Grant = { taskId: string; sessionId: string; employeeId: string | null; revision: number };
 
 export class TaskWorkflowRepository {
   constructor(private readonly db: DatabaseSync, private readonly s: WandStorage) {}
+
+  /** Synchronous transaction arbitrates against queue claims; never stops a runtime. */
+  maintainTask(taskId: string, value: unknown, registry?: SessionRegistry): WandTask {
+    const input = parseTaskMaintenanceInput(value);
+    const signature = hash(JSON.stringify({ maintenance: input }));
+    return this.s.transaction(() => {
+      const previous = this.db.prepare("SELECT signature FROM task_workflow_events WHERE task_id = ? AND request_id = ?").get(taskId, input.requestId);
+      if (previous) {
+        if (previous.signature !== signature) throw new HttpError(409, "conflict", "请求标识已用于其他操作，请核对原记录。");
+        const current = this.s.getWandTask(taskId);
+        if (!current) throw new HttpError(404, "not_found", "任务已删除。");
+        return current;
+      }
+      const task = this.s.getWandTask(taskId);
+      if (!task) throw new HttpError(404, "not_found", "未找到该任务。");
+      if (task.updatedAt !== input.expectedUpdatedAt || input.action === "close" && task.status === "archived") throw new HttpError(409, "conflict", "任务已变化或已归档，请刷新核对；不会自动重发。");
+      const children = this.s.listWandTaskChildren(taskId);
+      if (input.action === "close" && children.some(child => child.status !== "archived")) throw new HttpError(409, "busy", "仍有未归档子任务，请逐项核对后再关闭主任务。");
+      let duplicate: WandTask | null = null;
+      if (input.duplicateTaskId) {
+        duplicate = this.s.getWandTask(input.duplicateTaskId);
+        if (!duplicate || duplicate.id === task.id || duplicate.workspaceId !== task.workspaceId) throw new HttpError(409, "conflict", "保留任务不存在、与当前任务相同或不属于同一项目。");
+        // Do not close an ancestor into its own descendant.
+        const seen = new Set<string>([task.id]);
+        for (let ancestor: WandTask | null = duplicate; ancestor; ancestor = ancestor.parentTaskId ? this.s.getWandTask(ancestor.parentTaskId) : null) {
+          if (seen.has(ancestor.id)) throw new HttpError(409, "conflict", "不能合并到自身子任务或循环层级。");
+          seen.add(ancestor.id);
+        }
+      }
+      if (input.action === "close") {
+        const queuedIds = (this.db.prepare("SELECT comment_id FROM wand_task_comment_dispatches WHERE task_id = ? AND state IN ('queued', 'paused') ORDER BY comment_id").all(taskId) as Array<{ comment_id: string }>).map(row => row.comment_id);
+        if (JSON.stringify(queuedIds) !== JSON.stringify(input.expectedQueuedCommentIds)) throw new HttpError(409, "conflict", "排队指令已变化，请重新核对，未取消新增派发。");
+        if (this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE task_id = ? AND employee_id IS NOT NULL AND (state IN ('pending', 'unknown') OR (state = 'accepted' AND session_id IS NULL)) LIMIT 1").get(taskId)) throw new HttpError(409, "busy", "派发已领取或送达未知，不能取消归档。");
+        for (const member of [task, ...children]) {
+          for (const id of this.s.listWandTaskSessionIds(member.id)) {
+            const session = registry?.getSlim(id) ?? this.s.getSessionSlim(id);
+            if (session && isArchiveBlocked(session)) throw new HttpError(409, "busy", "任务仍有运行、排队或等待处理的会话，未停止或归档。");
+          }
+          if ([member.id, member.workspaceTaskId].some(id => id && this.s.listAiTeamRuns({ taskId: id, statuses: AI_TEAM_ACTIVE_RUN_STATUSES, limit: 1 }).length)) throw new HttpError(409, "busy", "任务仍有活动团队，不能取消归档。");
+        }
+      }
+      const cancelReason = `用户取消（尚未执行）：${input.reason}`;
+      const cancelled = this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'failed', execution_status = 'stopped', error = ?
+        WHERE task_id = ? AND state IN ('queued', 'paused') AND session_id IS NULL${input.action === "cancel" ? " AND comment_id = ?" : ""} RETURNING comment_id`)
+        .all(cancelReason, taskId, ...(input.action === "cancel" ? [input.commentId!] : []));
+      if (input.action === "cancel" && cancelled.length !== 1) throw new HttpError(409, "conflict", "该派发已领取、已取消或不属于此任务，未改变运行状态。");
+      if (input.action === "close" && this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE task_id = ? AND state IN ('queued', 'paused') LIMIT 1").get(taskId)) throw new HttpError(409, "busy", "队列存在已绑定会话的派发，未关闭任务。");
+      const result = this.s.tasks.writeWandTask(task, { ...(input.action === "close" ? { status: "archived" as const } : {}) }, true);
+      // Cancellation must preserve history, not opt it into acceptance-based auto-deletion.
+      if (input.action === "close") this.db.prepare("UPDATE wand_tasks SET retention_archive_version = NULL WHERE id = ?").run(taskId);
+      const id = crypto.randomUUID();
+      const evidence = [input.action === "close" ? `无需执行，按${input.kind === "duplicate" ? "重复任务" : "失效任务"}归档` : "取消指定排队派发，任务仍保留",
+        `原因：${input.reason}`, duplicate ? `保留任务：${duplicate.identifier} (${duplicate.id})` : "",
+        `取消尚未执行的派发：${cancelled.length} 条`, "此操作不代表交付或验收通过；原指令、会话与验收记录保留。"].filter(Boolean).join("\n\n");
+      this.db.prepare(`INSERT INTO task_workflow_events(id, task_id, request_id, signature, action, actor_kind, evidence, blocker, created_at, result_json)
+        VALUES (?, ?, ?, ?, ?, 'user', ?, '', ?, ?)`).run(id, taskId, input.requestId, signature, `maintenance:${input.action}`, evidence, result.updatedAt, JSON.stringify(result));
+      this.db.prepare("INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(id, taskId, "任务清理", evidence, result.updatedAt);
+      return result;
+    });
+  }
+
+  /** 系统动作（回收、清理）一律在任务评论里留一条可追溯的原因；调用方负责放进同一个事务。 */
+  addSystemComment(taskId: string, author: string, body: string, createdAt = new Date().toISOString()): void {
+    this.db.prepare("INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(crypto.randomUUID(), taskId, author, body, createdAt);
+  }
+
+  /**
+   * 回收「执行中却已无人执行」的任务：没有关联会话、没有排队/进行中的派发、没有活动团队、
+   * 没有未归档子任务、也没有交付/验收记录。会话被归档或清理后，任务卡会一直停在「执行中」，
+   * 这里把它退回「等待认领」，并在任务里补一条评论说明原因。只改状态，不删任何历史。
+   */
+  reclaimIdleDoingTasks(graceMs = 10 * 60_000, now = Date.now()): WandTask[] {
+    const reclaimed: WandTask[] = [];
+    for (const candidate of this.s.listWandTasks()) {
+      if (candidate.status !== "doing") continue;
+      const done = this.s.transaction(() => {
+        const task = this.s.getWandTask(candidate.id);
+        if (!task || task.status !== "doing") return null;
+        const updated = Date.parse(task.updatedAt);
+        if (!Number.isFinite(updated) || now - updated < graceMs) return null;
+        if (this.s.listWandTaskSessionIds(task.id).length > 0) return null;
+        if (task.acceptance?.evidence?.trim() || task.acceptance?.blocker?.trim() || task.verification) return null;
+        if (this.s.listWandTaskChildren(task.id).some(child => child.status !== "archived")) return null;
+        // 已领取但没绑会话的派发给 1 小时窗口（可能正在启动）；更久还没会话说明会话已被清理，不再算在途。
+        const startingAfter = new Date(now - 60 * 60_000).toISOString();
+        if (this.db.prepare(`SELECT 1 FROM wand_task_comment_dispatches d JOIN wand_task_comments c ON c.id = d.comment_id
+          WHERE d.task_id = ? AND (d.state IN ('pending', 'queued', 'paused', 'unknown') OR (d.state = 'accepted' AND d.session_id IS NULL AND c.created_at > ?)) LIMIT 1`).get(task.id, startingAfter)) return null;
+        if ([task.id, task.workspaceTaskId].some(id => id && this.s.listAiTeamRuns({ taskId: id, statuses: AI_TEAM_ACTIVE_RUN_STATUSES, limit: 1 }).length)) return null;
+        const result = this.s.tasks.writeWandTask(task, { status: "todo" }, true);
+        this.addSystemComment(task.id, "任务回收", [
+          "任务回收：已从「执行中」退回「等待认领」",
+          "原因：这个任务处于「执行中」，但已经没有关联会话、没有排队或进行中的派发，也没有活动团队（会话可能已被归档或清理）。",
+          "此操作不代表交付或验收通过；原描述、评论与历史记录均保留。需要继续时重新派发即可。",
+        ].join("\n\n"), result.updatedAt);
+        return result;
+      });
+      if (done) reclaimed.push(done);
+    }
+    return reclaimed;
+  }
 
   /** Called only by an active runner; never grants the project or arbitrary task IDs. */
   issueTaskWorkflowAccess(sessionId: string): { token: string; taskId: string; revision: number } | null {
@@ -69,7 +172,8 @@ export class TaskWorkflowRepository {
       const children = this.s.listWandTaskChildren(taskId);
       const ownedSession = actor.kind === "employee" ? actor.sessionId : null;
       const family = [task, ...children];
-      for (const member of family) {
+      for (const member of input.action === "progress" ? [] : family) {
+        if (this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE (task_id = ? OR execution_task_id = ?) AND (state IN ('pending', 'unknown') OR (state = 'accepted' AND session_id IS NULL)) AND (session_id IS NULL OR session_id != ?) LIMIT 1").get(member.id, member.id, ownedSession ?? "")) throw new HttpError(409, "busy", "仍有送达未确认的执行，请先核对原会话。");
         const queued = this.s.countQueuedTaskCommentDispatchesForTask(member.id);
         if (queued > 0) throw new HttpError(409, "busy", "任务仍有排队执行，请先处理队列。");
         for (const id of this.s.listWandTaskSessionIds(member.id)) {
@@ -81,12 +185,25 @@ export class TaskWorkflowRepository {
       }
       const now = new Date(Math.max(Date.now(), Date.parse(task.updatedAt) + 1)).toISOString();
       const patch = taskWorkflowPatch(task, children, input, actor, now);
+      if (input.action === "pass" || input.action === "accept") {
+        for (const child of children) {
+          const childPatch = input.action === "pass" ? { status: "ready" as const,
+            verification: { verdict: "passed" as const, evidence: input.evidence, blocker: "", reviewedAt: now, revision: child.deliveryRevision ?? 0,
+              sourceSessionId: ownedSession, reviewerId: actor.kind === "employee" ? actor.employeeId : null } }
+            : { status: "archived" as const, acceptance: { evidence: input.evidence, blocker: "", acceptedAt: now, confirmedRevision: child.deliveryRevision ?? 0 } };
+          this.s.tasks.writeWandTask(child, childPatch, true);
+        }
+      }
+      if (task.parentTaskId && ["progress", "submit", "fail", "return"].includes(input.action)) {
+        const parent = this.s.getWandTask(task.parentTaskId);
+        if (parent && ["review", "ready"].includes(parent.status)) this.s.tasks.writeWandTask(parent, { status: "doing", verification: null }, true);
+      }
       const result = this.s.tasks.writeWandTask(task, patch, true);
       const id = crypto.randomUUID();
       this.db.prepare(`INSERT INTO task_workflow_events(id, task_id, request_id, signature, action, actor_kind, actor_id, source_session_id, evidence, blocker, created_at, result_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, taskId, input.requestId, signature, input.action, actor.kind,
           actor.kind === "employee" ? actor.employeeId : null, ownedSession, input.evidence, input.blocker, now, JSON.stringify(result));
-      const labels = { submit: "交付已提交，等待 AI 验收", pass: "AI 验收通过，等待人工确认归档", fail: "AI 验收未通过，退回执行中", return: "人工退回，继续修改", accept: "人工确认交付并归档" };
+      const labels = { progress: "执行进展与阻塞已回填（不代表交付）", submit: "交付已提交，等待 AI 验收", pass: "AI 验收通过，等待人工确认归档", fail: "AI 验收未通过，退回执行中", return: "人工退回，继续修改", accept: "人工确认交付并归档" };
       this.db.prepare("INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)")
         .run(id, taskId, "验收流程", [labels[input.action], input.evidence ? `证据：${input.evidence}` : "", input.blocker ? `缺口：${input.blocker}` : "", `交付版本：${result.deliveryRevision ?? 0}${ownedSession ? ` · 来源会话：${ownedSession}` : ""}`].filter(Boolean).join("\n\n"), now);
       return result;

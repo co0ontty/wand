@@ -4,7 +4,7 @@ import type { WandTaskComment } from "../../../task-types";
 import { DeferredMarkdownPreview } from "../file-preview/deferred-markdown";
 import { WandButton } from "../ui/button";
 import { WandIcon } from "../ui/icons";
-import { EmployeeAvatar } from "../agents/employee-avatar.js";
+import { TaskPersonAvatar } from "./task-person-avatar.js";
 import { statusLabel, statusTones } from "../../../task-comment-status.js";
 import { TaskReferenceText } from "./task-stream-row.js";
 
@@ -78,22 +78,25 @@ export function TaskExecutionCard({ comment, result, onOpenSession, onLocateComm
     .trim();
   return <section className="task-execution-card" aria-label={`${dispatch.employeeName} 的执行`}>
     <header className="task-execution-card-head">
-      <EmployeeAvatar employee={{ id: dispatch.employeeId, name: dispatch.employeeName }} size="sm" className="task-execution-card-avatar"/>
+      <span className="task-execution-card-avatar"><TaskPersonAvatar kind="employee" id={dispatch.employeeId} name={dispatch.employeeName}/></span>
       <span className="task-execution-card-name">{dispatch.employeeName}</span>
-      <Tag color={statusTone[status] ?? "default"}>{statusLabel(status)}</Tag>
+      <Tag color={statusTone[status] ?? "default"}>{status === "done" ? "本轮已结束" : statusLabel(status)}</Tag>
+      {dispatch.deliveryStatus && <Tag color={dispatch.deliveryStatus === "submitted" ? "green" : "warning"}>{dispatch.deliveryStatus === "submitted" ? "交付已提交" : "尚未提交交付"}</Tag>}
       <div className="task-execution-card-meta">
-        {breakdown.total > 0 ? <button type="button" className="task-execution-card-actions-toggle" aria-expanded={open}
-          onClick={() => setOpen(value => !value)}>{breakdown.total} 个动作</button> : null}
+        {breakdown.total > 0 ? <WandButton kind="ghost" size="small" className="task-execution-card-actions-toggle" aria-expanded={open}
+          onClick={() => setOpen(value => !value)}>{breakdown.total} 个动作</WandButton> : null}
         {delivered ? <span className="task-execution-card-delivered">▷ 已送达</span> : null}
         {elapsed ? <span className="task-execution-card-elapsed">{elapsed}</span> : null}
       </div>
     </header>
     <div className="task-execution-card-body">
+      {dispatch.agent && <Typography.Text type="secondary">{dispatch.agent.provider} / {dispatch.agent.model} / {dispatch.agent.thinkingEffort}</Typography.Text>}
+      {dispatch.blocker && <p role="status">待处理：{dispatch.blocker}</p>}
       <div className="task-execution-card-row">
         <span className="task-execution-card-node" data-status={status}/>
         <div className="task-execution-card-text">
           <span className="task-execution-card-tag">任务</span>
-          <DeferredMarkdownPreview content={comment.body} variant="inline" wrap renderText={value => <TaskReferenceText text={value} onOpenTask={onOpenTask}/>}/>
+          <details><summary>{comment.body.length > 160 ? `${comment.body.slice(0, 160)}…` : comment.body}</summary><DeferredMarkdownPreview content={comment.body} variant="inline" wrap renderText={value => <TaskReferenceText text={value} onOpenTask={onOpenTask}/>}/></details>
         </div>
       </div>
       <div className="task-execution-card-row">

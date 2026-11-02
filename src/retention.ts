@@ -143,10 +143,16 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
     const lastActivity = taskLastActivity(deps.storage, task, bound);
     if (lastActivity === null || now - lastActivity < taskWindows.idleMs) continue;
     deps.storage.updateWandTask(task.id, { status: "archived" });
+    deps.storage.addSystemComment(task.id, "任务回收", "任务回收：长期无活动，已按任务保留设置自动归档。\n\n此操作不代表交付或验收通过；原描述、评论、会话与验收记录均保留，可在归档中恢复。");
     result.archivedTasks += 1;
   }
 
   sweepTeamRuns(deps, protection, taskWindows, snapshots, purgedSessionIds, archivedSessionIds, now, result);
+  // 会话刚被归档/清理后，名下没人执行的「执行中」任务在这里回收，并在任务里留评论。
+  try {
+    const reclaimed = deps.storage.reclaimIdleDoingTasks();
+    if (reclaimed.length > 0) console.log(`[retention] reclaimed idle doing tasks=${reclaimed.length}`);
+  } catch { /* 回收失败不影响本轮其它清理 */ }
   // 本轮刚归档的会话已经由 setArchived 清过 CLI 历史。这里只补更早的存量，
   // 避免和本轮写入抢同一批文件。
   const staleArchived = snapshots
@@ -187,7 +193,7 @@ function purgeRetentionSession(
     try { deps.sessions.stop(session.id); } catch { /* already gone */ }
   }
   try {
-    deps.sessions.delete(session.id);
+    deps.sessions.delete(session.id, "retention");
     purgedSessionIds.add(session.id);
     result.purgedSessions += 1;
   } catch { /* best-effort: a session may disappear between the read and the purge */ }

@@ -1,3 +1,4 @@
+import { WAND_REFERENCE_PATTERN, referenceHref } from "../../wand-reference.js";
 import * as React from "react";
 import type { ReactNode } from "react";
 import { messageFileTarget, type MessageFileContext as FileContext } from "../../message-file-target.js";
@@ -33,23 +34,29 @@ function MarkdownInline({ tokens, renderText }: {
   renderText?: (value: string) => ReactNode;
 }) {
   // 纯文本片段的自定义渲染（群聊用它保留 @成员名 token）；不传就是原样文本。
-  const text = (value: string): ReactNode => renderText ? renderText(value) : value;
+  const text = (value: string): ReactNode => {
+    if (renderText) return renderText(value);
+    const nodes: ReactNode[] = []; let cursor = 0;
+    for (const match of value.matchAll(WAND_REFERENCE_PATTERN)) { nodes.push(value.slice(cursor, match.index), <a key={match.index} href={referenceHref(match[0])} title="定位此 Wand 记录">{match[0]}</a>); cursor = match.index! + match[0].length; }
+    nodes.push(value.slice(cursor)); return nodes;
+  };
   const fileContext = React.useContext(MessageFileContext);
   return (
     <>
       {tokens.map((token, index): ReactNode => {
         switch (token.type) {
-          case "code": return <code key={index}>{token.value}</code>;
+          case "code": return <code key={index}>{text(token.value)}</code>;
           case "strong": return <strong key={index}>{text(token.value)}</strong>;
           case "emphasis": return <em key={index}>{text(token.value)}</em>;
           case "delete": return <del key={index}>{text(token.value)}</del>;
           case "link": {
+            if (/^\/api\/reference\/[0-9a-f-]+$/i.test(token.url)) return <a key={index} href={token.url}>{token.value}</a>;
             const file = messageFileTarget(token.url, fileContext);
             if (file?.previewUrl) return <InlineHtmlPreview key={index} previewUrl={file.previewUrl} downloadUrl={file.downloadUrl} label={token.value}/>;
             if (file) return <a key={index} href={file.downloadUrl} onClick={event => {
               event.preventDefault();
               void filePreviewController.open({ path: file.rawUrl });
-            }}>{text(token.value)}</a>;
+            }}>{token.value}</a>;
             const localHref = localHttpPreviewHref(token.url, fileContext.serverOrigin);
             if (!localHref && !/^(?:https?:|mailto:|#|\/)/i.test(token.url)) return <React.Fragment key={index}>{text(token.value)}</React.Fragment>;
             return localHref ? (
@@ -64,7 +71,7 @@ function MarkdownInline({ tokens, renderText }: {
                 {text(token.value)}
               </a>
             ) : (
-              <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{text(token.value)}</a>
+              <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{token.value}</a>
             );
           }
           case "image": {

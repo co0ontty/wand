@@ -2036,7 +2036,7 @@ export class AiTeamRunner {
   }
 
   private postUser(run: AiTeamRun, text: string): void {
-    this.postTurn(run, { role: "user", content: chatText(text) });
+    this.postTurn(run, { role: "user", content: chatText(text), readAt: this.iso() });
   }
 
   private postNotice(

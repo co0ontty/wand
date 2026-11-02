@@ -37,7 +37,11 @@ export function installNewWorkStyles(): void {
 .new-work-page .new-work-kind-settings.ant-btn { width:24px; min-width:24px; height:24px; min-height:24px; color:var(--text-secondary); }
 .new-work-subject { width:min(560px,calc(100vw - 48px)); max-height:60dvh; overflow:auto; }
 .new-work-paths { width:min(440px,calc(100vw - 48px)); max-height:60dvh; overflow:auto; }
-.new-work-paths > .ant-btn { justify-content:flex-start; overflow:hidden; }
+.new-work-path-options { max-height:32dvh; overflow:auto; min-height:0; }
+.new-work-path-option.ant-btn { width:100%; height:auto; min-height:52px; justify-content:flex-start; text-align:start; padding:8px; }
+.new-work-path-copy { display:flex; flex:1; flex-direction:column; min-width:0; gap:2px; }
+.new-work-path-copy > .ant-typography { display:block; max-width:100%; }
+.new-work-path-copy > .ant-typography-secondary { font-size:var(--font-size-xs); }
 /* 工具栏右侧的执行选择器与发送按钮：共用共享工具栏规则，这里只调字号。 */
 .new-work-page .conversation-runtime-summary .conversation-runtime-select { font-size:12px; }
 .new-work-page .new-work-actions { flex:none; }

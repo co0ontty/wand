@@ -2,6 +2,7 @@ import { AgentDispatchPreflightError, dispatchAgentForTask } from "./agent-dispa
 import { agentKey } from "./ai-team-types.js";
 import { DEFAULT_MAX_CONCURRENT_TASKS } from "./employee-types.js";
 import { employeeInputPriority, type EmployeeInputScheduling } from "./employee-input-scheduling.js";
+import { HttpError } from "./http-error.js";
 import type { ProcessManager } from "./process-manager.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -17,6 +18,8 @@ type QueuedExecution = { taskId: string; priority: number; createdAt: string; se
 
 export interface EmployeeTaskCommentSubmission {
   taskId: string;
+  executionTaskId?: string | null;
+  createChild?: boolean;
   employeeId: string;
   employeeName: string;
   requestId: string;
@@ -63,20 +66,18 @@ export class TaskExecutionQueue {
     return this.exclusive(employee.id, async () => {
       const task = this.deps.storage.getWandTask(input.taskId);
       if (!task) throw new Error("未找到该任务。");
+      if (task.status === "archived") throw new HttpError(409, "conflict", "任务已归档，本次派发未接受；请先刷新核对。");
       const latest = this.deps.storage.getSiliconEmployee(input.employeeId);
       if (!latest || latest.archivedAt) throw new Error("硅基员工不存在或已归档。");
-      const closed = task.status === "archived";
       // 先持久化再统一选队首，不能先排空低优先级旧项再比较新派发。
-      const queued = !closed;
       const comment = this.deps.storage.createTaskCommentIntent({
         taskId: input.taskId, requestId: input.requestId, signature: input.signature, body: input.body,
         instruction: input.instruction, sourceCommentId: input.sourceCommentId, employeeId: input.employeeId,
         employeeName: input.employeeName, taskVersion: input.taskVersion, referencedTaskIds: input.referencedTaskIds,
-        agent: input.agent, queued, purpose: input.purpose, reviewRevision: input.reviewRevision,
+        agent: input.agent, executionTaskId: input.executionTaskId, createChild: input.createChild, queued: true, purpose: input.purpose, reviewRevision: input.reviewRevision,
       });
       this.promoteTask(task, input.purpose);
-      if (!queued) await this.dispatchComment(comment.id, input.employeeId);
-      else await this.drainLocked(employee.id);
+      await this.drainLocked(employee.id);
       return this.deps.storage.getWandTaskComment(comment.id)!;
     });
   }
@@ -156,13 +157,13 @@ export class TaskExecutionQueue {
 
   private async dispatchComment(commentId: string, employeeId: string): Promise<void> {
     const comment = this.deps.storage.getWandTaskComment(commentId);
-    const task = comment ? this.deps.storage.getWandTask(comment.taskId) : null;
+    const task = comment ? this.deps.storage.getWandTask(comment.dispatch?.executionTaskId ?? comment.taskId) : null;
     const employee = this.deps.storage.getSiliconEmployee(employeeId);
     if (!comment?.dispatch || !task) {
       if (comment) this.deps.storage.updateTaskCommentDispatch(comment.id, "failed", null, "任务或派发记录不存在。");
       return;
     }
-    if (task.status === "archived" || comment.purpose === "review" && (task.status !== "review" || comment.reviewRevision !== (task.deliveryRevision ?? 0))) {
+    if (this.deps.storage.getWandTask(comment.taskId)?.status === "archived" || task.id !== comment.taskId && task.parentTaskId !== comment.taskId || task.status === "archived" || comment.purpose === "review" && (task.status !== "review" || comment.reviewRevision !== (task.deliveryRevision ?? 0))) {
       this.deps.storage.updateTaskCommentDispatch(comment.id, "failed", null, "任务已关闭，排队执行已取消。");
       return;
     }
@@ -192,8 +193,8 @@ export class TaskExecutionQueue {
           task, agent, employee: executionEmployee,
           employeeCandidateIndex: Math.max(0, candidateIndex),
           automationId: `wand-task-comment:${comment.id}`,
-          prompt: taskCommentPrompt({ taskId: task.id, commentId: comment.id, sourceCommentId: comment.sourceCommentId ?? null,
-            taskVersion: comment.taskVersion ?? task.updatedAt, instruction: comment.instruction ?? comment.body, referencedTasks, purpose: comment.purpose }),
+          prompt: taskCommentPrompt({ taskId: task.id, contextTaskId: comment.taskId, commentId: comment.id, sourceCommentId: comment.sourceCommentId ?? null,
+            taskVersion: task.updatedAt, instruction: comment.instruction ?? comment.body, referencedTasks, purpose: comment.purpose }),
           sessionCreated: session => {
             sessionId = session.id;
             // 已从队列认领、正在启动的派发不再被后来入队项抢占。

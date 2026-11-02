@@ -1,3 +1,4 @@
+import { referenceHtml } from "../wand-reference.js";
 import { presentAssistantReply, presentChat, refreshChatPresentation } from "../react/chat/presentation.js";
 import { paintTurnNavigation } from "../react/chat/navigation/browser-host.js";
 import { paintChatSubtasks } from "./chat-subtasks.js";
@@ -2457,7 +2458,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
       function renderUserText(text) {
         var raw = text || "";
         var m = raw.match(ATTACHMENT_PREFIX_RE);
-        if (!m) return escapeHtml(raw);
+        if (!m) return referenceHtml(escapeHtml(raw));
         var attachHtml = "";
         var lines = m[1].split("\n");
         for (var i = 0; i < lines.length; i++) {
@@ -2465,7 +2466,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         }
         var rest = raw.slice(m[0].length);
         var wrap = attachHtml ? '<div class="user-attachments">' + attachHtml + '</div>' : "";
-        var body = rest.trim() ? '<div class="user-attachment-text">' + escapeHtml(rest) + '</div>' : "";
+        var body = rest.trim() ? '<div class="user-attachment-text">' + referenceHtml(escapeHtml(rest)) + '</div>' : "";
         return wrap + body;
       }
 

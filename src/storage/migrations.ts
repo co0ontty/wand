@@ -516,4 +516,36 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
     DELETE FROM session_message_blocks WHERE session_id = OLD.id;
   END;
 `) },
+  { version: 30, name: "referenced-session-history", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS session_history_heads (
+      session_id TEXT PRIMARY KEY, turn_count INTEGER NOT NULL, format_version INTEGER NOT NULL,
+      snapshot_json TEXT NOT NULL, preserved_at TEXT NOT NULL, reason TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS session_history_turns (
+      session_id TEXT NOT NULL REFERENCES session_history_heads(session_id) ON DELETE CASCADE,
+      turn_index INTEGER NOT NULL, raw_json TEXT NOT NULL, digest TEXT NOT NULL,
+      metadata_json TEXT NOT NULL, outline_json TEXT NOT NULL, block_count INTEGER NOT NULL,
+      PRIMARY KEY(session_id, turn_index)
+    );
+    CREATE TABLE IF NOT EXISTS session_history_blocks (
+      session_id TEXT NOT NULL REFERENCES session_history_heads(session_id) ON DELETE CASCADE,
+      turn_index INTEGER NOT NULL, block_index INTEGER NOT NULL,
+      formatted_json TEXT NOT NULL, compact_json TEXT NOT NULL,
+      tool_id TEXT, block_type TEXT NOT NULL, raw_json TEXT NOT NULL,
+      PRIMARY KEY(session_id, turn_index, block_index)
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_session_reference
+      ON conversation_messages(json_extract(turn_json, '$.sessionLink.sessionId'));
+    CREATE INDEX IF NOT EXISTS idx_conversation_author_reference ON conversation_messages(json_extract(turn_json, '$.author.sessionId'));
+    CREATE INDEX IF NOT EXISTS idx_session_message_author_reference ON session_message_turns(json_extract(metadata_json, '$.author.sessionId'), session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_message_link_reference ON session_message_turns(json_extract(metadata_json, '$.sessionLink.sessionId'), session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_history_author_reference ON session_history_turns(json_extract(metadata_json, '$.author.sessionId'), session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_history_link_reference ON session_history_turns(json_extract(metadata_json, '$.sessionLink.sessionId'), session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_history_tool ON session_history_blocks(session_id, tool_id, block_type, turn_index DESC, block_index DESC);
+    CREATE TRIGGER IF NOT EXISTS delete_session_history_rows AFTER DELETE ON session_history_heads BEGIN
+      DELETE FROM session_history_turns WHERE session_id = OLD.session_id;
+      DELETE FROM session_history_blocks WHERE session_id = OLD.session_id;
+    END;
+  `) },
+  { version: 31, name: "task-comment-execution-owner", up: db => db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN execution_task_id TEXT") },
 ];

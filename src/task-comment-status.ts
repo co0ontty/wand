@@ -9,7 +9,7 @@
 export const statusLabels: Record<string, string> = {
   paused: "已暂停", queued: "排队中", pending: "等待确认", accepted: "已创建执行", running: "执行中", blocked: "等待审批",
   idle: "本轮已结束", exited: "会话已退出", stopped: "已停止", failed: "执行失败",
-  done: "已完成", unknown: "送达未知 · 不会重放", history: "历史会话", unavailable: "会话不可用",
+  done: "本轮已结束", unknown: "送达未知 · 不会重放", history: "历史会话", unavailable: "会话不可用",
 };
 
 /** 状态 → Web 标签色；其余端不用颜色，只用文案。 */

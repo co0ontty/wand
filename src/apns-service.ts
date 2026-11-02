@@ -1,7 +1,22 @@
 import type { ApnsConfiguration, ApnsResult, ApnsTransport } from "./apns-client.js";
+import { liveActivityText } from "./live-activity-state.js";
 import { apnsDigest } from "./storage/apns-repository.js";
 import type { WandStorage } from "./storage.js";
 import type { ProcessEvent, SessionSnapshot } from "./types.js";
+
+/** Only display names go to Apple; never project commands, paths or escalation details. */
+export function apnsAlert(
+  kind: "completed" | "permission",
+  session: SessionSnapshot | null,
+): { title: string; body: string } {
+  const title = kind === "permission" ? "需要你的授权" : "回复已完成";
+  const fallback = kind === "permission" ? "Wand 会话正在等待确认，点击查看。" : "Wand 会话已有新结果，点击查看。";
+  for (const value of [session?.title, session?.summary, session?.description]) {
+    const name = liveActivityText(value?.replace(/\s+/g, " ") ?? "", 60, 160);
+    if (name) return { title, body: name };
+  }
+  return { title, body: fallback };
+}
 
 export class ApnsService {
   private stopped = false;
@@ -93,10 +108,8 @@ export class ApnsService {
           || session.ptyBusy === true || session.structuredState?.inFlight === true));
       if (stale) { this.storage.apns.finish(job.id, "canceled", "NoLongerActionable"); continue; }
       const payload = JSON.stringify({
-        aps: { alert: {
-          title: job.kind === "permission" ? "需要你的授权" : "回复已完成",
-          body: job.kind === "permission" ? "Wand 会话正在等待确认，点击查看。" : "Wand 会话已有新结果，点击查看。",
-        }, sound: "default", "thread-id": apnsDigest(`${device!.server_id}:${job.session_id}`).slice(0, 32) },
+        aps: { alert: apnsAlert(job.kind, session), sound: "default",
+          "thread-id": apnsDigest(`${device!.server_id}:${job.session_id}`).slice(0, 32) },
         eventId: job.event_id, sessionId: job.session_id, serverId: device!.server_id, kind: job.kind,
       });
       let result: ApnsResult;

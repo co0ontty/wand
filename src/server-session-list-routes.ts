@@ -15,6 +15,7 @@ import { renameWorkspaceDirectory } from "./workspace-binding.js";
 
 import type { SessionRouteContext } from "./server-session-context.js";
 import { buildSessionListPage, directoryTreeContainsPath } from "./session-service.js";
+import { sendSessionHistory } from "./server-session-history.js";
 
 /** Session list, detail, transcript and tool-content read routes. */
 export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext): void {
@@ -109,7 +110,9 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
   });
 
   app.get("/api/sessions/:id/pi-execution/:toolUseId", asyncRoute(async (req, res) => {
-    const snapshot = sessions.get(req.params.id);
+    const history = storage.getSessionHistory(req.params.id);
+    const snapshot = sessions.get(req.params.id) ?? (history ? { ...history,
+      messages: storage.sessionHistory.messages.readSessionToolBlocks(req.params.id, req.params.toolUseId) } : null);
     if (!snapshot) { res.status(404).json({ error: "未找到该会话。" }); return; }
     const execution = await inspectPiExecution(snapshot.messages ?? [], req.params.toolUseId);
     if (!execution) { res.status(404).json({ error: "未找到该 Pi 执行调用。" }); return; }
@@ -118,7 +121,9 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
   }));
 
   app.get("/api/sessions/:id/tool-content/:toolUseId", (req, res) => {
-    const snapshot = sessions.get(req.params.id);
+    const history = storage.getSessionHistory(req.params.id);
+    const snapshot = sessions.get(req.params.id) ?? (history ? { ...history,
+      messages: storage.sessionHistory.messages.readSessionToolBlocks(req.params.id, req.params.toolUseId) } : null);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -152,7 +157,9 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
   // 塞进每次快照 / WS 帧）。各端用同一套带鉴权的取图通道按需加载。
 
   app.get("/api/sessions/:id/tool-images/:toolUseId/:index", (req, res) => {
-    const snapshot = sessions.get(req.params.id);
+    const history = storage.getSessionHistory(req.params.id);
+    const snapshot = sessions.get(req.params.id) ?? (history ? { ...history,
+      messages: storage.sessionHistory.messages.readSessionToolBlocks(req.params.id, req.params.toolUseId) } : null);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -223,6 +230,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
   });
 
   app.get("/api/sessions/:id", (req, res) => {
+    if (sendSessionHistory(req, res, ctx)) return;
     const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
@@ -277,6 +285,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
   // 返回 messages = 完整历史的 [offset, offset+limit)（已做 transport 截断）+ total。
 
   app.get("/api/sessions/:id/messages", (req, res) => {
+    if (sendSessionHistory(req, res, ctx, true)) return;
     const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });

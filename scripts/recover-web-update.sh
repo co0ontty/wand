@@ -80,20 +80,28 @@ NODE_BIN="$(command -v node)"
 INSTALL_PREFIX="$("$NODE_BIN" "$RECOVERY_DIR/recover-web-update.mjs" prefix "${WAND_INSTALL_PREFIX:-$(npm prefix -g)}" "$HOME" "$CONFIG_PATH")"
 GLOBAL_ROOT="$INSTALL_PREFIX/lib/node_modules"
 GLOBAL_BIN="$INSTALL_PREFIX/bin/wand"
-echo "[wand-recovery] preparing $VERSION ($CHANNEL subscription); current service stays online"
-npm install -g --engine-strict --prefix "$RECOVERY_DIR/prepared" "@co0ontty/wand@$VERSION"
-PREPARED="$RECOVERY_DIR/prepared/lib/node_modules/@co0ontty/wand"
-for name in core-status-cli update-health update-legacy deployment-lock; do
+for name in core-status-cli update-health update-legacy deployment-lock npm-install-policy; do
   # A checkout may contain an older dist; use the matching source protocol there.
   if [ ! -f "$SCRIPT_DIR/../src/$name.ts" ] && [ -f "$SCRIPT_DIR/../dist/$name.js" ]; then
     cp "$SCRIPT_DIR/../dist/$name.js" "$RECOVERY_DIR/$name.js"
-    case "$name" in core-status-cli) GUARD_PATH="$RECOVERY_DIR/$name.js" ;; update-health) HEALTH_PATH="$RECOVERY_DIR/$name.js" ;; update-legacy) LEGACY_PATH="$RECOVERY_DIR/$name.js" ;; esac
+    case "$name" in core-status-cli) GUARD_PATH="$RECOVERY_DIR/$name.js" ;; update-health) HEALTH_PATH="$RECOVERY_DIR/$name.js" ;; update-legacy) LEGACY_PATH="$RECOVERY_DIR/$name.js" ;; npm-install-policy) NPM_POLICY_PATH="$RECOVERY_DIR/$name.js" ;; esac
   else
     if [ -f "$SCRIPT_DIR/../src/$name.ts" ]; then cp "$SCRIPT_DIR/../src/$name.ts" "$RECOVERY_DIR/$name.ts";
     else curl -fLsS "https://raw.githubusercontent.com/co0ontty/wand/master/src/$name.ts" -o "$RECOVERY_DIR/$name.ts"; fi
-    case "$name" in core-status-cli) GUARD_PATH="$RECOVERY_DIR/$name.ts" ;; update-health) HEALTH_PATH="$RECOVERY_DIR/$name.ts" ;; update-legacy) LEGACY_PATH="$RECOVERY_DIR/$name.ts" ;; esac
+    case "$name" in core-status-cli) GUARD_PATH="$RECOVERY_DIR/$name.ts" ;; update-health) HEALTH_PATH="$RECOVERY_DIR/$name.ts" ;; update-legacy) LEGACY_PATH="$RECOVERY_DIR/$name.ts" ;; npm-install-policy) NPM_POLICY_PATH="$RECOVERY_DIR/$name.ts" ;; esac
   fi
 done
+# Fail early before a large download. The actual apply path reacquires the lock
+# before draining, so this preflight never substitutes for mutual exclusion.
+"$NODE_BIN" "$RECOVERY_DIR/recover-web-update.mjs" check-lock "$GLOBAL_ROOT" "$GUARD_PATH"
+echo "[wand-recovery] preparing $VERSION ($CHANNEL subscription); current service stays online"
+NPM_SCRIPT_FLAG="$("$NODE_BIN" "$NPM_POLICY_PATH" "$(command -v npm)")"
+if [ -n "$NPM_SCRIPT_FLAG" ]; then
+  npm install -g --engine-strict "$NPM_SCRIPT_FLAG" --prefix "$RECOVERY_DIR/prepared" "@co0ontty/wand@$VERSION"
+else
+  npm install -g --engine-strict --prefix "$RECOVERY_DIR/prepared" "@co0ontty/wand@$VERSION"
+fi
+PREPARED="$RECOVERY_DIR/prepared/lib/node_modules/@co0ontty/wand"
 ALLOW_STOPPED=0
 if [ "$SCOPE" = "standalone" ]; then ALLOW_STOPPED=1
 elif [ "$PLATFORM" = "Darwin" ]; then
@@ -121,6 +129,11 @@ const [guardPath, legacyPath, configPath, stopped, root, ...command] = process.a
 const guard = await import(pathToFileURL(guardPath).href);
 const { waitForCompatibleUpdate } = await import(pathToFileURL(legacyPath).href);
 const { withRecoveryLock } = await import(pathToFileURL(command[1]).href);
-process.exitCode = await withRecoveryLock(root, guardPath,
-  () => waitForCompatibleUpdate(configPath, 300, command, stopped === "1", guard));
+try {
+  process.exitCode = await withRecoveryLock(root, guardPath,
+    () => waitForCompatibleUpdate(configPath, 300, command, stopped === "1", guard));
+} catch (error) {
+  console.error("[wand-recovery] " + error.message);
+  process.exitCode = 1;
+}
 NODE

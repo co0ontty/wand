@@ -501,8 +501,10 @@ verify_installed_beta() {
 }
 
 wait_for_service_ready() {
-  local port https proto url pid command listener_pids listener_matches deadline announced=0
+  local port https proto url pid command listener_pids listener_matches deadline resolved_node announced=0
   command -v curl >/dev/null 2>&1 || die "缺少 curl，无法验证 Web 服务是否就绪"
+  # launchd/ps may report the executable's real path rather than the configured symlink.
+  resolved_node="$("$NODE_BIN" -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$NODE_FOR_WAND")" || die "无法解析服务 Node 入口"
   port="$(config_value port 8443)"
   https="$(config_value https false)"
   proto="http"; [[ "$https" == "true" ]] && proto="https"
@@ -520,7 +522,7 @@ wait_for_service_ready() {
       listener_pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
       grep -qx "$pid" <<<"$listener_pids" || listener_matches=0
     fi
-    if [[ "$command" == *"$NODE_FOR_WAND"* && "$command" == *"$WAND_BIN"* && "$command" == *"$CONFIG_PATH"* && "$listener_matches" == "1" ]]; then
+    if [[ ( "$command" == "$NODE_FOR_WAND "* || "$command" == "$resolved_node "* ) && "$command" == *"$WAND_BIN"* && "$command" == *"$CONFIG_PATH"* && "$listener_matches" == "1" ]]; then
       if curl -kfsS --max-time 2 -o /dev/null "$url"; then
         ok "$SCOPE 服务已使用全局 Wand 启动：PID $pid · $url"
         return 0
@@ -847,12 +849,17 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   PACK_FILE="$(cd "$PACKAGE_STAGE" && "$NPM_FOR_WAND" pack --ignore-scripts --pack-destination "$PACK_DIR" | tail -1)"
   [[ -n "$PACK_FILE" && -f "$PACK_DIR/$PACK_FILE" ]] || die "npm pack 未产出 tarball"
 
+  NPM_SCRIPT_FLAG="$("$NODE_BIN" "$REPO_ROOT/src/npm-install-policy.ts" "$NPM_FOR_WAND")"
   if service_installed && [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
     msg "安装前先停止 $SCOPE 服务"
     stop_service_for_install
   fi
   # sudo 继承的私有 umask 不应让包目录变成 0700，阻断 service 的普通用户。
-  (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund)
+  if [[ -n "$NPM_SCRIPT_FLAG" ]]; then
+    (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$NPM_SCRIPT_FLAG" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund)
+  else
+    (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund)
+  fi
   ok "本地 npm 包已安装到 $WAND_PREFIX"
   # npm 可能把全局包重新写成 root 所有、并丢掉 spawn-helper 的 +x。
   # 安装后再修一次，避免随后每一次新建 PTY 都 posix_spawnp failed。

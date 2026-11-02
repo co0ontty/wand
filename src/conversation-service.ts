@@ -136,9 +136,21 @@ export class ConversationService {
   private snapshot(id: string | null): SessionSnapshot | null {
     if (!id) return null;
     if (this.readSnapshots?.has(id)) return this.readSnapshots.get(id)!;
-    const snapshot = this.deps.structured.get(id) ?? this.storage.getSession(id);
+    let snapshot = this.deps.structured.get(id) ?? this.storage.getSession(id);
+    if (!snapshot) {
+      const history = this.storage.getSessionHistory(id);
+      if (history) snapshot = { ...history, messages: this.storage.sessionHistory.messages.loadSessionMessageRows(id) };
+    }
     this.readSnapshots?.set(id, snapshot);
     return snapshot;
+  }
+
+  private replyPreview(id: string, startup?: ConversationReceipt) {
+    const history = this.storage.getSessionHistory(id);
+    if (!history) return conversationSessionPreview(this.snapshot(id), startup);
+    const page = this.storage.sessionHistory.messages.readSessionMessagePage(id, this.deps.config.cardDefaults ?? {},
+      { blockBudget: 16, byteBudget: 16 * 1024, strictByteBudget: true });
+    return conversationSessionPreview({ ...history, messages: page.messages }, startup);
   }
 
   /** Explicit startup/event migration, never a GET repair and never an invented group. */
@@ -317,7 +329,7 @@ export class ConversationService {
       catch (error) { unavailableReason = getErrorMessage(error); }
     }
     const last = knownTurns ? knownTurns.at(-1) : this.previewTurn(instance);
-    const lastText = last?.sessionLink ? conversationSessionPreview(this.snapshot(last.sessionLink.sessionId), last.requestId ? this.receipt(last.requestId) ?? undefined : undefined).text
+    const lastText = last?.sessionLink ? this.replyPreview(last.sessionLink.sessionId, last.requestId ? this.receipt(last.requestId) ?? undefined : undefined).text
       : last?.content.map((b) => b.type === "text" ? b.text : "").join(" ") ?? "";
     const messageAt = [instance.updatedAt, last?.createdAt ?? "", ...tasks.flatMap((t) => t.runs.map((r) => r.updatedAt))].sort().at(-1) ?? "";
     const title = instance.kind === "dm" ? employee?.name ?? instance.name
@@ -433,7 +445,7 @@ export class ConversationService {
     }
     const { summary, turns } = projection;
     return { ...summary, messages: select(turns).map(turn => turn.sessionLink
-      ? { ...turn, sessionPreview: conversationSessionPreview(this.snapshot(turn.sessionLink.sessionId), turn.requestId ? this.receipt(turn.requestId) ?? undefined : undefined),
+      ? { ...turn, sessionPreview: this.replyPreview(turn.sessionLink.sessionId, turn.requestId ? this.receipt(turn.requestId) ?? undefined : undefined),
         // Older clients can still open the exact source session without understanding sessionLink.
         author: turn.author ? { ...turn.author, sessionId: turn.sessionLink.sessionId } : turn.author,
         content: turn.content.length ? turn.content : [{ type: "text" as const, text: "消息已接收，打开对应会话查看实时回复。" }] }
@@ -717,7 +729,7 @@ export class ConversationService {
       const session = this.communicationChannel(instance, cwd);
       const relayId = this.ensureRelay(instance, cwd);
       if (echo) this.deps.structured.appendRelayTurns(relayId, [{ role: "user", messageId: requestId, requestId,
-        conversationId: id, conversationTarget: null, content: [{ type: "text", text }] }]);
+        conversationId: id, conversationTarget: null, content: [{ type: "text", text }], readAt: now() }]);
       receipt.sessionId = session.id; receipt.messageId = requestId;
       // Server has captured and committed this input. Later model failure is not an unsent draft.
       receipt.state = "accepted"; commit();
@@ -846,7 +858,7 @@ export class ConversationService {
     });
     if (echo) this.deps.structured.appendRelayTurns(relayId, [{ role: "user", messageId: requestId, requestId,
       conversationId: group.id, conversationTarget: receipt.runId ? { taskId: task.id, runId: receipt.runId } : null,
-      content: [{ type: "text", text: description }] }]);
+      content: [{ type: "text", text: description }], readAt: now() }]);
   }
 
   act(id: string, requestId: string, target: { taskId: string; runId: string }, action: string, extraSteps?: number): Promise<ConversationReceipt> {

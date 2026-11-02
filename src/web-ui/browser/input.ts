@@ -1895,7 +1895,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         // 只要是受支持的 provider PTY + 非运行中 + 有可恢复历史 id，
         // 就允许在用户发送时静默触发恢复。不再要求 messages 里同时
         // 有 user + assistant 文本（slim 列表/截断历史会让该判断失真）。
-        return !!(session && !isStructuredSession(session)
+        return !!(session && !session.historyOnly && !isStructuredSession(session)
           && PROVIDER_IDS.indexOf(session.provider) !== -1
           && session.status !== "running" && session.claudeSessionId);
       }
@@ -2433,7 +2433,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         // 就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
         if (composer) {
           composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
-          composer.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
+          composer.disabled = !!selectedSession?.historyOnly || (!structured && !!selectedSession && !isRunning && !canResumeOnSend);
           composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
           // Terminal passthrough must stay editable for IME composition. Prompt
           // optimization is the sole short-lived read-only state so the request

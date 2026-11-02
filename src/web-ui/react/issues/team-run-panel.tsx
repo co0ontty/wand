@@ -42,7 +42,7 @@ function RunConversation({ detail, active, onOpenSession }: { detail: AiTeamRunD
 type BadgeTone = "neutral" | "accent" | "info" | "success" | "warning";
 
 export const RUN_STATUS: Record<AiTeamRun["status"], { label: string; tone: BadgeTone }> = {
-  running: { label: "进行中", tone: "info" },
+  running: { label: "运行中", tone: "info" },
   awaiting_approval: { label: "等你批准计划", tone: "warning" },
   waiting_user: { label: "等你回复", tone: "warning" },
   done: { label: "已完成", tone: "success" },
@@ -52,7 +52,7 @@ export const RUN_STATUS: Record<AiTeamRun["status"], { label: string; tone: Badg
 
 const STEP_STATUS: Record<AiTeamStep["status"], string> = {
   queued: "排队",
-  running: "进行中",
+  running: "运行中",
   done: "完成",
   failed: "失败",
   skipped: "跳过",
@@ -65,7 +65,7 @@ const MEMBER_STATE: Partial<Record<AgentActivityState, string>> = {
 
 const ACTIVE: ReadonlyArray<AiTeamRun["status"]> = ["running", "awaiting_approval", "waiting_user"];
 
-/** 同一位置依次显示 处理中 → 完成/失败；失败态停留更久。 */
+/** 同一位置依次显示 运行中 → 完成/失败；失败态停留更久。 */
 function useActionState(): {
   pending: string;
   flash: { key: string; ok: boolean } | null;

@@ -695,7 +695,7 @@ export function registerWorkspaceRoutes(
     const snapshots = sessions?.listSlim();
     const revision = crypto.createHash("sha256").update(JSON.stringify({
       storage: storage.projectionRevision(),
-      projection: "workspace-work-sessions-v3-task-status",
+      projection: "workspace-work-sessions-v4-queued-dispatches",
       query: { includeArchived, workspaceFilter, taskLimit, sessionLimit },
       runtime: snapshots,
     })).digest("base64url");
@@ -794,6 +794,9 @@ export function registerWorkspaceRoutes(
         ...task,
         boardTaskId: board?.id ?? null,
         boardTaskStatus: board?.status ?? null,
+        boardTaskIdentifier: board?.identifier ?? null,
+        assignedExecutor: board ? model.assignee(board) : null,
+        queuedDispatchCount: board ? model.queuedCommentCounts.get(board.id) ?? 0 : 0,
         ...(board ? model.execution(board) : taskExecutionProjection(visibleSessions)),
         parentWorkspaceTaskId: parent?.workspaceTaskId ?? null,
 

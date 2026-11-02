@@ -188,17 +188,20 @@ function buildUserTurn(
   createdAt: string,
   requestId?: string,
   messageId?: string,
+  readAt?: string,
 ): ConversationTurn {
   const identity = { ...(requestId ? { requestId } : {}), ...(messageId ? { messageId } : {}) };
+  const readReceipt = readAt ? { readAt } : {};
   if (pendingAsk) {
     return {
       role: "user",
       ...identity,
       createdAt,
+      ...readReceipt,
       content: [{ type: "tool_result", tool_use_id: pendingAsk.id, content: prompt, is_error: false }],
     };
   }
-  return { role: "user", ...identity, createdAt, content: [{ type: "text", text: prompt }] };
+  return { role: "user", ...identity, createdAt, ...readReceipt, content: [{ type: "text", text: prompt }] };
 }
 
 export class StructuredSessionManager {
@@ -1615,7 +1618,11 @@ export class StructuredSessionManager {
       ...session,
       messages: [
         ...(session.messages ?? []),
-        ...turns.map((turn) => ({ ...turn, createdAt: turn.createdAt ?? createdAt })),
+        ...turns.map((turn) => ({
+          ...turn,
+          createdAt: turn.createdAt ?? createdAt,
+          ...(turn.role === "user" && !turn.readAt ? { readAt: turn.readAt ?? createdAt } : {}),
+        })),
       ],
     };
     this.sessions.set(id, updated);
@@ -1692,7 +1699,7 @@ export class StructuredSessionManager {
       if (at >= 0) { queue = queue.filter((_, index) => index !== at); metadata = metadata.filter((_, index) => index !== at); }
     }
     const accepted: SessionSnapshot = relay
-      ? { ...session, messages: [...(session.messages ?? []), buildUserTurn(prompt, undefined, acceptedAt)] }
+      ? { ...session, messages: [...(session.messages ?? []), buildUserTurn(prompt, undefined, acceptedAt, undefined, undefined, acceptedAt)] }
       : { ...session, queuedMessages: interrupt ? [prompt, ...queue] : [...queue, prompt],
         queuedInputScheduling: interrupt ? [scheduling, ...metadata] : [...metadata, scheduling] };
     // Persist before publishing state, generating a topic, interrupting or starting a runner.
@@ -1791,7 +1798,8 @@ export class StructuredSessionManager {
     // lifecycle tokens and must never be copied into persisted/public messages.
     const transcriptRequestId = session.automationId?.startsWith("wand-task-comment:") ? requestId : undefined;
     const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt, transcriptRequestId,
-      session.provider === "pi" && session.structuredState?.engine !== "core" ? randomUUID() : undefined);
+      session.provider === "pi" && session.structuredState?.engine !== "core" ? randomUUID() : undefined,
+      userTurnAt);
     this.unacceptedTeamStarts.delete(id);
     if (this.unsupportedStructuredProviders.has(id)) {
       throw new Error(`会话使用的 provider 已不受支持，不能继续发送。`);
@@ -2689,10 +2697,13 @@ export class StructuredSessionManager {
     return barrier;
   }
 
-  delete(id: string): void {
-    this.unacceptedTeamStarts.delete(id);
+  delete(id: string, reason = "session-delete"): void {
     this.requireRecoveryControl(id);
+    const latest = this.get(id) ?? undefined;
     const runnerExecution = this.pendingRunnerExecutions.get(id);
+    // Commit history before disposing the live owner. A failed snapshot must leave its latest output reachable.
+    this.storage.deleteSession(id, latest, reason);
+    this.unacceptedTeamStarts.delete(id);
     // Invalidate callback ownership before signalling the runner. Cancellation
     // can synchronously wake listeners in some adapter implementations.
     this.sessions.delete(id);
@@ -2702,7 +2713,6 @@ export class StructuredSessionManager {
     }
     // 会话被删除后迟到的回合回调必须失效，静默心跳也不能再给一个不存在的会话发事件。
     this.disposeSession(id, "session");
-    this.storage.deleteSession(id);
     this.logger?.deleteSession(id);
   }
 

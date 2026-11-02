@@ -350,8 +350,9 @@ export class SessionRepository {
     catch { return null; }
   }
 
-  deleteSession(id: string): void {
+  deleteSession(id: string, latest?: SessionSnapshot, reason = "session-delete"): void {
     this.s.transaction(() => {
+      this.s.preserveConversationSession(id, latest, reason);
       this.db.prepare("DELETE FROM pi_cli_checkpoints WHERE session_id = ?").run(id);
       this.db.prepare("DELETE FROM command_sessions WHERE id = ?").run(id);
     });

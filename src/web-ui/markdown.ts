@@ -1,3 +1,4 @@
+import { referenceHtml } from "./wand-reference.js";
 import { Marked, Renderer } from "marked";
 import { localHttpPreviewHref } from "./react/local-preview/controller.js";
 import { messageFileTarget, type MessageFileContext } from "./message-file-target.js";
@@ -17,6 +18,7 @@ function previewAttributes(value: string, href: string): Array<[string, string]>
 }
 
 function linkAttributes(target: string, context: MessageFileContext): Array<[string, string]> | null {
+  if (/^\/api\/reference\/[0-9a-f-]+$/i.test(target)) return [["href", target]];
   const file = messageFileTarget(target, context);
   if (file) {
     if (file.previewUrl) return previewAttributes(file.previewUrl, file.previewUrl);
@@ -43,9 +45,14 @@ function linkAttributes(target: string, context: MessageFileContext): Array<[str
 // enable raw HTML or accept renderer extensions from message content.
 function createMarkdown(context: MessageFileContext): Marked {
   const renderer = new Renderer();
+  let insideLink = false;
+  const originalText = renderer.text;
+  renderer.text = function(token) { const rendered = originalText.call(this, token); return insideLink ? rendered : referenceHtml(rendered); };
   renderer.html = ({ text }) => escapeHtml(text);
   renderer.link = function({ href, tokens }) {
+    insideLink = true;
     const label = this.parser.parseInline(tokens);
+    insideLink = false;
     const file = messageFileTarget(href, context);
     const attributes = linkAttributes(href, context);
     if (file?.previewUrl) return '<span class="chat-html-preview" data-html-preview-url="' + escapeHtml(file.previewUrl) +
@@ -68,7 +75,7 @@ function createMarkdown(context: MessageFileContext): Marked {
     const tag = "h" + Math.min(depth + 1, 6);
     return "<" + tag + ">" + this.parser.parseInline(tokens) + "</" + tag + ">\n";
   };
-  renderer.codespan = ({ text }) => '<code class="code-inline">' + escapeHtml(text) + "</code>";
+  renderer.codespan = ({ text }) => '<code class="code-inline">' + referenceHtml(escapeHtml(text)) + "</code>";
   renderer.code = ({ text, lang }) => {
     const language = (lang || "").trim().split(/\s+/)[0];
     const content = text.endsWith("\n") ? text : text + "\n";

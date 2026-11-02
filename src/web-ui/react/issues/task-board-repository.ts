@@ -131,7 +131,7 @@ export const taskBoardRepository = {
     const query = new URLSearchParams({ ids: [...new Set(commentIds)].join(",") });
     return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}/comments/status?${query}`, { signal: options.signal, cache: "no-store" });
   },
-  commentSource(id: string, commentId: string, options: { signal?: AbortSignal } = {}): Promise<{ comment: Pick<WandTaskComment, "id" | "taskId" | "authorName" | "body" | "createdAt" | "sourceCommentId"> | null }> {
+  commentSource(id: string, commentId: string, options: { signal?: AbortSignal } = {}): Promise<{ comment: WandTaskComment | null }> {
     return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/source`, { signal: options.signal, cache: "no-store" });
   },
   commentResultBlocks(id: string, commentId: string, turnOffset: number, offset: number, options: { limit?: number; signal?: AbortSignal } = {}): Promise<{ turnOffset: number; blockOffset: number; blockTotal: number; blocks: Array<{ blockIndex: number; block: ConversationTurn["content"][number]; truncated: boolean }> }> {
@@ -223,7 +223,11 @@ export const taskBoardRepository = {
     return { input: JSON.parse(new TextDecoder().decode(input)) as Record<string, unknown>,
       content: JSON.parse(new TextDecoder().decode(content)), is_error: first.is_error, pending: first.pending };
   },
-  async postComment(id: string, input: { requestId: string; body: string; employeeId?: string | null; sourceCommentId?: string | null; purpose?: "execution" | "review" }): Promise<{ comment: WandTaskComment; replayed: boolean }> {
+  async postComment(id: string, input: { requestId: string; body: string; employeeId?: string | null; agent?: import("../../../task-types").WandTaskAgent | null; sourceCommentId?: string | null; purpose?: "execution" | "review" }): Promise<{ comment: WandTaskComment; replayed: boolean }> {
+    if (input.employeeId) {
+      const task = await this.get(id);
+      if ((task as WandTaskListed & { commentWorkflowVersion?: number }).commentWorkflowVersion !== 2) throw new HttpResponseError("服务端尚未支持评论子任务派发；草稿已保留，请先更新服务。", 409);
+    }
     if (input.purpose === "review" && input.employeeId) {
       const task = await this.get(id);
       if (task.workflowVersion !== 1 || task.id !== id) throw new HttpResponseError("服务端尚不支持验收派发；草稿与原请求标识已保留，请更新服务并核对，不会改用普通执行。", 409);

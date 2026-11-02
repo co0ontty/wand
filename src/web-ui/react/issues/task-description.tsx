@@ -4,6 +4,7 @@ import { DeferredMarkdownPreview } from "../file-preview/deferred-markdown";
 import { WandButton } from "../ui/button";
 import { usePopupDismiss } from "../ui/popup-lifecycle";
 import { TaskTextArea } from "./task-form";
+import { TaskExpandableText } from "./task-expandable-text";
 
 /** The saved task brief is reading content, never an implicit dispatch prompt. */
 export function TaskDescription({ description, busy, onSave }: {
@@ -29,7 +30,7 @@ export function TaskDescription({ description, busy, onSave }: {
       if (await onSave(draft) && mounted.current) { setEditing(false); trigger.current?.focus(); }
     } finally { if (mounted.current) setSaving(false); }
   };
-  return <Card size="small" title="任务描述" role="region" aria-label="任务描述" extra={
+  return <Card size="small" title="任务描述" className="task-board-description" role="region" aria-label="任务描述" extra={
     <WandButton ref={trigger} kind="ghost" size="small" disabled={busy || saving} aria-expanded={editing}
       onClick={() => { if (editing) close(); else { setDraft(description); setEditing(true); } }}>
       {editing ? "取消编辑" : "编辑描述"}
@@ -46,7 +47,9 @@ export function TaskDescription({ description, busy, onSave }: {
         </WandButton>
       </Flex>
     </Flex> : <div className="task-board-detail-content">
-      {description.trim() ? <DeferredMarkdownPreview content={description} variant="inline" wrap/>
+      {description.trim()
+        // 长描述默认只露出前面一段，首屏留给结论与评论；展开后看全文。
+        ? <TaskExpandableText lines={10}><DeferredMarkdownPreview content={description} variant="inline" wrap/></TaskExpandableText>
         : <Typography.Text type="secondary">暂无描述，可补充背景、验收标准或复现步骤。</Typography.Text>}
     </div>}
   </Card>;

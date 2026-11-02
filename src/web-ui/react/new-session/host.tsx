@@ -18,6 +18,8 @@ import { useEditorExpansion } from "../composer-sender/editor-expansion";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { UnifiedExecutionSubjectPicker } from "../workspaces/unified-execution-subject-picker";
 import { httpWorkspacesRepository } from "../workspaces/repository";
+import { requestAddWorkspace } from "../workspaces/controller";
+import { WandSearchField } from "../ui/search-field";
 import { usableTeamWorkspaceId } from "../workspaces/workspace-agent-model";
 import type { Workspace } from "../workspaces/types";
 import { notifyTasksChanged } from "../task-changes";
@@ -65,6 +67,7 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   const lock = React.useRef(false);
   const mounted = React.useRef(true);
   const [directoryOpen, setDirectoryOpen] = React.useState(false);
+  const [directoryQuery, setDirectoryQuery] = React.useState("");
   const [subjectOpen, setSubjectOpen] = React.useState(false);
   const [titleDirectoryOpen, setTitleDirectoryOpen] = React.useState(false);
   const [titleSubjectOpen, setTitleSubjectOpen] = React.useState(false);
@@ -265,24 +268,50 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
     }
   };
 
+  const closeDirectoryPicker = (): void => {
+    setDirectoryOpen(false); setTitleDirectoryOpen(false); setDirectoryQuery("");
+  };
+  const chooseDirectory = (cwd: string, workspaceId?: string): void => {
+    setForm(current => current ? { ...current, cwd, workspaceId } : current);
+    closeDirectoryPicker();
+  };
+  const directoryMatch = (name: string, path: string): boolean => `${name} ${path}`.toLocaleLowerCase().includes(directoryQuery.trim().toLocaleLowerCase());
+  const registeredProjects = projects.filter(project => project.kind !== "global" && project.userAdded !== false);
+  const recentDirectories = defaults?.recentPaths.filter(item => !registeredProjects.some(project => project.cwd === item.path)) ?? [];
+  const directoryRow = (item: { name: string; path: string; workspaceId?: string }) => <WandButton key={item.workspaceId || item.path}
+    className="new-work-path-option" kind={form?.cwd === item.path ? "soft" : "ghost"} aria-pressed={form?.cwd === item.path}
+    title={item.path} onClick={() => chooseDirectory(item.path, item.workspaceId)}>
+    <WandIcon name="folder" size={18}/><span className="new-work-path-copy"><Typography.Text strong ellipsis>{item.name}</Typography.Text>
+      <Typography.Text type="secondary" ellipsis>{item.path}</Typography.Text></span>
+    {form?.cwd === item.path ? <WandIcon name="check" size={16}/> : null}
+  </WandButton>;
   const directoryPickerContent = defaults && form ? (
-    <Flex vertical gap={12} className="new-work-paths"><Typography.Text strong>运行目录</Typography.Text>
-      <AutoComplete value={form.cwd} options={suggestions.map(item => ({ value: item.path }))} onChange={cwd => setForm({ ...form, cwd, workspaceId: undefined })}>
-        <WandInput autoFocus aria-label="新工作运行目录路径" placeholder="输入目录路径"
+    <Flex vertical gap={12} className="new-work-paths">
+      <Flex justify="space-between" align="center"><Typography.Text strong>选择工作区</Typography.Text>
+        <WandButton kind="ghost" onClick={() => {
+          closeDirectoryPicker();
+          requestAddWorkspace(form.cwd, workspace => {
+            if (!mounted.current) return;
+            setProjects(current => [...current.filter(item => item.id !== workspace.id), workspace]);
+            chooseDirectory(workspace.cwd, workspace.id);
+          });
+        }}><WandIcon name="plus" size={16}/>添加工作区</WandButton></Flex>
+      <WandSearchField label="搜索工作区或最近目录" value={directoryQuery} onValueChange={setDirectoryQuery}/>
+      <Flex vertical gap={4} className="new-work-path-options">
+        {registeredProjects.filter(project => directoryMatch(project.name, project.cwd)).map(project => directoryRow({ name: project.name, path: project.cwd, workspaceId: project.id }))}
+        {recentDirectories.some(item => directoryMatch(item.name, item.path)) ? <Typography.Text type="secondary">最近目录</Typography.Text> : null}
+        {recentDirectories.filter(item => directoryMatch(item.name, item.path)).map(item => directoryRow(item))}
+        {!registeredProjects.some(project => directoryMatch(project.name, project.cwd)) && !recentDirectories.some(item => directoryMatch(item.name, item.path))
+          ? <Typography.Text type="secondary" role="status">没有匹配的工作区或最近目录</Typography.Text> : null}
+      </Flex>
+      <Typography.Text type="secondary">也可以直接填写运行目录</Typography.Text>
+      <AutoComplete value={form.cwd} options={suggestions.map(item => ({ value: item.path }))} onChange={cwd => setForm(current => current ? { ...current, cwd, workspaceId: undefined } : current)}>
+        <WandInput aria-label="新工作运行目录路径" placeholder="输入目录路径"
           onCompositionStart={directoryIme.onCompositionStart} onCompositionEnd={directoryIme.onCompositionEnd} onKeyDown={event => {
-          if (event.key === "Enter" && !directoryIme.shouldIgnore(event)) {
-            event.preventDefault();
-            setDirectoryOpen(false);
-            setTitleDirectoryOpen(false);
-          }
+          if (event.key === "Enter" && !directoryIme.shouldIgnore(event)) { event.preventDefault(); closeDirectoryPicker(); }
         }}/>
       </AutoComplete>
-      {defaults.recentPaths.map(item => <WandButton key={item.path} kind="ghost" title={item.path} onClick={() => {
-        setForm({ ...form, cwd: item.path, workspaceId: undefined });
-        setDirectoryOpen(false);
-        setTitleDirectoryOpen(false);
-      }}>{item.path}</WandButton>)}
-      <WandButton onClick={() => { setDirectoryOpen(false); setTitleDirectoryOpen(false); }}>完成</WandButton>
+      <WandButton onClick={closeDirectoryPicker}>完成</WandButton>
     </Flex>
   ) : null;
 

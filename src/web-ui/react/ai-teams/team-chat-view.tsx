@@ -2375,6 +2375,7 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
             clock={clock}
             arriving={arriving}
             onArrivalEnd={onArrivalEnd}
+            footer={turn.readAt ? <span className="chat-message-read" aria-label="服务端已接收并开始处理">已读</span> : null}
           >
             <MessageBody
               shape={shape}

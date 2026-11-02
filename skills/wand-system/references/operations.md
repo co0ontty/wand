@@ -19,6 +19,18 @@
 | HELPER schedule:list --include-cancelled | 包含取消记录 |
 | HELPER schedule:read <id> | {task,runs}，最近50条执行含 sessionId、接收及实际执行状态 |
 
+## 任务上下文与阻塞处理
+
+- `HELPER task:context <task-id> [comment-id]`：当前任务、来源指派、被回复的原评论、评论索引及关联会话 ID；同时返回正式父任务和直接子任务。任务 ID 和评论 ID 使用派发中给出的稳定 ID。
+- `HELPER task:comments <task-id>`：完整正文与执行回执，每页50条，返回 `totalCount`、`nextCursor`。
+- `HELPER task:comments <task-id> --before <nextCursor>`：读取下一页；沿返回游标读完，不把首屏数量当成全部记录。
+
+先核对最新目标、交付版本、验收结论及来源评论；评论索引不是完整正文。
+根据本轮指令处理阻塞，引用任务只按明确关联按需读取，不遍历无关任务或员工私聊。
+区分代码缺陷、缺失证据、外部依赖和等待用户取舍；已有实现先复核，不重复开发。
+本轮结束后仍有缺口就回填具体阻塞及解除条件，不因会话空闲、历史 `done` 或自己结束回复而宣称已交付。
+通过派发时授予的 `task:workflow` 能力提交真实交付或验收结论，不以本技能的本机所有者认证替代任务级回填权限。
+
 ## 创建员工定义（控制台招聘）
 
 `employee:list` 只是查询，`session:create` 是为已有员工创建会话，都不是创建员工定义；当前无 `employee:create/add` 命令。

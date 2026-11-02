@@ -47,9 +47,9 @@ export function ConversationSessionReply({ turn, active, onOpen, onModelSettings
       {children ? <div className="conversation-session-actions">{children}</div> : null}
       <Flex align="center" gap={token.marginSM} className="conversation-reply-footer" style={{ flexShrink: 0 }}>
         {!statusProvided ? <Typography.Text role="status" type={preview?.status === "failed" ? "danger" : "secondary"}>
-          {conversationSessionPreviewLabels[preview?.status ?? "starting"]}
+          {preview?.historyOnly ? "历史回复 · 只读" : conversationSessionPreviewLabels[preview?.status ?? "starting"]}
         </Typography.Text> : null}
-        <WandButton kind="ghost" size="small" disabled={unavailable} title="进入此工作的执行会话，补充指令会继续同一项工作" onClick={onOpen}>继续此工作 <WandIcon name="up" size={14} className="conversation-continue-arrow"/></WandButton>
+        <WandButton kind="ghost" size="small" disabled={unavailable} title={preview?.historyOnly ? "查看保全的完整历史回复" : "进入此工作的执行会话，补充指令会继续同一项工作"} onClick={onOpen}>{preview?.historyOnly ? "查看历史回复" : "继续此工作"} <WandIcon name="up" size={14} className="conversation-continue-arrow"/></WandButton>
       </Flex>
     </>}/>;
 }

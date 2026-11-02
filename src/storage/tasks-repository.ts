@@ -148,27 +148,31 @@ export class TaskRepository {
     const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 50)));
     const before = options.before;
     const rows = (before
-      ? this.db.prepare(`SELECT id, created_at FROM wand_task_comments WHERE task_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`)
-        .all(taskId, before.createdAt, before.createdAt, before.id, limit + 1)
-      : this.db.prepare(`SELECT id, created_at FROM wand_task_comments WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`)
-        .all(taskId, limit + 1)) as Array<{ id: string; created_at: string }>;
+      ? this.db.prepare(`SELECT id, created_at FROM wand_task_comments WHERE (task_id = ? OR task_id IN (SELECT id FROM wand_tasks WHERE parent_task_id = ?) OR id IN (SELECT comment_id FROM wand_task_comment_dispatches WHERE execution_task_id = ?)) AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`)
+        .all(taskId, taskId, taskId, before.createdAt, before.createdAt, before.id, limit + 1)
+      : this.db.prepare(`SELECT id, created_at FROM wand_task_comments WHERE (task_id = ? OR task_id IN (SELECT id FROM wand_tasks WHERE parent_task_id = ?) OR id IN (SELECT comment_id FROM wand_task_comment_dispatches WHERE execution_task_id = ?)) ORDER BY created_at DESC, id DESC LIMIT ?`)
+        .all(taskId, taskId, taskId, limit + 1)) as Array<{ id: string; created_at: string }>;
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
     const oldest = page.at(-1);
-    const count = this.db.prepare("SELECT COUNT(*) AS count FROM wand_task_comments WHERE task_id = ?").get(taskId) as { count: number };
+    const count = this.db.prepare("SELECT COUNT(*) AS count FROM wand_task_comments WHERE task_id = ? OR task_id IN (SELECT id FROM wand_tasks WHERE parent_task_id = ?) OR id IN (SELECT comment_id FROM wand_task_comment_dispatches WHERE execution_task_id = ?)").get(taskId, taskId, taskId) as { count: number };
     const comments = [...page].reverse().map(row => this.getWandTaskComment(row.id)!).filter(Boolean);
     return { comments, totalCount: Number(count.count) || 0,
       nextCursor: hasMore && oldest ? { createdAt: oldest.created_at, id: oldest.id } : null };
   }
 
   countWandTaskComments(taskId: string): number {
-    const row = this.db.prepare("SELECT COUNT(*) AS count FROM wand_task_comments WHERE task_id = ?").get(taskId) as { count: number };
+    const row = this.db.prepare("SELECT COUNT(*) AS count FROM wand_task_comments WHERE task_id = ? OR task_id IN (SELECT id FROM wand_tasks WHERE parent_task_id = ?) OR id IN (SELECT comment_id FROM wand_task_comment_dispatches WHERE execution_task_id = ?) ").get(taskId, taskId, taskId) as { count: number };
     return Number(row.count) || 0;
   }
 
   /** One grouped query for task-list projections; tasks without comments are omitted (read as zero). */
   countWandTaskCommentsByTask(): Map<string, number> {
-    const rows = this.db.prepare(`SELECT task_id, COUNT(*) AS count FROM wand_task_comments GROUP BY task_id`)
+    const rows = this.db.prepare(`SELECT task_id, COUNT(DISTINCT comment_id) AS count FROM (
+        SELECT task_id, id AS comment_id FROM wand_task_comments
+        UNION SELECT t.parent_task_id AS task_id, c.id AS comment_id FROM wand_task_comments c JOIN wand_tasks t ON t.id = c.task_id WHERE t.parent_task_id IS NOT NULL
+        UNION SELECT execution_task_id AS task_id, comment_id FROM wand_task_comment_dispatches WHERE execution_task_id IS NOT NULL
+      ) GROUP BY task_id`)
       .all() as Array<{ task_id: string; count: number }>;
     return new Map(rows.map(row => [row.task_id, Number(row.count) || 0]));
   }
@@ -179,7 +183,7 @@ export class TaskRepository {
 
   getWandTaskComment(id: string): WandTaskComment | null {
     const row = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
-      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status, d.referenced_task_ids,
+      d.execution_task_id, d.agent_json, d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status, d.referenced_task_ids,
       d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint, d.purpose, d.review_revision FROM wand_task_comments c
       LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id WHERE c.id = ?`).get(id) as Record<string, string | null> | undefined;
     return row ? this.mapWandTaskCommentRow(row) : null;
@@ -189,14 +193,7 @@ export class TaskRepository {
   getWandTaskCommentsByIds(taskId: string, ids: readonly string[]): WandTaskComment[] {
     const boundedIds = [...new Set(ids)].slice(0, 100);
     if (!boundedIds.length) return [];
-    const placeholders = boundedIds.map(() => "?").join(", ");
-    const rows = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
-      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status, d.referenced_task_ids,
-      d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint, d.purpose, d.review_revision
-      FROM wand_task_comments c LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id
-      WHERE c.task_id = ? AND c.id IN (${placeholders})`).all(taskId, ...boundedIds) as Array<Record<string, string | null>>;
-    const byId = new Map(rows.map(row => [row.id!, this.mapWandTaskCommentRow(row)]));
-    return boundedIds.flatMap(id => { const comment = byId.get(id); return comment ? [comment] : []; });
+    return boundedIds.flatMap(id => { const comment = this.getTaskCommentForTask(taskId, id); return comment ? [comment] : []; });
   }
 
   private mapWandTaskCommentRow(row: Record<string, string | null>): WandTaskComment {
@@ -205,7 +202,7 @@ export class TaskRepository {
       purpose: row.purpose === "review" ? "review" : "execution", reviewRevision: row.review_revision == null ? null : Number(row.review_revision),
       ...(row.request_id ? { requestId: row.request_id, sourceCommentId: row.source_comment_id, instruction: row.instruction!, taskVersion: row.task_version!,
         ...(referencedTaskIds.length ? { referencedTaskIds } : {}),
-        dispatch: row.employee_id ? { employeeId: row.employee_id, employeeName: row.employee_name!,
+        dispatch: row.employee_id ? { executionTaskId: row.execution_task_id ?? null, agent: parseWandTaskAgent(row.agent_json), employeeId: row.employee_id, employeeName: row.employee_name!,
           state: row.state as "queued" | "paused" | "pending" | "accepted" | "failed" | "unknown", sessionId: row.session_id, error: row.error,
           ...(referencedTaskIds.length ? { referencedTaskIds } : {}),
           ...(row.result_start_index !== null && row.result_start_index !== undefined && row.result_request_id ? { resultAnchor: {
@@ -224,16 +221,37 @@ export class TaskRepository {
   /** Atomically persist both the visible comment and the one-shot dispatch intent before any side effect. */
   createTaskCommentIntent(input: { taskId: string; requestId: string; signature: string; body: string; instruction: string;
     sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string;
-    referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean; purpose?: "execution" | "review"; reviewRevision?: number | null }): WandTaskComment {
+    referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean; purpose?: "execution" | "review"; reviewRevision?: number | null; executionTaskId?: string | null; createChild?: boolean }): WandTaskComment {
     return this.s.transaction(() => {
+      const previous = this.findTaskCommentRequest(input.taskId, input.requestId);
+      if (previous) {
+        if (previous.signature !== input.signature) throw new Error("评论请求标识已用于另一份指令。");
+        return previous.comment;
+      }
+      const parent = this.getWandTask(input.taskId);
+      if (!parent || parent.status === "archived") throw new Error("任务已关闭，未派发。");
+      let executionTaskId = input.executionTaskId ?? parent.id;
+      if (input.createChild && input.employeeId && !parent.parentTaskId) {
+        const child = this.createWandTask({ title: input.instruction.split("\n").find(line => line.trim())!.trim().slice(0, 160),
+          description: input.instruction, workspaceId: parent.workspaceId, parentTaskId: parent.id,
+          priority: parent.priority, milestoneId: parent.milestoneId, status: "todo", agent: input.agent ?? null,
+          executionSubject: { type: "employee", id: input.employeeId } });
+        executionTaskId = child.id;
+      }
+      const owner = this.getWandTask(executionTaskId);
+      if (!owner || owner.status === "archived" || owner.id !== parent.id && owner.parentTaskId !== parent.id) throw new Error("执行目标不属于当前任务。");
+      if (input.employeeId && input.purpose !== "review") {
+        this.writeWandTask(parent, { status: "doing" });
+        if (owner.id !== parent.id) this.writeWandTask(owner, { status: "doing" });
+      }
       const id = crypto.randomUUID();
       this.db.prepare(`INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)`)
         .run(id, input.taskId, "用户", input.body, nowIso());
       this.db.prepare(`INSERT INTO wand_task_comment_dispatches(comment_id, task_id, request_id, signature, source_comment_id,
-        employee_id, employee_name, instruction, task_version, state, referenced_task_ids, agent_json, purpose, review_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        employee_id, employee_name, instruction, task_version, state, referenced_task_ids, agent_json, purpose, review_revision, execution_task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, input.taskId, input.requestId, input.signature, input.sourceCommentId, input.employeeId, input.employeeName,
           input.instruction, input.taskVersion, input.employeeId ? input.queued ? "queued" : "pending" : "accepted",
-          JSON.stringify(input.referencedTaskIds ?? []), input.agent ? JSON.stringify(input.agent) : null, input.purpose ?? "execution", input.reviewRevision ?? null);
+          JSON.stringify(input.referencedTaskIds ?? []), input.agent ? JSON.stringify(input.agent) : null, input.purpose ?? "execution", input.reviewRevision ?? null, input.employeeId ? executionTaskId : null);
       return this.getWandTaskComment(id)!;
     });
   }
@@ -263,10 +281,10 @@ export class TaskRepository {
   /** 按任务面板的实时优先级排序，同级保持实际插入顺序；只读查询不修改运行事实。 */
   listQueuedTaskCommentDispatches(employeeId: string, limit = 10, taskIds?: readonly string[]): Array<{ commentId: string; taskId: string; createdAt: string }> {
     if (taskIds && !taskIds.length) return [];
-    const filter = taskIds ? ` AND d.task_id IN (${taskIds.map(() => "?").join(",")})` : "";
-    const rows = this.db.prepare(`SELECT d.comment_id, d.task_id, c.created_at FROM wand_task_comment_dispatches d
+    const filter = taskIds ? ` AND COALESCE(d.execution_task_id, d.task_id) IN (${taskIds.map(() => "?").join(",")})` : "";
+    const rows = this.db.prepare(`SELECT d.comment_id, COALESCE(d.execution_task_id, d.task_id) AS task_id, c.created_at FROM wand_task_comment_dispatches d
       JOIN wand_task_comments c ON c.id = d.comment_id
-      LEFT JOIN wand_tasks t ON t.id = d.task_id
+      LEFT JOIN wand_tasks t ON t.id = COALESCE(d.execution_task_id, d.task_id)
       WHERE d.state = 'queued' AND d.employee_id = ?${filter}
       ORDER BY CASE t.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC,
         c.created_at ASC, c.rowid ASC LIMIT ?`).all(employeeId, ...(taskIds ?? []), Math.max(1, limit)) as Array<{ comment_id: string; task_id: string; created_at: string }>;
@@ -280,16 +298,17 @@ export class TaskRepository {
   }
 
   countQueuedTaskCommentDispatchesForTask(taskId: string): number {
-    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM wand_task_comment_dispatches WHERE state = 'queued' AND task_id = ?`)
-      .get(taskId) as { count: number };
+    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM wand_task_comment_dispatches WHERE state = 'queued' AND (task_id = ? OR execution_task_id = ?)`)
+      .get(taskId, taskId) as { count: number };
     return Number(row.count) || 0;
   }
 
   /** One grouped query for task-list projections; tasks without queued work are omitted (read as zero). */
   countQueuedTaskCommentDispatchesByTask(): Map<string, number> {
-    const rows = this.db.prepare(`SELECT task_id, COUNT(*) AS count FROM wand_task_comment_dispatches
-      WHERE state = 'queued' GROUP BY task_id`).all() as Array<{ task_id: string; count: number }>;
-    return new Map(rows.map(row => [row.task_id, Number(row.count) || 0]));
+    const rows = this.db.prepare(`SELECT task_id, execution_task_id FROM wand_task_comment_dispatches WHERE state = 'queued'`).all() as Array<{ task_id: string; execution_task_id: string | null }>;
+    const counts = new Map<string, number>();
+    for (const row of rows) for (const id of new Set([row.task_id, row.execution_task_id].filter((id): id is string => Boolean(id)))) counts.set(id, (counts.get(id) ?? 0) + 1);
+    return counts;
   }
 
   /** 原子占位：只有仍是 queued 的评论能转成 pending，避免重复派发。 */
@@ -380,8 +399,9 @@ export class TaskRepository {
   }
 
   getTaskCommentResultBinding(taskId: string, commentId: string): { sessionId: string; requestId: string | null; startFingerprint: string | null; fingerprint: string | null; startIndex: number | null; endIndex: number | null; outcome: "done" | "failed" | "stopped" | null } | null {
+    if (!this.getTaskCommentForTask(taskId, commentId)) return null;
     const row = this.db.prepare(`SELECT session_id, result_request_id, result_start_fingerprint, result_fingerprint, result_start_index, result_end_index, result_outcome
-      FROM wand_task_comment_dispatches WHERE task_id = ? AND comment_id = ?`).get(taskId, commentId) as {
+      FROM wand_task_comment_dispatches WHERE comment_id = ?`).get(commentId) as {
         session_id: string | null; result_request_id: string | null; result_start_fingerprint: string | null; result_fingerprint: string | null; result_start_index: number | null; result_end_index: number | null; result_outcome: string | null;
       } | undefined;
     if (!row?.session_id) return null;
@@ -393,7 +413,7 @@ export class TaskRepository {
 
   getTaskCommentForTask(taskId: string, commentId: string): WandTaskComment | null {
     const comment = this.getWandTaskComment(commentId);
-    return comment?.taskId === taskId ? comment : null;
+    return comment && (comment.taskId === taskId || this.getWandTask(comment.taskId)?.parentTaskId === taskId || comment.dispatch?.executionTaskId === taskId) ? comment : null;
   }
 
   /** Read-only recovery of the create/bind crash gap, by a server-generated correlation ID, never message text. */

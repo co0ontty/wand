@@ -28,15 +28,20 @@ interface TurnRow {
 /** Raw execution history and the formatted read model have independent storage shapes. */
 export class SessionMessageRepository {
   private readonly settledTurnDigests = new WeakMap<ConversationTurn, string>();
-  constructor(private readonly db: DatabaseSync, private readonly storage: WandStorage) {}
+  constructor(private readonly db: DatabaseSync, private readonly storage: WandStorage, private readonly history = false) {}
+
+  /** Both stores use the identical indexed pagination/read model. Table names are internal constants. */
+  private read(sql: string) {
+    return this.db.prepare(this.history ? sql.replaceAll("session_message_", "session_history_") : sql);
+  }
 
   hasSessionMessageRows(id: string): boolean {
-    return !!this.db.prepare("SELECT 1 FROM session_message_heads WHERE session_id = ? AND format_version = 1").get(id);
+    return !!this.read("SELECT 1 FROM session_message_heads WHERE session_id = ? AND format_version = 1").get(id);
   }
 
   /** Import legacy history once. The original column remains intact for rollback. */
   ensureSessionMessageRows(id: string): void {
-    if (this.hasSessionMessageRows(id)) return;
+    if (this.history || this.hasSessionMessageRows(id)) return;
     const row = this.db.prepare("SELECT messages FROM command_sessions WHERE id = ?").get(id) as { messages: string | null } | undefined;
     if (!row) return;
     let messages: ConversationTurn[] = [];
@@ -59,6 +64,7 @@ export class SessionMessageRepository {
 
   /** Prepare outside the write lock; callers commit payload and runtime cursor together. */
   prepareSessionMessageWrite(id: string, messages: ConversationTurn[], immutablePrefix = false): () => void {
+    if (this.history) throw new Error("保全的会话历史只读。");
     const previous = this.db.prepare("SELECT turn_index, digest FROM session_message_turns WHERE session_id = ? ORDER BY turn_index").all(id) as Array<{ turn_index: number; digest: string }>;
     let liveStart = messages.length - 1;
     while (liveStart > 0 && !(messages[liveStart].role === "user" && messages[liveStart].content.some(block => block.type === "text"))) liveStart--;
@@ -160,14 +166,14 @@ export class SessionMessageRepository {
 
   sessionMessageCount(id: string): number {
     this.ensureSessionMessageRows(id);
-    return Number(this.db.prepare("SELECT turn_count FROM session_message_heads WHERE session_id = ?").get(id)?.turn_count ?? 0);
+    return Number(this.read("SELECT turn_count FROM session_message_heads WHERE session_id = ?").get(id)?.turn_count ?? 0);
   }
 
   readSessionRawMessageRange(id: string, start: number, end: number): ConversationTurn[] {
     this.ensureSessionMessageRows(id);
-    const turns = this.db.prepare(`SELECT turn_index, raw_json FROM session_message_turns
+    const turns = this.read(`SELECT turn_index, raw_json FROM session_message_turns
       WHERE session_id = ? AND turn_index >= ? AND turn_index < ? ORDER BY turn_index`).all(id, start, end) as Array<{ turn_index: number; raw_json: string }>;
-    const blocks = this.db.prepare(`SELECT turn_index, raw_json FROM session_message_blocks
+    const blocks = this.read(`SELECT turn_index, raw_json FROM session_message_blocks
       WHERE session_id = ? AND turn_index >= ? AND turn_index < ? ORDER BY turn_index, block_index`).all(id, start, end) as Array<{ turn_index: number; raw_json: string }>;
     const contentByTurn = new Map<number, ContentBlock[]>();
     for (const block of blocks) {
@@ -184,7 +190,7 @@ export class SessionMessageRepository {
 
   readSessionToolBlocks(id: string, toolId: string): ConversationTurn[] {
     this.ensureSessionMessageRows(id);
-    const rows = this.db.prepare(`SELECT raw_json FROM session_message_blocks
+    const rows = this.read(`SELECT raw_json FROM session_message_blocks
       WHERE session_id = ? AND tool_id = ? ORDER BY turn_index, block_index`).all(id, toolId) as Array<{ raw_json: string }>;
     return [{ role: "assistant", content: rows.map(row => JSON.parse(row.raw_json) as ContentBlock) }];
   }
@@ -192,7 +198,7 @@ export class SessionMessageRepository {
   /** Plan with stored sizes/types, then retrieve only the selected indexed block range. */
   readSessionMessagePage(id: string, defaults: CardExpandDefaults, options: MessagePageOptions = {}): BlockWindowedMessages {
     this.ensureSessionMessageRows(id);
-    const head = this.db.prepare("SELECT turn_count FROM session_message_heads WHERE session_id = ?").get(id) as { turn_count: number } | undefined;
+    const head = this.read("SELECT turn_count FROM session_message_heads WHERE session_id = ?").get(id) as { turn_count: number } | undefined;
     const total = head?.turn_count ?? 0;
     const turn = options.turn !== undefined ? Math.min(Math.max(0, options.turn), Math.max(0, total - 1)) : undefined;
     const end = Math.min(total, turn !== undefined ? turn + 1 : options.before ?? total);
@@ -203,7 +209,7 @@ export class SessionMessageRepository {
     let plan: BlockWindowedMessages;
     const measures = new Map<ContentBlock, readonly [number, number]>();
     for (;;) {
-      rows = this.db.prepare(`SELECT turn_index, metadata_json, outline_json, block_count FROM session_message_turns
+      rows = this.read(`SELECT turn_index, metadata_json, outline_json, block_count FROM session_message_turns
         WHERE session_id = ? AND turn_index >= ? AND turn_index < ? ORDER BY turn_index`).all(id, firstTurn, lastTurn) as unknown as TurnRow[];
       outlines = rows.map(row => {
         const outline = JSON.parse(row.outline_json) as Array<{ block: ContentBlock; full: readonly [number, number]; compact: readonly [number, number] }>;
@@ -236,7 +242,7 @@ export class SessionMessageRepository {
     const startTurn = firstTurn + plan.messageOffset;
     const column = options.compact ? "compact_json" : "formatted_json";
     const blockEnd = turn !== undefined ? Math.min(rows[0]?.block_count ?? 0, options.blockEnd ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
-    const blocks = this.db.prepare(`SELECT turn_index, ${column} AS payload FROM session_message_blocks
+    const blocks = this.read(`SELECT turn_index, ${column} AS payload FROM session_message_blocks
       WHERE session_id = ? AND turn_index >= ? AND turn_index < ?
         AND (turn_index > ? OR block_index >= ?) AND (turn_index < ? OR block_index < ?)
       ORDER BY turn_index, block_index`).all(id, startTurn, lastTurn, startTurn, plan.leadingBlockOffset, lastTurn - 1, blockEnd) as Array<{ turn_index: number; payload: string }>;

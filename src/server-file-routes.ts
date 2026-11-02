@@ -63,7 +63,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
 
   // Resolve relative artifacts against the stored source session, never a client-supplied cwd.
   app.get("/api/session-file/:sessionId", asyncRoute(async (req, res) => {
-    const session = storage.getSessionSlim(String(req.params.sessionId));
+    const session = storage.getSessionSlim(String(req.params.sessionId)) ?? storage.getSessionHistory(String(req.params.sessionId));
     if (!session?.cwd) { res.status(404).json({ error: "文件所属会话不存在。" }); return; }
     const relative = typeof req.query.path === "string" ? req.query.path : "";
     const editorLocation = /^[^/:]+:\d+(?::\d+)?$/.test(relative);

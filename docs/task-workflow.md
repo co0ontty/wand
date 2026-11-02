@@ -28,15 +28,48 @@ Use existing `PATCH /api/wand-tasks/:id` with **only** this body:
 ```
 
 Actions:
+- `progress`: doing → doing. Records actual evidence/blockers without advancing deliveryRevision or claiming completion.
 - `submit`: doing → review. Requires evidence and no blockers. Does NOT launch a model.
-- `pass`: review → ready. Requires evidence, no blockers, current delivery and child AI checks. Records AI verification, NOT human acceptance.
+- `pass`: review → ready. Requires evidence, no blockers, current delivery and all children delivered. Parent review records AI approval for the delivered children atomically. Records AI verification, NOT human acceptance.
 - `fail`: review → doing. Requires a blocker, preserving evidence and an auditable result (unable-to-verify uses this path with an explicit reason).
 - `return`: ready → doing. Requires human rejection reason; clears current AI/human approval while keeping history.
-- `accept`: ready → archived. Explicit **确认并归档**, human-only, records acceptance with confirmedRevision and archives atomically. Requires current AI approval, accepted children and no active/pending execution.
+- `accept`: ready → archived. Explicit **确认并归档**, human-only, records acceptance with confirmedRevision and archives atomically. Requires current AI approval for the parent and children, and no active/pending execution. Parent acceptance archives approved children atomically.
 
 Every client must keep the clicked snapshot, retain the same requestId when checking/retrying an unknown receipt, retain drafts on rejection/conflict, refresh instead of replaying a stale intent. UUID is fine for requestId. This action cannot be mixed with arbitrary task patches. Response is the normal fresh task DTO. No automatic model dispatch, no production simulation buttons.
 
 Direct PATCH remains for draft evidence/metadata and backlog/todo/doing planning changes. Direct ready, new done, acceptance.acceptedAt and archive shortcuts must not bypass the workflow. Existing archive/restore/history APIs remain conservative and preserve data. Creating a task only permits planning stages, not pretending it already passed. An explicitly deleted project may collect unaccepted task history through the separately named storage removal operation; it records a project-removal comment and never writes human acceptance or counts that collection as completion.
+
+## Cancel unnecessary work without accepting delivery
+
+`POST /api/wand-tasks/:id/maintenance` and owner CLI `wand task:maintain <task-id> --stdin`
+provide explicit user-requested maintenance, separate from the acceptance workflow. They do not
+grant an employee workflow capability or imply permission to cancel other tasks.
+
+```json
+{
+  "action": "close",
+  "kind": "duplicate",
+  "duplicateTaskId": "the-retained-task-id",
+  "requestId": "one-stable-id-for-this-intent",
+  "expectedUpdatedAt": "the-reviewed-task.updatedAt",
+  "expectedQueuedCommentIds": ["the-reviewed-queued-or-paused-comment-id"],
+  "reason": "why this work is obsolete or covered by the retained task"
+}
+```
+
+Use `kind: "obsolete"` without `duplicateTaskId` for retired work. To cancel only one
+unclaimed dispatch while preserving the task, use `action: "cancel"`, `commentId`,
+`requestId`, `expectedUpdatedAt` and `reason`; omit the closure fields.
+
+The transaction checks the task version, exact queued/paused instruction set, live sessions,
+teams, pending/unknown dispatches, and open children before closing. A claimed dispatch cannot
+be recalled. New queue instructions or changed task content cause a conflict, not an automatic
+retry. Retried identical request IDs return current facts without cancelling later instructions.
+Cancellation retains the original comment, request identity, sessions and workflow history.
+The existing wire representation is `state: "failed"` (not delivered), `status: "stopped"`,
+with an explicit user-cancellation reason; Web/macOS/iOS/Android already render these values.
+It never fabricates a runtime result, AI pass or human acceptance. Closure audit comments name
+the reason and retained task. Such archives stay outside automatic deletion eligibility.
 
 ## UI
 
@@ -50,4 +83,10 @@ When the task is in `review`, selecting an employee in the comment composer send
 
 ## AI write-back
 
-A separate session-scoped runtime capability supports only `submit/pass/fail` on the exact bound task through `wand task:workflow <task-id> --stdin`; human accept/return are never granted to employees. Capabilities are ephemeral, revoked on execution completion/interrupt, validated against persisted task/session/employee binding and delivery revision. Never put credentials in prompts, task DTOs, persisted reports or logs. Owner CLI authentication is not an employee authorization boundary. Workflow history and request receipts remain auditable without credentials.
+A separate session-scoped runtime capability supports only `progress/submit/pass/fail` on the exact bound task through `wand task:workflow <task-id> --stdin`; human accept/return are never granted to employees. Capabilities are ephemeral, revoked on execution completion/interrupt, validated against persisted task/session/employee binding and delivery revision. Never put credentials in prompts, task DTOs, persisted reports or logs. Owner CLI authentication is not an employee authorization boundary. Workflow history and request receipts remain auditable without credentials.
+
+## Comment execution ownership (protocol v2)
+
+An employee implementation comment on a root requirement atomically creates a direct child and persists `executionTaskId`; the visible instruction remains on the parent. A reply or an explicit child reference continues that child. Request replay returns the same comment/child. Review dispatch keeps its existing review intent and does not create an implementation child.
+
+Parent comment pagination includes direct-child records without copying them. `taskId` remains the real record owner; `activityTaskId` identifies the reading surface. Agents receive both actual execution task ID and parent context ID, read `task:context` / cursor-paginated `task:comments`, and use their exact-task capability to record progress. Session termination alone never means delivered. All children must submit evidence without blockers before parent submission; unresolved or pending/unknown delivery blocks aggregate acceptance.

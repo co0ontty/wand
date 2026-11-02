@@ -4,19 +4,26 @@ import { installStyleSheet } from "../styles";
 if (typeof document !== "undefined") installStyleSheet("wand-task-library-layout", String.raw`
 /* Match the management-page frame without changing the board's scroll ownership. */
 .task-board-native-page { padding:0 var(--wand-page-inset,20px) var(--wand-page-inset,20px); }
-.task-board-workspace-header { min-height:var(--wand-page-header-height,56px); box-sizing:border-box; padding-block:8px; }
+.task-board-workspace-header { min-height:var(--wand-page-header-height,56px); box-sizing:border-box; padding-block:8px; border-bottom:1px solid var(--border-subtle); }
+.task-board-kicker { flex:1 1 auto; flex-wrap:nowrap; min-width:0; }
+.task-board-kicker .task-board-view-tabs { min-width:0; max-width:100%; overflow-x:auto; scrollbar-width:none; }
+.task-board-workspace-header.ant-flex { flex-wrap:nowrap; }
+.task-board-visually-hidden { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.task-board-detail-crumb { margin:0; font-size:var(--wand-page-title-size,18px); font-weight:600; color:var(--text-primary); font-variant-numeric:tabular-nums; }
+.task-board-back-button.ant-btn { padding-inline:8px 12px; gap:2px; }
 .task-board-heading-copy h1 { font-size:var(--wand-page-title-size,18px); }
 .task-board-workspace-header .wand-ui-icon-button { min-width:var(--wand-page-toolbar-height,36px); min-height:var(--wand-page-toolbar-height,36px); }
 .task-board-create-button.ant-btn { min-height:var(--wand-page-toolbar-height,36px); }
 .task-board-card-title { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-.task-board-card.is-open .task-board-card-title { display:block; -webkit-line-clamp:unset; overflow:visible; }
-.task-board-toolbar { padding-block:8px; row-gap:8px; }
-.task-board-toolbar-controls { grid-template-columns:minmax(180px,1fr) minmax(120px,180px) 140px auto auto; }
+.task-goal-children { min-width:0; border-block-start:1px solid var(--border-subtle); border-radius:0; font-size:12px; }
+.task-goal-children > .ant-collapse-item > .ant-collapse-header { min-height:36px; padding:8px 0; align-items:center; }
+.task-goal-children .ant-collapse-title { min-width:0; }
+.task-goal-children .ant-collapse-header .ant-typography { font-size:11px; white-space:nowrap; }
+.task-goal-children > .ant-collapse-item > .ant-collapse-panel > .ant-collapse-body { padding:4px 0 8px; }
+@media(pointer:coarse) { .task-goal-children > .ant-collapse-item > .ant-collapse-header { min-height:44px; } }
+.task-board-toolbar { padding-block:4px; row-gap:8px; }
 .task-board-toolbar-controls .ant-input-affix-wrapper,
 .task-board-toolbar-controls .wand-ui-select-trigger { min-height:var(--wand-page-toolbar-height,36px); }
-@container taskboard (max-width:600px) {
-  .task-board-toolbar-controls { grid-template-columns:minmax(0,1fr) minmax(0,1fr) 36px 36px; }
-}
 @media (max-width:639px) {
   .task-board-native-page { padding:0 var(--wand-page-inset,12px) var(--wand-page-inset,12px); }
 }

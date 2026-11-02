@@ -213,6 +213,8 @@ async function main(): Promise<void> {
     case "session:resume":
     case "schedule:list":
     case "task:context":
+    case "task:comments":
+    case "task:maintain":
     case "schedule:read":
     case "schedule:create":
     case "schedule:update": {
@@ -377,6 +379,8 @@ Agent runtime:
   wand session:resume <id> --stdin  Continue the exact structured session with JSON input
   wand schedule:list [--include-cancelled]
   wand task:context <task-id> [comment-id]  Read task facts and source reference
+  wand task:comments <task-id> [--before <cursor>]  Read full task comments in pages
+  wand task:maintain <task-id> --stdin     Cancel queued dispatch or archive obsolete/duplicate task (reason + version required)
   wand task:workflow <task-id> --stdin     Write a scoped delivery/AI-review receipt
   wand schedule:read <id>    Read schedule and execution history
   wand schedule:create --stdin  Create a schedule from JSON (requestId required)

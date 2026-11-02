@@ -135,7 +135,21 @@ else
 fi
 INSTALL_PREFIX="$(node "$PREFIX_SELECTOR" prefix "${WAND_INSTALL_PREFIX:-$(npm prefix -g)}" "$HOME")"
 info "Installing @co0ontty/wand@$INSTALL_VERSION..."
-npm install -g --engine-strict --prefix "$INSTALL_PREFIX" "@co0ontty/wand@$INSTALL_VERSION" || error "npm install failed."
+if [ -f "$SCRIPT_DIR/src/npm-install-policy.ts" ]; then
+  NPM_POLICY_PATH="$SCRIPT_DIR/src/npm-install-policy.ts"
+elif [ -f "$SCRIPT_DIR/dist/npm-install-policy.js" ]; then
+  NPM_POLICY_PATH="$SCRIPT_DIR/dist/npm-install-policy.js"
+else
+  ensure_install_temp
+  NPM_POLICY_PATH="$INSTALL_TEMP_DIR/npm-install-policy.ts"
+  curl -fLsS https://raw.githubusercontent.com/co0ontty/wand/master/src/npm-install-policy.ts -o "$NPM_POLICY_PATH"
+fi
+NPM_SCRIPT_FLAG="$(node "$NPM_POLICY_PATH" "$(command -v npm)")"
+if [ -n "$NPM_SCRIPT_FLAG" ]; then
+  npm install -g --engine-strict "$NPM_SCRIPT_FLAG" --prefix "$INSTALL_PREFIX" "@co0ontty/wand@$INSTALL_VERSION" || error "npm install failed."
+else
+  npm install -g --engine-strict --prefix "$INSTALL_PREFIX" "@co0ontty/wand@$INSTALL_VERSION" || error "npm install failed."
+fi
 NODE_BIN="$(command -v node)"
 GLOBAL_WAND_BIN="$INSTALL_PREFIX/bin/wand"
 export PATH="$INSTALL_PREFIX/bin:$PATH"

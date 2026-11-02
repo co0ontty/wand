@@ -701,6 +701,8 @@ export interface TeamReportFile {
 }
 
 export interface ConversationSessionPreview {
+  /** Execution was removed; the complete referenced transcript remains readable. */
+  historyOnly?: boolean;
   status: "starting" | "running" | "waiting_user" | "done" | "failed" | "stopped" | "unavailable";
   text: string;
 }
@@ -732,6 +734,8 @@ export interface ConversationTurn {
   createdAt?: string;
   /** ISO time when an assistant turn finished streaming. */
   completedAt?: string;
+  /** ISO time when the server received and started processing this turn. */
+  readAt?: string;
   /** Optional usage metadata when available from the underlying tool. */
   usage?: {
     inputTokens?: number;
@@ -786,6 +790,8 @@ export interface StructuredSessionState {
 
 export interface SessionSnapshot extends SessionCompletionState {
   id: string;
+  /** Read-only preserved transcript. Never a runnable or resumable session. */
+  historyOnly?: boolean;
   /** 会话创建来源。旧数据和缺省值按 interactive 处理。 */
   sessionSource?: SessionSource;
   /** 自动化创建会话时关联的自动化任务 ID。 */

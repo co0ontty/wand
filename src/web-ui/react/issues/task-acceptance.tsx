@@ -55,29 +55,32 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
     if (saving === action) return "提交中…";
     if (receipt?.action !== action) return fallback;
     if (!receipt.accepted) return "未确认，请核对";
-    return ({ save: "交付已保存", submit: "已提交 AI 验收", pass: "已进入待归档", fail: "已退回执行", accept: "已确认并归档", return: "已退回执行" })[action];
+    return ({ progress: "进展已记录", save: "交付已保存", submit: "已提交 AI 验收", pass: "已进入待归档", fail: "已退回执行", accept: "已确认并归档", return: "已退回执行" })[action];
   };
-  const status = taskWorkflowStage(task.status), gaps = children.filter(child => !taskHumanAccepted(child));
+  const status = taskWorkflowStage(task.status), gaps = children.filter(child => !taskAiVerified(child));
   const proof = Boolean(draft.evidence.trim()), blocked = Boolean(draft.blocker.trim());
   const actions: { action: TaskWorkflowAction; label: string; enabled: boolean }[] = [
     { action: "submit", label: "提交 AI 验收", enabled: status === "doing" && proof && !blocked },
-    { action: "pass", label: "记录 AI 验收通过", enabled: status === "review" && proof && !blocked && children.every(taskAiVerified) },
+    { action: "pass", label: "记录 AI 验收通过", enabled: status === "review" && proof && !blocked && children.every(child => ["review", "ready", "archived"].includes(child.status) && !child.acceptance?.blocker?.trim()) },
     { action: "fail", label: "验收失败并退回", enabled: status === "review" && blocked },
     { action: "accept", label: "确认并归档", enabled: status === "ready" && taskAiVerified(task) && proof && !blocked && !gaps.length },
     { action: "return", label: "退回执行", enabled: status === "ready" && blocked },
   ];
   return <Flex vertical gap="small" aria-label="交付与验收">
-    <Typography.Title level={5}>交付与验收</Typography.Title>
     <Typography.Text type="secondary">执行结束不代表交付；AI 验收通过后，仍需你明确确认并归档。这里只记录真实结论，不会启动模型。</Typography.Text>
     <TaskTextArea aria-label="交付证据与产物" placeholder="实际产物路径、版本、验证命令与结果，未验证项不能写成通过" value={draft.evidence} onChange={event => edit({ evidence: event.target.value })} autoSize={{ minRows: 3 }} maxLength={16000} disabled={busy || Boolean(saving) || status === "archived"}/>
     <TaskTextArea aria-label="验收阻塞" placeholder="无阻塞时留空；不通过、无法验证或人工退回时写明原因" value={draft.blocker} onChange={event => edit({ blocker: event.target.value })} autoSize={{ minRows: 2 }} maxLength={4000} disabled={busy || Boolean(saving) || status === "archived"}/>
+    {status !== "archived" && !actions.some(entry => entry.enabled) && <Typography.Text type="secondary" className="task-acceptance-hint">{
+      status === "doing" ? (blocked ? "有未解除的阻塞，清空阻塞并填写证据后才能提交 AI 验收。" : "填写交付证据后即可提交 AI 验收。")
+      : status === "review" ? (blocked ? "" : "AI 验收通过需要证据且没有阻塞；未通过时在阻塞里写明原因。")
+      : status === "ready" ? "确认归档需要当前交付的 AI 通过记录与证据；不认可时写明原因退回。" : "此阶段还没有可执行的验收动作。"}</Typography.Text>}
     <Flex gap="small" wrap>
-      <WandButton style={{ width: 160 }} disabled={busy || Boolean(saving) || status === "archived"} loading={saving === "save"} onClick={() => void save()}>{buttonTitle("save", "保存交付与缺口")}</WandButton>
-      {actions.map(entry => <WandButton key={entry.action} style={{ width: 160 }} kind={entry.action === "accept" || entry.action === "submit" ? "primary" : "secondary"} disabled={busy || Boolean(saving) || !entry.enabled} loading={saving === entry.action} onClick={() => void act(entry.action)}>{buttonTitle(entry.action, entry.label)}</WandButton>)}
+      <WandButton disabled={busy || Boolean(saving) || status === "archived"} loading={saving === "save"} onClick={() => void save()}>{buttonTitle("save", "保存交付与缺口")}</WandButton>
+      {/* 只列当前阶段能做的动作；不可用的不再以禁用按钮堆在这里。 */}
+      {actions.filter(entry => entry.enabled || saving === entry.action || receipt?.action === entry.action).map(entry => <WandButton key={entry.action} kind={entry.action === "accept" || entry.action === "submit" || entry.action === "pass" ? "primary" : "secondary"} disabled={busy || Boolean(saving) || !entry.enabled} loading={saving === entry.action} onClick={() => void act(entry.action)}>{buttonTitle(entry.action, entry.label)}</WandButton>)}
     </Flex>
     {task.legacyReview && <Alert type="warning" showIcon title="历史验收记录待核对" description="旧状态没有可信 AI 通过记录；原证据与历史保留，请针对当前交付重新核验。"/>}
-    {gaps.length > 0 && <Alert type="warning" showIcon title={`${gaps.length} 个子任务尚未由人工确认`} description={gaps.map(child => child.identifier).join("、")}/>}
-    {status === "ready" && <Alert type="info" showIcon title="AI 已通过 · 人工未确认" description="检查交付后确认并归档；不认可时填写原因并退回执行。"/>}
+    {gaps.length > 0 && <Alert type="warning" showIcon title={`${gaps.length} 个子任务尚未通过当前交付验收`} description={gaps.map(child => child.identifier).join("、")}/>}
     {status === "archived" && <Alert type={taskHumanAccepted(task) ? "success" : "info"} title={taskHumanAccepted(task) ? "人工已确认 · 已归档" : "历史归档 · 不代表本轮验收通过"}/>}
     <Typography.Text type="secondary" role="status">{feedback || "工作流按真实回执流转；版本冲突与未知结果不会自动重试。"}</Typography.Text>
   </Flex>;

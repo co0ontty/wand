@@ -12,6 +12,7 @@ import { workspaceContextStore } from "../workspaces/workspace-context";
 import { workspacesStore } from "../workspaces/controller";
 import { notifyTasksChanged } from "../task-changes";
 import { useUiStoreSnapshot } from "../shell/ui-store-react";
+import { taskBoardStore } from "../issues/task-board-controller";
 import { readQuickTerminalPreference, saveQuickTerminalPreference, resolveQuickTerminal, withQuickTerminalLock, QuickTerminalUnavailableError, type TerminalDock, type QuickTerminalPreference } from "./state";
 
 function StableSlot({ host }: { host: HTMLDivElement }) {
@@ -54,6 +55,8 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
     return () => setChromeOwners(previous => { const next = new Set(previous); next.delete(owner); return next; });
   }, []);
   const topbarActive = chromeOwners.size > 0;
+  // 任务看板等整页自带页头，不需要单独占一整行只放一个终端入口。
+  const boardOpen = React.useSyncExternalStore(taskBoardStore.subscribe, () => taskBoardStore.getSnapshot().open, () => false);
   const frame = React.useRef<HTMLDivElement>(null);
   const button = React.useRef<HTMLButtonElement>(null);
   const session = React.useRef("");
@@ -221,7 +224,7 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
   const canReconnect = !!(session.current || preference.sessionId);
   const canReplace = !!replaceableSession && !preference.creationPending;
   return <QuickTerminalActionContext.Provider value={{ open, show: () => { void show(); }, trigger: button, chromeHost, registerChrome }}><Flex vertical ref={frame} className="quick-terminal-workspace" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
-    <Flex align="center" justify="end" className="quick-terminal-toolbar" style={{ padding: topbarActive ? 0 : "2px var(--wand-page-inset, 20px)", borderBottom: topbarActive ? undefined : "1px solid var(--border-subtle)", flexShrink: 0 }}>
+    <Flex align="center" justify="end" className="quick-terminal-toolbar" style={{ display: !topbarActive && boardOpen ? "none" : undefined, padding: topbarActive ? 0 : "2px var(--wand-page-inset, 20px)", borderBottom: topbarActive ? undefined : "1px solid var(--border-subtle)", flexShrink: 0 }}>
       <div style={{ width: "100%", display: topbarActive ? undefined : "none" }}><StableSlot host={chromeHost}/></div>
       {!topbarActive && <QuickTerminalButton/>}
     </Flex>

@@ -33,10 +33,16 @@ export class ConversationRepository {
 
   deleteConversation(id: string): void {
     this.s.transaction(() => {
+      const instance = this.getConversation(id);
+      const authors = this.db.prepare("SELECT json_extract(turn_json, '$.author.sessionId') AS id FROM conversation_messages WHERE conversation_id = ?")
+        .all(id) as Array<{ id: string | null }>;
+      const sources = [...this.conversationSessionIds(id), ...authors.map(author => author.id), instance?.sessionId, instance?.communicationSessionId,
+        ...(instance?.historySessionIds ?? [])].filter((source): source is string => !!source);
       this.db.prepare("DELETE FROM conversation_messages WHERE conversation_id = ?").run(id);
       this.db.prepare("DELETE FROM conversation_tasks WHERE conversation_id = ?").run(id);
       this.db.prepare("DELETE FROM conversations WHERE id = ? AND owner = ?").run(id, CONVERSATION_OWNER);
       this.db.prepare("DELETE FROM conversation_list_state WHERE conversation_id = ?").run(id);
+      this.s.releaseUnreferencedSessionHistory(sources);
       // Keep the content-free request ledger: retrying an old accepted request must never recreate deleted work.
     });
   }
@@ -101,7 +107,7 @@ export class ConversationRepository {
         source.createdAt ||= nowIso(); source.updatedAt = nowIso();
         this.s.saveConversation(source);
         this.s.appendConversationEvent(source.id, { role: "user", messageId: request.id, requestId: request.id,
-          conversationTarget: null, content: [{ type: "text", text: "description" in input ? input.description ?? task.description : task.description }] });
+          conversationTarget: null, content: [{ type: "text", text: "description" in input ? input.description ?? task.description : task.description }], readAt: nowIso() });
         request.receipt.messageId = request.id;
         const employee = source.peerEmployeeId ? this.s.getSiliconEmployee(source.peerEmployeeId) : null;
         this.s.appendConversationEvent(source.id, { role: "assistant", notice: true,
@@ -129,7 +135,7 @@ export class ConversationRepository {
       instance.createdAt ||= nowIso(); instance.updatedAt = nowIso();
       this.s.saveConversation(instance);
       this.s.appendConversationEvent(instance.id, { role: "user", messageId: request.id, requestId: request.id,
-        conversationTarget: null, content: [{ type: "text", text: input }] });
+        conversationTarget: null, content: [{ type: "text", text: input }], readAt: nowIso() });
       const employee = instance.peerEmployeeId ? this.s.getSiliconEmployee(instance.peerEmployeeId) : null;
       this.s.appendConversationEvent(instance.id, { role: "assistant", messageId: `${request.id}:session`, requestId: request.id,
         author: { id: instance.peerEmployeeId ?? instance.id, name: employee?.name ?? instance.name, avatar: employee?.avatar },

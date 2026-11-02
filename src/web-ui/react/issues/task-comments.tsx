@@ -1,5 +1,6 @@
+import { usePageSearch } from "../use-page-route.js";
 import * as React from "react";
-import { Alert, Flex, Typography } from "antd";
+import { Alert, Flex, Typography, theme } from "antd";
 import type { WandTaskComment } from "../../../task-types";
 import { TaskCommentDispatchStreamRow, TaskCommentStreamRow, TaskLegacySessionStreamRow } from "./task-stream-row";
 import type { IssueSessionSummary, WandTaskListed } from "./task-board-repository";
@@ -8,24 +9,28 @@ import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
 import { usePortalContainer } from "../ui/portal-context";
 import { createPortal } from "react-dom";
 import { taskBoardRepository } from "./task-board-repository";
-import { TaskTextArea } from "./task-form";
+import { TaskCommentEditor, type TaskCommentEditorHandle } from "./task-comment-editor";
+import { TaskExecutionCard } from "./task-execution-card";
+import type { WandTaskAgent } from "../../../task-types";
 import { installChatComposerStyles } from "../chat-composer-styles";
 import { acceptCommentDraft, commentDeliveryUncertain, commentDraft, commentMentionHeld, commentMentionQuery, commentReferenceQuery, commentRequestIdentity, commentRequestRejected, editCommentDraft, insertCommentMention, insertCommentReference, parseTaskReferenceIds, settleCommentRequest, type CommentDraft } from "./task-comment-composer";
 
-type MentionEmployee = { id: string; name: string; archivedAt?: string | null };
+type MentionEmployee = { id: string; name: string; archivedAt?: string | null; agents?: WandTaskAgent[] };
 /** 可被 `#TASK-133` 引用的子任务；编号是引用句柄，标题与状态只用于展示。 */
 type ReferenceTask = { id: string; identifier: string; title: string; status?: string };
 
-function focusCommentCaret(node: HTMLTextAreaElement | null | undefined, caret: number): void {
+function focusCommentCaret(node: TaskCommentEditorHandle | null | undefined, caret: number): void {
   if (!node) return;
   node.focus({ preventScroll: true });
   const pos = Math.max(0, Math.min(caret, node.value.length));
   node.setSelectionRange(pos, pos);
 }
 
-export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution", employees = [], childTasks = [], sessions = [], onOpenSession, onOpenTask }: { taskId: string; updatedAt: string; dispatchPurpose?: "execution" | "review";
+export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose = "execution", employees = [], childTasks = [], sessions = [], onOpenSession, onOpenTask }: { taskId: string; updatedAt: string; replyRequest?: { commentId: string | null; body: string; revision: number } | null; dispatchPurpose?: "execution" | "review";
   employees?: MentionEmployee[]; childTasks?: WandTaskListed[]; sessions?: IssueSessionSummary[]; onOpenSession?: (id: string) => void; onOpenTask?: (id: string) => void }): React.ReactElement {
   React.useLayoutEffect(() => { installChatComposerStyles(); }, []);
+  const referenceTarget = new URLSearchParams(usePageSearch()).get("comment");
+  const locatedReference = React.useRef("");
   const [result, setResult] = React.useState<{ taskId: string; comments: WandTaskComment[]; totalCount: number; nextCursor: string | null; failed: boolean; loading: boolean }>({ taskId, comments: [], totalCount: 0, nextCursor: null, failed: false, loading: true });
   const [attempt, retry] = React.useReducer(value => value + 1, 0);
   const [draft, setDraft] = React.useState(() => commentDraft(taskId));
@@ -56,10 +61,11 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
   activeTaskId.current = taskId;
   const [mentionRect, setMentionRect] = React.useState<DOMRect | null>(null);
   const portal = usePortalContainer();
+  const { token } = theme.useToken();
   const popupOwner = `task-comment-${taskId}`;
   const pending = React.useRef(false);
   const mounted = React.useRef(true);
-  const input = React.useRef<HTMLTextAreaElement>(null);
+  const input = React.useRef<TaskCommentEditorHandle>(null);
   const submitButton = React.useRef<HTMLButtonElement>(null);
   const rowRefs = React.useRef(new Map<string, HTMLDivElement>());
   const taskGeneration = React.useRef(0);
@@ -106,7 +112,7 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
     update(); window.addEventListener("resize", update); window.addEventListener("scroll", update, true);
     return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
   }, [menuOpen, mentionKey, referenceMenuOpen, referenceKey]);
-  const nativeInput = (): HTMLTextAreaElement | null => input.current;
+  const nativeInput = (): TaskCommentEditorHandle | null => input.current;
   /** 引用编号 → 子任务 ID；只在本任务的直接子任务里找。 */
   const openReferencedTask = (identifier: string): void => {
     const target = referenceTasks.find(task => task.identifier === identifier);
@@ -116,7 +122,7 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
     const node = nativeInput();
     const pos = node?.selectionStart ?? caret;
     const next = insertCommentMention(draft.body, pos, employee.name);
-    edit({ body: next.body, employeeId: employee.id });
+    edit({ body: next.body, employeeId: employee.id, agent: null });
     setCaret(next.caret);
     setDismissed("");
     requestAnimationFrame(() => focusCommentCaret(nativeInput(), next.caret));
@@ -143,6 +149,14 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
     requestAnimationFrame(() => focusCommentCaret(nativeInput(), body.length));
   };
   React.useEffect(() => {
+    if (!replyRequest) return;
+    const current = commentDraft(taskId);
+    const body = `${current.body}${current.body ? "\n" : ""}${replyRequest.body}\n@`;
+    edit({ body, employeeId: "", sourceCommentId: replyRequest.commentId, agent: null });
+    setReplyLabel(replyRequest.commentId ? "当前阻塞的原执行记录" : ""); setCaret(body.length); setDismissed("");
+    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(body.length, body.length); });
+  }, [replyRequest?.revision]);
+  React.useEffect(() => {
     const controller = new AbortController();
     let generation = 0;
     const load = (): void => {
@@ -150,6 +164,10 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
       void taskBoardRepository.comments(taskId, { limit: 50, signal: controller.signal }).then(async rawPage => {
         const page = Array.isArray(rawPage) ? { comments: rawPage, totalCount: rawPage.length, nextCursor: null } : rawPage;
         if (controller.signal.aborted || request !== generation) return;
+        if (referenceTarget && !page.comments.some(comment => comment.id === referenceTarget)) {
+          const located = await taskBoardRepository.commentSource(taskId, referenceTarget, { signal: controller.signal });
+          if (located.comment) page.comments.push(located.comment);
+        }
         const latest = commentsRef.current;
         const existing = latest.taskId === taskId ? latest.comments : [];
         const loadedIds = new Set([...existing, ...page.comments].map(comment => comment.id));
@@ -167,7 +185,7 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
           const exactById = new Map(statusPages.flatMap(statusPage => statusPage.comments.map(comment => [comment.id, comment] as const)));
           const freshDispatches = new Map(page.comments.filter(comment => comment.taskId === taskId && comment.dispatch).map(comment => [comment.id, comment.dispatch] as const));
           const existingWithStatus = existing.map(comment => exactById.has(comment.id) ? { ...comment, dispatch: exactById.get(comment.id)?.dispatch ?? null, reviewWritebackPending: exactById.get(comment.id)?.reviewWritebackPending ?? comment.reviewWritebackPending } : comment);
-          const refreshedPage = page.comments.filter(comment => comment.taskId === taskId).map(comment => freshDispatches.has(comment.id) && exactById.has(comment.id)
+          const refreshedPage = page.comments.filter(comment => comment.activityTaskId === taskId || comment.taskId === taskId || comment.dispatch?.executionTaskId === taskId || referenceTasks.some(child => child.id === comment.taskId)).map(comment => freshDispatches.has(comment.id) && exactById.has(comment.id)
             ? { ...comment, dispatch: exactById.get(comment.id)?.dispatch ?? comment.dispatch, reviewWritebackPending: exactById.get(comment.id)?.reviewWritebackPending ?? comment.reviewWritebackPending } : comment);
           const merged = new Map([...existingWithStatus, ...refreshedPage].map(comment => [comment.id, comment]));
           setSourceComments(currentSources => {
@@ -185,8 +203,17 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
     setResult(current => ({ taskId, comments: current.taskId === taskId ? current.comments : [], totalCount: current.taskId === taskId ? current.totalCount : 0, nextCursor: current.taskId === taskId ? current.nextCursor : null, failed: false, loading: true }));
     load(); const timer = window.setInterval(load, 5000);
     return () => { controller.abort(); clearInterval(timer); };
-  }, [taskId, updatedAt, attempt]);
+  }, [taskId, updatedAt, attempt, referenceTasks, referenceTarget]);
   const comments = result.taskId === taskId ? result.comments : [];
+  React.useEffect(() => {
+    const key = `${taskId}:${referenceTarget}`;
+    if (!referenceTarget || locatedReference.current === key || !comments.some(comment => comment.id === referenceTarget)) return;
+    const node = rowRefs.current.get(`comment-${referenceTarget}`); if (!node) return;
+    locatedReference.current = key;
+    setStreamExpanded(current => ({ ...current, [referenceTarget]: true }));
+    const frame = requestAnimationFrame(() => { node.scrollIntoView({ block: "center" }); node.tabIndex = -1; node.focus({ preventScroll: true }); node.classList.add("task-reference-target"); });
+    return () => cancelAnimationFrame(frame);
+  }, [taskId, referenceTarget, comments]);
   const totalCount = result.taskId === taskId ? result.totalCount : 0;
   const nextCursor = result.taskId === taskId ? result.nextCursor : null;
   const loadResult = async (commentId: string, offset = 0): Promise<void> => {
@@ -258,7 +285,7 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
     try {
       identity = await commentRequestIdentity(taskId, submitted, submitted.employeeId ? dispatchPurpose : "execution");
       const response = await taskBoardRepository.postComment(taskId, { requestId: identity.requestId, body: submitted.body.trim(),
-        employeeId: submitted.employeeId || null, sourceCommentId: submitted.sourceCommentId, ...(submitted.employeeId ? { purpose: identity.purpose } : {}) });
+        employeeId: submitted.employeeId || null, ...(submitted.employeeId && submitted.agent ? { agent: submitted.agent } : {}), sourceCommentId: submitted.sourceCommentId, ...(submitted.employeeId ? { purpose: identity.purpose } : {}) });
       settleCommentRequest(identity, response.comment);
       if (mounted.current) setStreamExpanded(current => ({ ...current, [response.comment.id]: true }));
       const uncertain = commentDeliveryUncertain(response.comment);
@@ -297,19 +324,6 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
   const dispatchCommentBySessionId = new Map(dispatchComments.map(comment => [comment.dispatch?.sessionId, comment.id]));
   const legacySessions = sessions.filter(session => !session.taskCommentId && !dispatchedSessionIds.has(session.id) && !dispatchCommentBySessionId.has(session.id));
   return <div className="task-board-detail-streams" data-testid="task-detail-streams">
-    {(dispatchComments.length > 0 || legacySessions.length > 0) && <section className="task-board-child-stream" role="region" aria-label="本任务的员工执行">
-      <Flex wrap align="center" justify="space-between" gap="small" className="task-stream-heading">
-        <Typography.Title level={4} style={{ margin: 0 }}>本任务的员工执行</Typography.Title>
-        <Typography.Text type="secondary">已加载 {dispatchComments.length + legacySessions.length} 项 · 执行记录不计入子任务</Typography.Text>
-      </Flex>
-      <Flex vertical gap="small" className="task-board-detail-content" data-testid="task-child-stream">
-        {dispatchComments.map(comment => <TaskCommentDispatchStreamRow ref={(node: HTMLDivElement | null) => { const key = `dispatch-${comment.id}`; if (node) rowRefs.current.set(key, node); else rowRefs.current.delete(key); }} key={`dispatch-${comment.id}`} comment={comment}
-          result={resultPages[comment.id]?.taskId === taskId ? resultPages[comment.id] : undefined} onLoadResult={loadResult} onOpenSession={onOpenSession}
-          onOpenTask={identifier => openReferencedTask(identifier)}
-          onLocateComment={() => { setStreamExpanded(current => ({ ...current, [comment.id]: true })); requestAnimationFrame(() => rowRefs.current.get(`comment-${comment.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })); }}/>) }
-        {legacySessions.map(session => <TaskLegacySessionStreamRow key={`session-${session.id}`} session={session} onOpen={onOpenSession}/>)}
-      </Flex>
-    </section>}
     <section className="task-board-comment-stream" role="region" aria-label="任务评论" aria-busy={loading} data-testid="task-comments-stream">
       <Flex align="center" justify="space-between" gap="small" className="task-stream-heading">
         <Typography.Title level={4} style={{ margin: 0 }}>评论 <Typography.Text type="secondary">{totalCount}</Typography.Text></Typography.Title>
@@ -318,16 +332,20 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
       <Flex vertical gap="small" className="task-board-detail-content">
       {failed ? <Alert type="warning" title="评论暂时加载失败" action={<WandButton kind="ghost" size="small" onClick={retry}>重试</WandButton>}/> : null}
       {!ordinaryComments.length && !failed ? <Typography.Text type="secondary" role="status">{loading ? "正在加载评论…" : "还没有评论。在正文里 @员工 并提交即可派发；不 @ 只是普通评论。"}</Typography.Text> : null}
-      {ordinaryComments.map(comment => <TaskCommentStreamRow ref={(node: HTMLDivElement | null) => { const key = `comment-${comment.id}`; if (node) rowRefs.current.set(key, node); else rowRefs.current.delete(key); }} key={comment.id} comment={comment}
+      {ordinaryComments.map(comment => comment.dispatch ? <div key={comment.id} ref={node => { if (node) rowRefs.current.set(`comment-${comment.id}`, node); }}>
+        {comment.dispatch?.executionTaskId && childTasks.find(child => child.id === comment.dispatch?.executionTaskId) ? <WandButton size="small" kind="ghost" onClick={() => onOpenTask?.(comment.dispatch!.executionTaskId!)}>{childTasks.find(child => child.id === comment.dispatch?.executionTaskId)!.identifier} · 查看子任务</WandButton> : null}
+        <TaskExecutionCard comment={comment} result={resultPages[comment.id]?.taskId === taskId ? resultPages[comment.id] : undefined}
+          onOpenSession={onOpenSession} onLoadResult={loadResult} onOpenTask={openReferencedTask}/>
+        <WandButton size="small" kind="ghost" onClick={() => replyTo(comment.id, true)}>继续此子任务 / 处理阻塞</WandButton>
+      </div> : <TaskCommentStreamRow ref={(node: HTMLDivElement | null) => { if (node) rowRefs.current.set(`comment-${comment.id}`, node); }} key={comment.id} comment={comment}
         sourceComment={comment.sourceCommentId ? commentById.get(comment.sourceCommentId) ?? sourceComments[comment.sourceCommentId]?.comment ?? undefined : undefined}
         expanded={streamExpanded[comment.id]} onExpanded={value => setStreamExpanded(current => ({ ...current, [comment.id]: value }))}
-        onViewDispatch={() => rowRefs.current.get(`dispatch-${comment.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })}
-        onOpenTask={identifier => openReferencedTask(identifier)}
-        onReply={replyTo}/ >)}
+        onOpenTask={openReferencedTask} onReply={replyTo}/>)}
+      {legacySessions.length > 0 && <details><summary>历史关联会话 · {legacySessions.length}</summary>{legacySessions.map(session => <TaskLegacySessionStreamRow key={session.id} session={session} onOpen={onOpenSession}/>)}</details>}
       {nextCursor && <WandButton kind="ghost" size="small" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "正在加载更早评论…" : "加载更早评论"}</WandButton>}
       {draft.sourceCommentId && <Flex align="center" gap="small" className="task-comment-reply-context"><Typography.Text type="secondary">回复「{replyLabel || draft.sourceCommentId.slice(0, 8)}」</Typography.Text><WandButton kind="ghost" size="small" onClick={() => { edit({ sourceCommentId: null }); setReplyLabel(""); }}>取消回复</WandButton></Flex>}
       {menuOpen && portal && mentionRect ? createPortal(<div id="task-comment-mention" role="listbox" aria-label="提及员工" className="task-comment-mention" data-wand-popup-owner={`task-comment-${taskId}`}
-        style={{ position: "fixed", zIndex: 1200, left: Math.max(8, Math.min(mentionRect.left, window.innerWidth - 280)), top: mentionTop, width: Math.min(280, window.innerWidth - 16), maxHeight: mentionHeight, pointerEvents: "auto" }}>
+        style={{ position: "fixed", zIndex: token.zIndexPopupBase + 100, left: Math.max(8, Math.min(mentionRect.left, window.innerWidth - 280)), top: mentionTop, width: Math.min(280, window.innerWidth - 16), maxHeight: mentionHeight, pointerEvents: "auto" }}>
         {matches.length === 0 ? <button type="button" role="option" disabled>没有匹配的员工</button> : matches.map((employee, index) => <button
           key={employee.id} id={`task-comment-mention-option-${employee.id}`} type="button" role="option" title={`@${employee.name}`} aria-selected={index === highlight}
           onMouseEnter={() => setHighlight(index)}
@@ -336,7 +354,7 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
         >@{employee.name}</button>)}
       </div>, portal) : null}
       {referenceMenuOpen && portal && mentionRect ? createPortal(<div id="task-comment-reference" role="listbox" aria-label="引用任务" className="task-comment-mention" data-wand-popup-owner={`task-comment-${taskId}`}
-        style={{ position: "fixed", zIndex: 1200, left: Math.max(8, Math.min(mentionRect.left, window.innerWidth - 320)), top: mentionTop, width: Math.min(320, window.innerWidth - 16), maxHeight: mentionHeight, pointerEvents: "auto" }}>
+        style={{ position: "fixed", zIndex: token.zIndexPopupBase + 100, left: Math.max(8, Math.min(mentionRect.left, window.innerWidth - 320)), top: mentionTop, width: Math.min(320, window.innerWidth - 16), maxHeight: mentionHeight, pointerEvents: "auto" }}>
         {referenceMatches.length === 0 ? <button type="button" role="option" disabled>没有匹配的任务</button> : referenceMatches.map((task, index) => <button
           key={task.id} id={`task-comment-reference-option-${task.id}`} type="button" role="option" className="task-comment-reference-option" title={`#${task.identifier}`} aria-selected={index === referenceHighlight}
           onMouseEnter={() => setReferenceHighlight(index)}
@@ -345,12 +363,11 @@ export function TaskComments({ taskId, updatedAt, dispatchPurpose = "execution",
         ><span className="task-comment-reference-id">#{task.identifier}</span><span className="task-comment-reference-title">{task.title}</span></button>)}
       </div>, portal) : null}
       <div className="wand-composer-surface task-comment-input-surface">
-      <TaskTextArea ref={input} value={draft.body} rows={3} maxLength={16000} aria-label="任务评论输入"
+      <TaskCommentEditor popupOwner={popupOwner} ref={input} value={draft.body} employee={bound} agent={draft.agent} onAgent={agent => edit({ agent })} disabled={busy}
         aria-expanded={menuOpen || referenceMenuOpen} aria-controls={menuOpen ? "task-comment-mention" : referenceMenuOpen ? "task-comment-reference" : undefined}
         aria-activedescendant={menuOpen && matches[highlight] ? `task-comment-mention-option-${matches[highlight]!.id}`
           : referenceMenuOpen && referenceMatches[referenceHighlight] ? `task-comment-reference-option-${referenceMatches[referenceHighlight]!.id}` : undefined}
-        aria-autocomplete="list"
-        placeholder="写评论。输入 @ 选择员工派发，输入 # 引用子任务"
+
         onSelect={event => setCaret(event.currentTarget.selectionStart ?? draft.body.length)}
         onChange={event => {
           const value = event.currentTarget.value;

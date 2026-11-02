@@ -26,7 +26,7 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # release tag 可能比客户端仓库的 push 早几秒可见。主仓库与子模块
           # 分开 checkout，避免短暂竞态直接终止整个 IPA workflow。

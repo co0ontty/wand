@@ -362,37 +362,32 @@ export class SessionRegistry {
     }));
   }
 
-  private deleteManagedSession(id: string): SessionSnapshot | null {
+  private deleteManagedSession(id: string, reason: string): SessionSnapshot | null {
     const snapshot = this.get(id);
     if (!snapshot) return null;
     if (isSystemAiCall(snapshot)) {
       systemAiSessions(this.storage).remove(id);
       return snapshot;
     }
-    // Best-effort: tear down the session's isolated worktree (directory +
-    // branch) before removing the session record. Without this, deleting a
-    // session that was never merged leaves an orphan under `.wand-worktrees/`
-    // and a dangling `wand/*` branch forever — the merge path is the only
-    // other place that cleans them up. Force removal is intentional: deleting
-    // a session means discarding everything tied to it.
-    if (snapshot.worktree) {
-      try { cleanupWorktreeSync(snapshot.worktree); } catch { /* never block deletion */ }
-    }
     const owner = this.ownerOf(id);
     if (owner === "structured") {
-      this.structured.delete(id);
+      this.structured.delete(id, reason);
     } else if (owner === "pty") {
-      this.processes.delete(id);
+      this.processes.delete(id, reason);
     } else if (snapshot.sessionKind === "structured") {
-      this.structured.delete(id);
+      this.structured.delete(id, reason);
     } else {
-      this.processes.delete(id);
+      this.processes.delete(id, reason);
+    }
+    // The owner commits referenced history first; failed preservation must not remove its worktree.
+    if (snapshot.worktree) {
+      try { cleanupWorktreeSync(snapshot.worktree); } catch { /* never block deletion */ }
     }
     return snapshot;
   }
 
   /** All destructive paths, including retention, remove native session artifacts. */
-  delete(id: string): SessionSnapshot | null {
+  delete(id: string, reason = "session-delete"): SessionSnapshot | null {
     const snapshot = this.get(id);
     if (!snapshot) return null;
     const manager = this.ownerOf(id) === "structured" || snapshot.sessionKind === "structured"
@@ -413,7 +408,7 @@ export class SessionRegistry {
     const canCleanup = () => !this.listSlim().some((other) => other.id !== id
       && other.claudeSessionId?.trim() === snapshot.claudeSessionId?.trim()
       && sessionProvider(other) === sessionProvider(snapshot));
-    return deleteOwnedSessionWithHistory(() => this.deleteManagedSession(id), this.processes, this.storage,
+    return deleteOwnedSessionWithHistory(() => this.deleteManagedSession(id, reason), this.processes, this.storage,
       { barrier, canCleanup, isSettled: () => !this.nativeDeletionBarriers.has(key) });
   }
 

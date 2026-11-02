@@ -181,6 +181,7 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
     ...task,
     status: taskWorkflowStage(task.status),
     workflowVersion: 1 as const,
+    commentWorkflowVersion: 2 as const,
     ...(task.status === "done" ? { legacyReview: true } : {}),
     commentCount: model ? model.commentCounts.get(task.id) ?? 0 : storage.countWandTaskComments(task.id),
     queuedCommentCount: model ? model.queuedCommentCounts.get(task.id) ?? 0 : storage.countQueuedTaskCommentDispatchesForTask(task.id),
@@ -241,6 +242,19 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   taskTitleService(storage, { config, generateTitle: deps.generateTitle, free: deps.free });
   const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(deps, task);
 
+  app.get("/api/reference/:id", (req, res) => {
+    const id = String(req.params.id).toLowerCase();
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id)) { res.status(400).send("记录 ID 格式无效。"); return; }
+    const task = storage.getWandTask(id);
+    const comment = task ? null : storage.getWandTaskComment(id);
+    const session = task || comment ? null : storage.getSessionSlim(id);
+    if (!task && !comment && !session) { res.status(404).send("该记录不存在或已删除，请核对 ID。"); return; }
+    const query = session ? new URLSearchParams({ view: "workspace", session: id })
+      : new URLSearchParams({ view: "taskboard", task: task?.id ?? comment!.taskId, ...(comment ? { comment: id } : {}) });
+    res.setHeader("Cache-Control", "no-store");
+    res.redirect(302, `/?${query}`);
+  });
+
   app.get("/api/wand-tasks", (req, res) => {
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
     // 数组顺序即展示顺序：created_at 倒序，新创建的在上面。
@@ -254,6 +268,13 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     res.json(readTaskActions(storage, sessions, workspaceId));
   });
   registerTaskCommentRoutes(app, deps);
+  app.post("/api/wand-tasks/:id/maintenance", (req, res) => {
+    try {
+      res.json(dto(storage.maintainTask(req.params.id, req.body, sessions)));
+    } catch (error) {
+      sendRouteError(res, error, "无法取消或关闭任务。");
+    }
+  });
   app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
   });

@@ -1,3 +1,4 @@
+import { TaskSummaryRow } from "./task-inline-summary.js";
 import { taskExecutors } from "./task-executors";
 import { TaskBoardAgentChips } from "./task-executor-chips";
 export { TaskBoardAgentChips } from "./task-executor-chips";
@@ -8,8 +9,9 @@ import { canArchiveBoardTask } from "./task-board-repository";
 import { WandButton } from "../ui";
 import { Alert, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
-import { taskAcceptanceLabel, taskSessionActivity, taskSessionSummary } from "./task-delivery-state";
+import { taskAcceptanceLabel, taskSessionIsRunning, taskSessionSummary } from "./task-delivery-state";
 import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
+import { DEFAULT_ITERATION_NAME } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
 import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
 import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
@@ -84,10 +86,19 @@ export function TaskBoardPriorityChip({
   </Tag>;
 }
 
+/** 截止日期胶囊：卡片、列表、详情共用；逾期变红。 */
+export function TaskBoardDueChip({ date, status }: { date: string; status: WandTaskStatus }): React.ReactElement {
+  const overdue = issueIsOverdue(date, status);
+  return <Tag className={classNames("task-board-chip task-board-due", overdue && "is-overdue")} title={overdue ? `已逾期 · 截止 ${date}` : `截止 ${date}`}>
+    <TaskBoardDueIcon size={12}/>{issueDueStamp(date)}
+  </Tag>;
+}
+
 export function TaskBoardLabelChip({ label }: { label: string }): React.ReactElement {
   const tone = issueLabelTone(label);
+  // 颜色只作为色相输入，底色/文字由 CSS 按当前主题与表面色混合，深浅主题都保持可读。
   return <Tag className={classNames("task-board-label", tone && `is-${tone}`)}
-    color={issueLabelColor(label)}>{issueLabelName(label)}</Tag>;
+    style={{ "--task-label-color": issueLabelColor(label) } as React.CSSProperties}>{issueLabelName(label)}</Tag>;
 }
 
 export function TaskBoardConversationButton({ sessions, onOpen }: {
@@ -127,7 +138,7 @@ export function TaskBoardProcessingRow({
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement | null {
   if (task.status !== "doing") return null;
-  const running = task.executionStatus === "running" || task.sessions.some((session) => taskSessionActivity(session) === "运行中");
+  const running = task.executionStatus === "running" || task.sessions.some(taskSessionIsRunning);
   const queued = task.queuedExecutionCount ?? task.queuedCommentCount ?? 0;
   return <Flex align="center" gap="small" className={classNames("task-board-processing", running && "is-running")}>
     {running ? <TaskBoardProcessingGlyph/> : null}
@@ -136,7 +147,7 @@ export function TaskBoardProcessingRow({
       : taskHumanAccepted(task) ? "人工已确认 · 已完成" : task.acceptance?.blocker ? `待处理：${task.acceptance.blocker}`
       : task.sessions.length > 0 ? taskSessionSummary(task.sessions) + " · 尚待验收" : "等待派发"}</span>
     <span style={{ flex: 1 }} aria-hidden="true"/>
-    <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
+    {onOpenSession && <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>}
   </Flex>;
 }
 
@@ -176,22 +187,26 @@ export function TaskBoardFilterMenu({
     </WandIconButton>}
   >
     <strong>筛选</strong>
-    <p>状态</p>
-    {ISSUE_STATUS_FILTERS.map((column) => <Checkbox key={column.status} checked={filters.statuses.includes(column.status)} onChange={() => onChange({ ...filters, statuses: toggleValue(column.status, filters.statuses) })}>
-      <TaskBoardStatusIcon status={column.status} size={14}/>
-      {column.label}
-    </Checkbox>)}
-    <p>优先级</p>
-    {ISSUE_PRIORITIES.map((entry) => <Checkbox key={entry.value} checked={filters.priorities.includes(entry.value)} onChange={() => onChange({ ...filters, priorities: toggleValue(entry.value, filters.priorities) })}>
-      <TaskBoardPriorityIcon priority={entry.value} size={14}/>
-      {entry.label}
-    </Checkbox>)}
-    {labels.length > 0 && <>
-      <p>标签</p>
+    <div role="group" aria-labelledby="task-filter-status">
+      <p id="task-filter-status">状态</p>
+      {ISSUE_STATUS_FILTERS.map((column) => <Checkbox key={column.status} checked={filters.statuses.includes(column.status)} onChange={() => onChange({ ...filters, statuses: toggleValue(column.status, filters.statuses) })}>
+        <TaskBoardStatusIcon status={column.status} size={14}/>
+        {column.label}
+      </Checkbox>)}
+    </div>
+    <div role="group" aria-labelledby="task-filter-priority">
+      <p id="task-filter-priority">优先级</p>
+      {ISSUE_PRIORITIES.map((entry) => <Checkbox key={entry.value} checked={filters.priorities.includes(entry.value)} onChange={() => onChange({ ...filters, priorities: toggleValue(entry.value, filters.priorities) })}>
+        <TaskBoardPriorityIcon priority={entry.value} size={14}/>
+        {entry.label}
+      </Checkbox>)}
+    </div>
+    {labels.length > 0 && <div role="group" aria-labelledby="task-filter-labels">
+      <p id="task-filter-labels">标签</p>
       {labels.map((label) => <Checkbox key={label} checked={filters.labels.includes(label)} onChange={() => onChange({ ...filters, labels: toggleValue(label, filters.labels) })}>
         <TaskBoardLabelChip label={label}/>
       </Checkbox>)}
-    </>}
+    </div>}
     {count > 0 && <WandButton kind="ghost" type="button" className="task-board-filter-clear" onClick={() => onChange(EMPTY_ISSUE_FILTERS)}>
       清除筛选
     </WandButton>}
@@ -288,7 +303,7 @@ export function TaskBoardArchiveFolder({
  */
 function sessionStatusLabel(status: string): string {
   if (status === "queued") return "排队中";
-  if (status === "running" || status === "thinking") return "进行中";
+  if (status === "running" || status === "thinking") return "运行中";
   if (status === "waiting-input") return "等待输入";
   if (status === "idle") return "空闲";
   if (status === "exited" || status === "stopped") return "已结束";
@@ -296,206 +311,64 @@ function sessionStatusLabel(status: string): string {
   return status || "会话";
 }
 
-function taskSessionGlow(status: string): string {
-  if (issueSessionRunning(status)) return "running";
-  if (status === "thinking") return "thinking";
-  if (status === "waiting-input" || status === "waiting_input") return "waiting-input";
-  if (status === "failed") return "failed";
-  return "none";
-}
-
-/**
- * 就地展开收起后的「焦点归还」，看板卡片与列表行共用一份。
- *
- * 面板收起时是带着焦点一起变 inert 的（用户没点收起，而是改了筛选、换了视图、按了 Esc），
- * 浏览器会把焦点丢回 body，键盘用户就此失去位置。这里记住展开那一刻的触发按钮，
- * 只在「由开转关」且焦点确实被甩掉时还回去：
- *   - 触发按钮已经不连着文档（行被筛掉、整块视图换掉）→ 不动焦点；
- *   - 焦点已经在别的元素上（搜索框、下一张卡片、用户刚点的地方）→ 不抢焦点。
- * 归还只在同一个 openId 从有到无时触发；换成别的 id 说明是点开下一张，焦点本来就在新触发点上。
- */
-export function useExpansionFocusReturn(openId: string): (id: string) => (element: HTMLElement | null) => void {
-  const triggers = React.useRef(new Map<string, HTMLElement>());
-  const lastOpenId = React.useRef("");
-  const bind = React.useCallback((id: string) => (element: HTMLElement | null): void => {
-    if (element) triggers.current.set(id, element);
-    else triggers.current.delete(id);
-  }, []);
-  React.useEffect(() => {
-    const previous = lastOpenId.current;
-    lastOpenId.current = openId;
-    if (!previous || openId) return;
-    const trigger = triggers.current.get(previous);
-    if (!trigger?.isConnected) return;
-    const active = document.activeElement;
-    if (active && active !== document.body && active !== document.documentElement) return;
-    trigger.focus();
-  }, [openId]);
-  return bind;
-}
-
 function TaskBoardListRow({
   task,
   parentLabel,
+  workspaceLabel,
   allTasks,
-  expanded,
-  onToggle,
   onOpen,
   onOpenSession,
   onOpenComments,
-  bindTrigger,
 }: {
   task: WandTaskListed;
   parentLabel?: string;
+  workspaceLabel: string;
   allTasks: WandTaskListed[];
-  expanded: boolean;
-  onToggle(): void;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
   onOpenComments?(id: string): void;
-  bindTrigger(id: string): (element: HTMLElement | null) => void;
 }): React.ReactElement {
   const description = task.description.trim();
-  const triggerRef = React.useMemo(() => bindTrigger(task.id), [bindTrigger, task.id]);
+  // 整行都是进入详情的入口；行内的按钮/链接各自处理自己的点击。
   return <Card
-    className={classNames("task-board-list-row", expanded && "is-open", task.status === "archived" && "is-archived")}
+    hoverable
+    className={classNames("task-board-list-row", task.status === "archived" && "is-archived")}
     onClick={(event) => {
       if ((event.target as HTMLElement).closest("button, a")) return;
-      onToggle();
+      onOpen(task.id);
     }}
   >
     <WandButton kind="ghost"
       type="button"
-      ref={triggerRef}
       className="task-board-list-title"
-      aria-expanded={expanded}
-      aria-controls={`task-list-detail-${task.id}`}
-      aria-label={`${expanded ? "收起" : "展开"} ${task.identifier}: ${task.title}`}
-      onClick={onToggle}
+      aria-label={`打开 ${task.identifier}: ${task.title}`}
+      onClick={() => onOpen(task.id)}
     >
-      <WandIcon name="chevron" size={12} className="task-board-list-chevron"/>
       <small>{task.identifier}{parentLabel ? ` ↳ ${parentLabel}` : ""}</small>
       <strong>{task.title}</strong>
     </WandButton>
+    {description ? <p className="task-board-list-description">{description}</p> : null}
     <Flex wrap align="center" gap={4} className="task-board-list-meta">
-      <Typography.Text type={taskHumanAccepted(task) ? "success" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text>
+      {/* 列表已按阶段分组，只有「排队中」这类组名表达不了的状态才单独标出。 */}
+      {issueTaskStatusLabel(task) !== issueStatusLabel(task.status) && <Tag className="task-board-chip task-detail-stage" data-stage={taskWorkflowStage(task.status)}>{issueTaskStatusLabel(task)}</Tag>}
+      {["review", "ready", "archived"].includes(task.status) || task.acceptance?.blocker?.trim()
+        ? <Typography.Text type={taskHumanAccepted(task) ? "success" : task.acceptance?.blocker?.trim() ? "warning" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text> : null}
       <TaskBoardPriorityChip priority={task.priority}/>
-      {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
+      {task.milestone && task.milestone.name !== DEFAULT_ITERATION_NAME ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
-      {task.dueDate ? <span className="task-board-due"><TaskBoardDueIcon size={12}/>{issueDueStamp(task.dueDate)}</span> : null}
-      <span>{task.workspace?.name ?? "未归属工作区"}</span>
+      {task.dueDate ? <TaskBoardDueChip date={task.dueDate} status={task.status}/> : null}
+      <span>{workspaceLabel}</span>
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
-      <TaskBoardCommentCountButton task={task} onOpen={() => onOpenComments?.(task.id)}/>
+      {(task.commentCount ?? 0) > 0 && <TaskBoardCommentCountButton task={task} onOpen={() => onOpenComments?.(task.id)}/>}
       <time>{formatIssueStamp(task.updatedAt)}</time>
     </Flex>
     <TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/>
-    <Collapse bordered={false} ghost activeKey={expanded ? ["details"] : []}
-      styles={{ header: { display: "none" }, body: { padding: 0 } }}
-      items={[{ key: "details", label: "任务详情", forceRender: true, showArrow: false, children: <div className="task-board-list-detail" id={`task-list-detail-${task.id}`} inert={!expanded}>
-      <div className="task-board-list-detail-inner">
-        <p>
-          <span>{issueTaskStatusLabel(task)}</span>
-          <span>更新于 {formatIssueStamp(task.updatedAt)}</span>
-        </p>
-        {description ? <Typography.Paragraph className="task-board-list-description" ellipsis={{ rows: 4, expandable: "collapsible", symbol: (expanded) => expanded ? "收起全文" : "展开全文" }} style={{ whiteSpace: "pre-wrap", margin: "8px 0" }}>{description}</Typography.Paragraph> : null}
-        <div aria-label="全部任务标签">{task.labels.map((label) => <TaskBoardLabelChip key={label} label={label}/>)}</div>
-        {task.workspace?.cwd && <p><code>{task.workspace.cwd}</code></p>}
-        {task.sessions.length > 0 ? (
-          <ul>
-            {task.sessions.map((session) => {
-              const glow = taskSessionGlow(session.status);
-              return (
-                <li key={session.id}>
-                  <WandButton kind="ghost" type="button" onClick={() => onOpenSession?.(session.id)} data-session-glow={glow}>
-                    <ProviderLogo
-                      provider={session.provider}
-                      className={classNames("task-board-agent-logo", glow !== "none" && `wand-logo-glow glow-${glow}`)}
-                    />
-                    <span>{session.title || issueAgentLabel(session.provider, session.engine)}</span>
-                    <small>{sessionStatusLabel(session.status)}</small>
-                    <code>{session.cwd}</code>
-                  </WandButton>
-                </li>
-              );
-            })}
-          </ul>
-        ) : <p className="task-board-list-description">还没有关联会话</p>}
-        <WandButton kind="ghost" type="button" className="task-board-list-open" onClick={() => onOpen(task.id)}>
-          查看详情
-        </WandButton>
-      </div>
-    </div> }]}/>
   </Card>;
-}
-
-/**
- * 看板卡片的就地展开面板，和 TaskBoardListRow 同一套语义（aria-expanded + aria-controls + inert），
- * 差别有两处：卡片整面都是触发区，所以面板里必须自带「收起」按钮；
- * 面板要比重叠态多东西，因此列出的是带状态与运行目录的会话，而不是卡片上那排可拖拽的简版行。
- */
-export function TaskBoardCardDetail({
-  task,
-  open,
-  parentLabel,
-  childCount,
-  onOpen,
-  onCollapse,
-  onOpenSession,
-}: {
-  task: WandTaskListed;
-  open: boolean;
-  parentLabel?: string;
-  childCount: number;
-  onOpen(id: string): void;
-  onCollapse(): void;
-  onOpenSession?: (sessionId: string) => void;
-}): React.ReactElement {
-  const description = task.description.trim();
-  const catalog = useWandModelCatalog();
-  const agent = task.agent;
-  const assignee = <TaskBoardAgentChips sessions={task.sessions} assigned={agent} subject={task.executionSubject} assignee={task.assignedExecutor}/>;
-  const fields = [
-    { key: "status", label: "状态", children: issueTaskStatusLabel(task) },
-    { key: "assignee", label: "负责人", children: assignee },
-    { key: "priority", label: "优先级", children: issuePriorityLabel(task.priority) },
-    { key: "workspace", label: "项目", children: <Flex vertical><span>{task.workspace?.name ?? "未归属工作区"}</span>{task.workspace?.cwd && <Typography.Text code>{task.workspace.cwd}</Typography.Text>}</Flex> },
-    ...(agent ? [{ key: "model", label: "模型", children: `${issueAgentProviderModelLine(agent, catalog)} · ${issueAgentEffortLabel(agent.thinkingEffort)}` }] : []),
-    { key: "milestone", label: "迭代", children: task.milestone?.name ?? "默认迭代" },
-    { key: "due", label: "截止", children: task.dueDate ? issueDueStamp(task.dueDate) : "未设置" },
-    { key: "updated", label: "更新", children: formatIssueStamp(task.updatedAt) },
-    ...(parentLabel ? [{ key: "parent", label: "父任务", children: parentLabel }] : []),
-    ...(childCount > 0 ? [{ key: "children", label: "子任务", children: `${childCount} 个` }] : []),
-  ];
-  return <Collapse bordered={false} ghost activeKey={open ? ["details"] : []}
-    styles={{ header: { display: "none" }, body: { padding: 0 } }}
-    items={[{ key: "details", label: "任务详情", showArrow: false, forceRender: true, children:
-      <div className="task-board-card-detail" id={`task-card-detail-${task.id}`} inert={!open}>
-        <Flex vertical gap="middle" className="task-board-card-detail-inner">
-          <Descriptions size="small" column={1} items={fields}/>
-          {task.labels.length > 0 && <Flex wrap gap={4} aria-label="全部任务标签">{task.labels.map((label) => <TaskBoardLabelChip key={label} label={label}/>)}</Flex>}
-          <Typography.Paragraph ellipsis={{ rows: 4, expandable: "collapsible", symbol: (expanded) => expanded ? "收起全文" : "展开全文" }} style={{ whiteSpace: "pre-wrap", margin: 0 }}>{description || "还没有填写任务说明。"}</Typography.Paragraph>
-          {task.sessions.length > 0 && <Flex vertical gap="small" className="task-board-card-detail-sessions" aria-label="关联会话">
-            {task.sessions.map(session => <Flex key={session.id} align="center" justify="space-between" gap="small" wrap>
-              <Flex vertical style={{ minWidth: 0 }}>
-                <Typography.Text strong>{session.employeeName ? `${session.employeeName} · ` : ""}{session.title || issueAgentLabel(session.provider, session.engine)}</Typography.Text>
-                <Typography.Text type="secondary">{session.provider}{session.model ? ` · ${session.model}` : ""} · {session.status}</Typography.Text>
-                {session.cwd && <Typography.Text code>{session.cwd}</Typography.Text>}
-              </Flex>
-              <WandButton kind="ghost" size="small" onClick={() => onOpenSession?.(session.id)}>打开会话</WandButton>
-            </Flex>)}
-          </Flex>}
-          <Typography.Text type="secondary">任务摘要与执行记录请在详情事项流中查看。</Typography.Text>
-          <Flex wrap gap="small" className="task-board-card-detail-actions">
-            <WandButton kind="ghost" type="button" className="task-board-card-detail-open" onClick={() => onOpen(task.id)}>查看完整详情</WandButton>
-            <WandButton kind="ghost" type="button" className="task-board-card-detail-collapse" onClick={() => onCollapse()}>收起</WandButton>
-          </Flex>
-        </Flex>
-      </div>,
-    }]}/>;
 }
 
 export function TaskBoardListView({
   archiveOnly = false,
+  inferredWorkspaces,
   grouped,
   allTasks,
   collapsed,
@@ -510,6 +383,7 @@ export function TaskBoardListView({
   onOpenComments,
 }: {
   archiveOnly?: boolean;
+  inferredWorkspaces?: ReadonlyMap<string, { name: string }>;
   grouped: Record<WandTaskStatus, WandTaskListed[]>;
   allTasks: WandTaskListed[];
   collapsed: Record<WandTaskStatus, boolean>;
@@ -523,12 +397,18 @@ export function TaskBoardListView({
   onOpenSession?: (sessionId: string) => void;
   onOpenComments?(id: string): void;
 }): React.ReactElement {
-  const [expandedId, setExpandedId] = React.useState<string | null>(null);
-  const bindTrigger = useExpansionFocusReturn(expandedId ?? "");
-  const toggleExpanded = (id: string): void => {
-    setExpandedId((current) => current === id ? null : id);
-  };
   const archived = grouped.archived;
+  const identifierById = React.useMemo(() => new Map(allTasks.map((task) => [task.id, task.identifier])), [allTasks]);
+  const renderRow = (task: WandTaskListed): React.ReactElement => <TaskBoardListRow
+    key={task.id}
+    task={task}
+    allTasks={allTasks}
+    parentLabel={task.parentTaskId ? identifierById.get(task.parentTaskId) : undefined}
+    workspaceLabel={task.workspace?.name ?? (inferredWorkspaces?.get(task.id) ? `${inferredWorkspaces.get(task.id)!.name}（按会话目录）` : "未归属工作区")}
+    onOpen={onOpen}
+    onOpenSession={onOpenSession}
+    onOpenComments={onOpenComments}
+  />;
   return <Flex vertical gap="middle" className="task-board-list-view">
     {archiveOnly && <Flex justify="space-between" align="center"><Typography.Text type="secondary">归档保留交付与执行历史，不代表旧任务已经通过本轮验收。</Typography.Text>{onPurgeArchive && archived.length > 0 && <WandButton kind="danger" disabled={archivePurging} onClick={onPurgeArchive}>清空归档</WandButton>}</Flex>}
     {(archiveOnly ? [ISSUE_ARCHIVE_COLUMN] : ISSUE_COLUMNS).map((column) => {
@@ -544,7 +424,7 @@ export function TaskBoardListView({
           onClick={() => onToggle(column.status)}
         >
           <span className="task-board-list-heading">
-            <WandIcon name={isCollapsed ? "chevronLeft" : "chevron"} size={12}/>
+            <WandIcon name="chevron" size={12} className={isCollapsed ? "task-disclosure-chevron" : "task-disclosure-chevron is-open"}/>
             <TaskBoardStatusGlyph status={column.status}/>
             <strong>{column.label}</strong>
           </span>
@@ -553,18 +433,7 @@ export function TaskBoardListView({
         {!isCollapsed && <Flex vertical gap="small" className="task-board-list-rows">
           {items.length === 0 && column.status !== "ready" && <p className="task-board-column-empty">{column.empty}</p>}
           {items.length === 0 && column.status === "ready" && archived.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
-          {items.map((task) => <TaskBoardListRow
-            key={task.id}
-            task={task}
-            allTasks={allTasks}
-            expanded={expandedId === task.id}
-            parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
-            onToggle={() => toggleExpanded(task.id)}
-            onOpen={onOpen}
-            onOpenSession={onOpenSession}
-            onOpenComments={onOpenComments}
-            bindTrigger={bindTrigger}
-          />)}
+          {items.map(renderRow)}
           {!archiveOnly && column.status === "ready" && archiveOpen && archived.length > 0 ? <TaskBoardArchiveFolder
             count={archiveCount}
             open={archiveOpen}
@@ -573,18 +442,7 @@ export function TaskBoardListView({
             purging={archivePurging}
           >
             <Flex vertical gap="small" className="task-board-archive-rows">
-              {archived.map((task) => <TaskBoardListRow
-                key={task.id}
-                task={task}
-                allTasks={allTasks}
-                expanded={expandedId === task.id}
-                parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
-                onToggle={() => toggleExpanded(task.id)}
-                onOpen={onOpen}
-                onOpenSession={onOpenSession}
-                onOpenComments={onOpenComments}
-                bindTrigger={bindTrigger}
-              />)}
+              {archived.map(renderRow)}
             </Flex>
           </TaskBoardArchiveFolder> : null}
         </Flex>}
@@ -593,45 +451,64 @@ export function TaskBoardListView({
   </Flex>;
 }
 
-export function TaskBoardDashboard({ tasks, projectName, onOpen, onStage, actionHub }: {
+export function TaskBoardDashboard({ tasks, projectName, onOpen, onOpenAcceptance, onStage }: {
   allTasks?: WandTaskListed[]; projectName: string; tasks: WandTaskListed[];
-  onOpen(id: string): void; onOpenSession?: (sessionId: string) => void;
+  onOpen(id: string): void; onOpenAcceptance?(id: string): void; onOpenSession?: (sessionId: string) => void;
   onStage?(status: WandTaskStatus): void; actionHub?: React.ReactNode;
 }): React.ReactElement {
   const goals = tasks.filter(task => !task.parentTaskId), stats = issueBoardStats(goals);
   const active = goals.filter(task => task.status !== "archived");
   const ready = active.filter(task => task.status === "ready" && taskAiVerified(task));
   const review = active.filter(task => taskWorkflowStage(task.status) === "review");
-  const running = active.filter(task => task.executionStatus === "running" || task.sessions.some(session => taskSessionActivity(session) === "运行中"));
+  const running = active.filter(task => task.executionStatus === "running" || task.sessions.some(taskSessionIsRunning));
   const gaps = active.filter(task => task.acceptance?.blocker.trim());
-  const due = [...active].filter(task => task.dueDate).sort((a,b) => a.dueDate!.localeCompare(b.dueDate!)).slice(0,4);
-  const series = issueProgressSeries(goals), maximum = Math.max(1, stats.accepted);
-  const points = series.map((point, index) => `${20 + index * 36},${120 - point.completed / maximum * 88}`).join(" ");
+  const due = [...active].filter(task => task.dueDate).sort((a, b) => a.dueDate!.localeCompare(b.dueDate!)).slice(0, 5);
   const count = (status: WandTaskStatus): number => status === "backlog" ? stats.backlog : status === "todo" ? stats.todo : status === "doing" ? stats.doing : status === "review" ? stats.review : stats.ready;
-  const row = (task: WandTaskListed, caption?: string): React.ReactElement => <WandButton kind="ghost" key={task.id} className="task-panel-summary-row" onClick={() => onOpen(task.id)}>
-    <span><strong>{task.title}</strong><small>{caption || `${task.identifier} · ${task.assignedExecutor?.name || "未指派"}`}</small></span><WandIcon name="chevron" size={12}/>
-  </WandButton>;
-  const panel = (title: string, children: React.ReactNode, extra?: React.ReactNode): React.ReactElement => <Card title={title} extra={extra} size="small" className="task-panel-analysis">{children}</Card>;
-  return <div className="task-board-dashboard task-panel-dashboard">
-    <div className="task-panel-overview"><div><Typography.Text type="secondary">项目完成度 · 人工确认口径</Typography.Text><div className="task-panel-completion"><strong>{stats.total ? Math.round(stats.accepted / stats.total * 100) : 0}<small>%</small></strong><span>{stats.accepted} / {stats.total} 个主目标已确认</span></div></div>
-      <div className="task-panel-summary"><Typography.Title level={3}>{projectName}</Typography.Title><Typography.Paragraph>当前 {active.length} 个主目标推进中，<WandButton kind="ghost" onClick={() => onStage?.("review")}>{review.length} 项待 AI 验收</WandButton>，<WandButton kind="ghost" onClick={() => onStage?.("ready")}>{ready.length} 项待你确认归档</WandButton>。{gaps.length ? `另有 ${gaps.length} 项验收缺口。` : ""}</Typography.Paragraph><Typography.Text type="secondary">AI 通过不代表人工已接受，不提前计入完成度。旧记录未核对前不自动认定通过。</Typography.Text></div>
-    </div>
-    <section className="task-panel-metrics" aria-label="五阶段统计">{ISSUE_COLUMNS.map(column => <WandButton key={column.status} kind="ghost" className={`task-panel-metric is-${column.status}`} aria-label={`查看${column.label}任务`} onClick={() => onStage?.(column.status)}>
-      <span><TaskBoardStatusGlyph status={column.status}/>{column.label}</span><strong>{count(column.status)}</strong><Progress showInfo={false} percent={active.length ? count(column.status) / active.length * 100 : 0} strokeColor={column.status === "ready" ? "var(--success)" : column.status === "review" ? "var(--info, var(--accent))" : column.status === "doing" ? "var(--accent)" : "var(--text-secondary)"} size="small"/>
-    </WandButton>)}</section>
-    <div className="task-panel-section-title"><Typography.Title level={5}>先看需要你决定的事</Typography.Title><Typography.Text type="secondary">AI 做验收，你确认交付</Typography.Text></div>
-    <Card title={`待你确认归档 · ${ready.length}`} extra={<WandButton kind="ghost" onClick={() => onStage?.("ready")}>查看全部</WandButton>} size="small" className="task-panel-ready">
-      {ready.length ? ready.slice(0,6).map(task => <div className="task-panel-ready-row" key={task.id}><WandIcon name="shieldCheck" size={18}/><WandButton kind="ghost" onClick={() => onOpen(task.id)}><strong>{task.title}</strong><small>{task.identifier} · {task.assignedExecutor?.name || "负责人未记录"} · AI 已通过</small></WandButton><Typography.Text type="secondary">人工未确认</Typography.Text><WandButton onClick={() => onOpen(task.id)}>查看交付</WandButton></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有等待你确认的交付"/>}
-    </Card>
-    {actionHub && <Collapse className="task-panel-action-hub" items={[{ key:"actions", label:"授权、待答与其他待处理事项", children:actionHub }]}/>}
-    <div className="task-panel-section-title"><Typography.Title level={5}>项目分析</Typography.Title><Typography.Text type="secondary">{running.length} 项正在执行 · {gaps.length} 项有缺口 · {stats.overdue} 项已逾期</Typography.Text></div>
-    <div className="task-panel-analysis-grid">
-      {panel("AI 验收队列", review.length ? review.slice(0,5).map(task => row(task, `${task.identifier} · ${task.legacyReview ? "历史交付待核对" : task.executionStatus === "running" ? "正在核验" : task.executionStatus === "queued" ? "验收已排队 · 等待员工空闲" : "交付已提交 · 查看核验进度与回执"}`)) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无待 AI 验收任务"/>)}
-      {panel("执行与返工", gaps.length || running.length ? [...gaps, ...running.filter(task => !gaps.includes(task))].slice(0,5).map(task => row(task, task.acceptance?.blocker || `${task.identifier} · 正在执行`)) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有执行或返工项目"/>)}
-      {panel("优先级分布", <div className="task-panel-distribution">{ISSUE_PRIORITIES.filter(entry => entry.value !== "none").map(entry => { const n = active.filter(task => task.priority === entry.value).length; return <div key={entry.value}><span>{entry.label}</span><Progress showInfo={false} size="small" percent={active.length ? n / active.length * 100 : 0}/><b>{n}</b></div>; })}<Typography.Text type="secondary">按未归档主目标统计，不重复计算子任务。</Typography.Text></div>)}
-      {panel("累计人工确认", <><svg className="task-panel-trend" viewBox="0 0 475 150" role="img" aria-label="基于已记录确认时间的累计人工确认"><path d="M20 120H452 M20 32H452" stroke="var(--border-subtle)" fill="none"/><polyline points={points} fill="none" stroke="var(--accent)" strokeWidth="2"/><text x="20" y="145" fontSize="11" fill="var(--text-secondary)">记录开始</text><text x="420" y="145" fontSize="11" fill="var(--text-secondary)">当前</text></svg><Typography.Text type="secondary">只计入明确人工确认的记录；不推测缺失历史。</Typography.Text></>)}
-      {panel("近期到期", due.length ? due.map(task => row(task, `${task.identifier} · ${task.dueDate} · ${issueStatusLabel(task.status)}`)) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有设置截止日期"/>)}
-      {panel("负责人交付", <div className="task-panel-owner-delivery">{[...new Set(goals.map(task => task.assignedExecutor?.id).filter(Boolean))].map(id => { const owned = goals.filter(task => task.assignedExecutor?.id === id); return <div key={id}><strong>{owned[0].assignedExecutor?.name}</strong><span>{owned.filter(taskHumanAccepted).length} 项人工确认 · {owned.filter(task => task.status === "ready").length} 项待归档</span></div>; })}{!goals.some(task => task.assignedExecutor) && <Typography.Text type="secondary">暂无已记录的负责人</Typography.Text>}</div>)}
+  const completion = stats.total ? Math.round(stats.accepted / stats.total * 100) : 0;
+  // 「需要你处理」只放必须由人决定的事：等你确认的交付，以及有阻塞的任务。
+  const attention = [
+    ...ready.map(task => ({ task, reason: "AI 已通过 · 等你确认", tone: "success" as const, action: () => (onOpenAcceptance ?? onOpen)(task.id), label: "查看交付" })),
+    ...gaps.filter(task => !ready.includes(task)).map(task => ({ task, reason: task.acceptance!.blocker.trim(), tone: "warning" as const, action: () => onOpen(task.id), label: "处理阻塞" })),
+  ];
+  const owners = [...new Set(goals.map(task => task.assignedExecutor?.id).filter(Boolean))].map(id => {
+    const owned = goals.filter(task => task.assignedExecutor?.id === id);
+    return { id: id!, name: owned[0]!.assignedExecutor!.name, active: owned.filter(task => task.status !== "archived").length, waiting: owned.filter(task => task.status === "ready").length, accepted: owned.filter(taskHumanAccepted).length };
+  }).sort((a, b) => b.active - a.active).slice(0, 6);
+  const list = (items: WandTaskListed[], caption: (task: WandTaskListed) => string, empty: string): React.ReactElement => items.length
+    ? <div className="task-dash-list">{items.slice(0, 5).map(task => <TaskSummaryRow key={task.id} task={task} caption={caption(task)} onOpen={onOpen}/>)}</div>
+    : <p className="task-dash-empty">{empty}</p>;
+  return <div className="task-board-dashboard task-dash">
+    <header className="task-dash-head">
+      <div>
+        <h2>{projectName}</h2>
+        <p>{active.length} 个任务进行中 · 人工确认完成 {stats.accepted}/{stats.total}（{completion}%）{stats.overdue ? ` · ${stats.overdue} 个已逾期` : ""}</p>
+      </div>
+    </header>
+    <nav className="task-dash-stages" aria-label="各阶段任务数">
+      {ISSUE_COLUMNS.map(column => <WandButton key={column.status} kind="ghost" className="task-dash-stage" data-stage={column.status}
+        aria-label={`查看${column.label}任务（${count(column.status)}）`} onClick={() => onStage?.(column.status)}>
+        <span><TaskBoardStatusGlyph status={column.status}/>{column.label}</span><strong>{count(column.status)}</strong>
+      </WandButton>)}
+      <div className="task-dash-stage-bar" aria-hidden="true">{ISSUE_COLUMNS.map(column => <i key={column.status} data-stage={column.status} style={{ flexGrow: count(column.status) }}/>)}</div>
+    </nav>
+    <section className="task-dash-section task-dash-attention" aria-labelledby="task-dash-attention">
+      <header><h3 id="task-dash-attention">需要你处理</h3><span>{attention.length ? `${attention.length} 项` : ""}</span></header>
+      {attention.length ? <div className="task-dash-list">{attention.slice(0, 8).map(({ task, reason, tone, action, label }) => <div className="task-dash-attention-row" key={task.id} data-tone={tone}>
+        <TaskSummaryRow task={task} caption={`${task.identifier} · ${reason}`} onOpen={onOpen}/>
+        <WandButton size="small" kind={tone === "success" ? "primary" : "secondary"} onClick={action}>{label}</WandButton>
+      </div>)}</div> : <p className="task-dash-empty">没有等你确认或处理的事项。</p>}
+    </section>
+    <div className="task-dash-grid">
+      <section className="task-dash-section" aria-labelledby="task-dash-running"><header><h3 id="task-dash-running">正在执行</h3><span>{running.length || ""}</span></header>
+        {list(running, task => `${task.identifier} · ${task.assignedExecutor?.name || "未指派"}`, "当前没有正在运行的任务。")}</section>
+      <section className="task-dash-section" aria-labelledby="task-dash-review"><header><h3 id="task-dash-review">AI 验收中</h3><span>{review.length || ""}</span></header>
+        {list(review, task => `${task.identifier} · ${task.legacyReview ? "历史交付待核对" : task.executionStatus === "running" ? "正在核验" : task.executionStatus === "queued" ? "验收排队中" : "交付已提交"}`, "暂无待 AI 验收的任务。")}</section>
+      <section className="task-dash-section" aria-labelledby="task-dash-due"><header><h3 id="task-dash-due">近期到期</h3><span>{due.length || ""}</span></header>
+        {list(due, task => `${task.identifier} · ${issueDueStamp(task.dueDate!)} · ${issueStatusLabel(task.status)}`, "没有设置截止日期的任务。")}</section>
+      <section className="task-dash-section" aria-labelledby="task-dash-owners"><header><h3 id="task-dash-owners">负责人</h3><span>{owners.length || ""}</span></header>
+        {owners.length ? <table className="task-dash-owners"><thead><tr><th scope="col">负责人</th><th scope="col">进行中</th><th scope="col">待确认</th><th scope="col">已确认</th></tr></thead>
+          <tbody>{owners.map(owner => <tr key={owner.id}><th scope="row">{owner.name}</th><td>{owner.active}</td><td>{owner.waiting}</td><td>{owner.accepted}</td></tr>)}</tbody></table>
+          : <p className="task-dash-empty">暂无已记录的负责人。</p>}</section>
     </div>
   </div>;
 }
@@ -724,6 +601,7 @@ export function TaskBoardGantt({
                 className="task-board-gantt-row"
                 title={`${task.title} · ${task.dueDate ? `截止 ${task.dueDate}` : "待排期，未设置截止日期"}`}
                 style={{ width: "100%", height: 48, padding: 0, display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", gap: 0, textAlign: "left" }}
+                aria-label={`${task.identifier} ${task.title}，${task.dueDate ? `截止 ${task.dueDate}` : "待排期，未设置截止日期"}`}
                 onClick={() => onOpen(task.id)}
               >
                 <Flex vertical style={{ minWidth: 0, paddingInline: 8 }}><Typography.Text type="secondary">{task.identifier}{task.parentTaskId ? ` · 归属 ${allTasks.find(parent => parent.id === task.parentTaskId)?.identifier ?? "历史主目标"}` : ""}</Typography.Text><Typography.Text ellipsis>{task.title}</Typography.Text></Flex>
@@ -753,11 +631,14 @@ export function TaskBoardContextMenu({
   onNewSession,
   onArchive,
   onRestore,
+  onMove,
   onClose,
 }: {
   x: number;
   y: number;
   task: WandTaskListed;
+  /** 不依赖拖拽的换列入口（键盘与触屏）；与拖拽共用同一条落点逻辑。 */
+  onMove?(status: WandTaskStatus): void;
   onOpen(): void;
   onCopy(): void;
   onDispatch(): void;
@@ -784,13 +665,17 @@ export function TaskBoardContextMenu({
     ...(task.status === "archived"
       ? [{ key: "restore", label: "恢复到等待认领", icon: <WandIcon name="resume"/>, onClick: onRestore }]
       : [
+          ...(onMove ? [{ key: "move", label: "移动到", icon: <WandIcon name="board"/>,
+            children: ISSUE_COLUMNS.filter((column) => column.status !== task.status).map((column) => ({
+              key: `move-${column.status}`, label: column.label, onClick: () => { onMove(column.status); onClose(); },
+            })) }] : []),
           { key: "dispatch", label: "派发 Agent", icon: <WandIcon name="zap"/>, onClick: onDispatch },
           ...(canArchiveBoardTask(task) ? [{ key: "archive", label: "归档", icon: <WandIcon name="archive"/>, onClick: onArchive }] : []),
         ]),
   ];
   return <Dropdown open autoFocus placement="bottomLeft" trigger={[]}
     onOpenChange={(open) => { if (!open) onClose(); }}
-    menu={{ items: actions.map((action) => ({ ...action, onClick: () => { action.onClick(); onClose(); } })) }}
+    menu={{ items: actions.map((action) => "children" in action ? action : { ...action, onClick: () => { action.onClick(); onClose(); } }) }}
     popupRender={(menu) => <div data-wand-popup-owner="task-board-context">{menu}</div>}>
     <span style={{ position: "fixed", left: x, top: y, width: 1, height: 1 }} aria-hidden="true"/>
   </Dropdown>;
@@ -831,8 +716,8 @@ export function TaskBoardAgentSessionList({ sessions, assigned, subject, assigne
   </div>;
 }
 
-export function TaskBoardProjectChip({ name }: { name: string }): React.ReactElement {
-  return <Tag className="task-board-chip" title={name}>
+export function TaskBoardProjectChip({ name, inferred = false }: { name: string; inferred?: boolean }): React.ReactElement {
+  return <Tag className={classNames("task-board-chip", inferred && "is-inferred")} title={inferred ? `${name}（任务未绑定项目，按会话运行目录归入）` : name}>
     <TaskBoardFolderIcon size={12}/>
     <span>{name}</span>
   </Tag>;

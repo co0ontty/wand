@@ -13,6 +13,11 @@ export function TaskReferenceableTasks({ children, onOpenTask, onOpenSession, on
   onCreateChild?(): void;
 }): React.ReactElement | null {
   if (!children.length && !onCreateChild) return null;
+  // 没有子任务时只留一行入口，不占一个带统计的大标题。
+  if (!children.length) return <Flex align="center" justify="space-between" gap="small" className="task-board-child-empty" role="region" aria-label="子任务">
+    <Typography.Text type="secondary">子任务 · 暂无，可把独立交付目标拆开分别验收</Typography.Text>
+    <WandButton kind="ghost" size="small" onClick={onCreateChild}>添加子任务</WandButton>
+  </Flex>;
   const awaiting = children.filter(child => taskWorkflowStage(child.status) === "review").length;
   const ready = children.filter(child => child.status === "ready").length;
   const accepted = children.filter(taskHumanAccepted).length;
@@ -20,7 +25,7 @@ export function TaskReferenceableTasks({ children, onOpenTask, onOpenSession, on
     <Flex wrap align="center" justify="space-between" gap="small" className="task-stream-heading">
       <Flex wrap align="center" gap="small">
         <Typography.Title level={4} style={{ margin: 0 }}>子任务</Typography.Title>
-        <Typography.Text type="secondary">{children.length} 项 · {awaiting} 项待 AI 验收 · {ready} 项待归档 · {accepted} 项人工已确认</Typography.Text>
+        <Typography.Text type="secondary">{[`${children.length} 项`, awaiting ? `${awaiting} 项待验收` : "", ready ? `${ready} 项待确认` : "", `${accepted} 项已确认`].filter(Boolean).join(" · ")}</Typography.Text>
       </Flex>
       {onCreateChild && <WandButton kind="ghost" size="small" onClick={onCreateChild}>添加子任务</WandButton>}
     </Flex>

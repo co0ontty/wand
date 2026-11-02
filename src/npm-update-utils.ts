@@ -44,6 +44,7 @@ import { whichSync } from "./path-repair.js";
 import { getErrorMessage } from "./error-utils.js";
 import { compareSemver, compareWandInstallOrder, extractSemver } from "./version-utils.js";
 import { acquireDeploymentLock, releaseDeploymentLock, type DeploymentLock as GlobalUpdateLock } from "./deployment-lock.js";
+import { npmInstallScriptArgs } from "./npm-install-policy.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -744,7 +745,8 @@ async function checkUpdateNodeVersion(pkg: string, timeoutMs: number): Promise<v
 }
 
 async function npmInstallGlobalAsync(pkg: string, timeoutMs: number, extra: string[] = []): Promise<void> {
-  await runNpmAsync(["install", "-g", "--engine-strict", ...extra, pkg], timeoutMs);
+  const scriptArgs = npmInstallScriptArgs(npmBin(), getChildEnv());
+  await runNpmAsync(["install", "-g", "--engine-strict", ...scriptArgs, ...extra, pkg], timeoutMs);
 }
 
 function isRecoverableInstallError(message: string): boolean {
@@ -973,7 +975,8 @@ export function installPackageGloballySync(
     };
   };
   const tryInstall = (extra: string[]): { status: number | null; stdout: string; stderr: string } => {
-    const args = ["install", "-g", "--engine-strict", ...extra, pkg];
+    const scriptArgs = npmInstallScriptArgs(npmBin(), getChildEnv());
+    const args = ["install", "-g", "--engine-strict", ...scriptArgs, ...extra, pkg];
     attempts.push(`npm ${args.join(" ")}`);
     const r = runNpmSync(args, timeoutMs);
     return withValidation({

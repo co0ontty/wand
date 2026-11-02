@@ -201,6 +201,9 @@ export interface WorkspaceTaskDetail extends WorkspaceTask {
 /** GET /api/tasks 聚合行：任务 + 运行期派生字段；目录信息在 TaskDirectoryGroup 上。 */
 export type TaskSummary = WorkspaceTaskDetail & {
   boardTaskId?: string | null;
+  boardTaskIdentifier?: string | null;
+  assignedExecutor?: { id: string; name: string; avatar?: string } | null;
+  queuedDispatchCount?: number;
   /** Canonical board phase; absent/unknown must not be inferred from active/done. */
   boardTaskStatus?: import("../../../task-types.js").WandTaskStatus | null;
   executionStatus?: "running" | "queued" | null;

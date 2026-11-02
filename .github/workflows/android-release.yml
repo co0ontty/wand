@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # 主仓库 tag 与客户端子模块 push 几乎同时发生时，checkout@v4 的
           # 一次性递归拉取会直接失败。先取主仓库，再对目标子模块做有退避的重试。

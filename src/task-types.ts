@@ -224,6 +224,10 @@ export interface TaskCommentResultAnchor {
 }
 
 export interface TaskCommentDispatch {
+  executionTaskId?: string | null;
+  agent?: WandTaskAgent | null;
+  deliveryStatus?: string;
+  blocker?: string;
   employeeId: string;
   employeeName: string;
   /** queued = 已接受但因员工并发上限排队，尚未创建会话；任务仍保持活动状态。 */
@@ -239,6 +243,7 @@ export interface TaskCommentDispatch {
 }
 
 export interface WandTaskComment {
+  activityTaskId?: string;
   purpose?: "execution" | "review";
   reviewRevision?: number | null;
   reviewWritebackPending?: boolean;
@@ -275,7 +280,7 @@ export interface TaskVerification {
   reviewerId: string | null;
 }
 
-export type TaskWorkflowAction = "submit" | "pass" | "fail" | "return" | "accept";
+export type TaskWorkflowAction = "progress" | "submit" | "pass" | "fail" | "return" | "accept";
 export interface TaskWorkflowInput {
   action: TaskWorkflowAction;
   requestId: string;

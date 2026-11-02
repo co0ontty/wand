@@ -61,15 +61,21 @@ export function chooseInstallPrefix(defaultPrefix, home, configPath) {
  * The module is copied into the independent recovery runtime, never loaded
  * from the installation that this transaction is about to replace.
  */
-export async function withRecoveryLock(root, guardPath, action) {
+async function recoveryLockModule(guardPath) {
   const directory = path.dirname(guardPath);
   const lockModule = path.join(directory, existsSync(path.join(directory, "deployment-lock.js"))
     ? "deployment-lock.js" : "deployment-lock.ts");
-  const { acquireDeploymentLock, releaseDeploymentLock } = await import(pathToFileURL(lockModule).href);
+  return import(pathToFileURL(lockModule).href);
+}
+
+export async function withRecoveryLock(root, guardPath, action) {
+  const { acquireDeploymentLock, releaseDeploymentLock } = await recoveryLockModule(guardPath);
   const previous = process.env.WAND_DEPLOYMENT_LOCKS;
   const inherited = previous ? JSON.parse(previous) : [];
   if (!Array.isArray(inherited)) throw new Error("无效的部署锁回执。");
-  const lock = acquireDeploymentLock(path.join(root, ".wand-update-lock"), { inherited });
+  const lock = acquireDeploymentLock(path.join(root, ".wand-update-lock"), {
+    inherited, recoverAfterReboot: true, note: message => console.error(message),
+  });
   try {
     process.env.WAND_DEPLOYMENT_LOCKS = JSON.stringify([...inherited, lock]);
     return await action();
@@ -261,7 +267,12 @@ if (main) {
     const [command, ...args] = process.argv.slice(2);
     if (command === "config") console.log(discoverServiceConfig(args[0], args[1]));
     else if (command === "prefix") console.log(chooseInstallPrefix(args[0], args[1], args[2]));
-    else if (command === "apply") {
+    else if (command === "check-lock") {
+      const { assertRecoveryDeploymentLockAvailable } = await recoveryLockModule(args[1]);
+      const inherited = process.env.WAND_DEPLOYMENT_LOCKS ? JSON.parse(process.env.WAND_DEPLOYMENT_LOCKS) : [];
+      if (!Array.isArray(inherited)) throw new Error("无效的部署锁回执。");
+      assertRecoveryDeploymentLockAvailable(path.join(args[0], ".wand-update-lock"), inherited);
+    } else if (command === "apply") {
       const [prepared, root, bin, configPath, scope, platform, healthPath, guardPath] = args;
       await recoverPreparedInstallation({ prepared, root, bin, configPath, scope, platform, healthPath, guardPath });
     } else throw new Error("未知恢复操作。");

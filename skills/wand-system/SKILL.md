@@ -1,6 +1,6 @@
 ---
 name: wand-system
-description: 操作 Wand 工作台的系统能力：查询员工和工作区，创建员工会话，查看或续接指定历史会话，创建、查看、暂停和取消定时任务，以及通过真实网页登录页使用短时一次性票据。用户要求延迟检查、两小时后复查、选择员工执行、异常时唤起原会话等自动化流程时使用。
+description: 操作 Wand 工作台的系统能力：读取任务上下文和评论、查询员工和工作区，创建员工会话，查看或续接指定历史会话，创建、查看、暂停和取消定时任务，以及通过真实网页登录页使用短时一次性票据。用户要求延迟检查、两小时后复查、选择员工执行、异常时唤起原会话等自动化流程时使用。
 license: MIT
 compatibility: 本机 Wand 服务、Node.js、已安装的 wand-system skill，以及用户允许的命令执行权限。
 ---
@@ -27,6 +27,19 @@ node /absolute/path/to/wand-system/scripts/wand.mjs session:current
 - 以 API 返回的 ID、nextRunAt、revision、执行记录及检查证据为准。创建成功不等于执行完成，accepted 不等于检查通过；不靠状态文案关键词判断业务恢复。
 - 网络断开、超时、5xx/408/409、响应解析失败均可能已接受；不盲目重建计划或再次唤起。定时任务保留相同 requestId 查询核对；会话操作读取原 ID/消息后核对，无法确认就报告未知。
 - 仅支持当前 Wand 管理的结构化历史会话精确续接。不能拿 provider 原生 ID 替代 Wand ID，不能把新建空白会话说成恢复原会话。PTY 或已删除历史明确报告不支持/不可用。
+
+## 评论指派任务
+
+收到任务评论派发时，使用提示词中的 Task ID 和 Comment ID 读取最新事实：
+
+```sh
+node /absolute/path/to/wand-system/scripts/wand.mjs task:context <task-id> <comment-id>
+node /absolute/path/to/wand-system/scripts/wand.mjs task:comments <task-id>
+```
+
+完整读取分页评论；核对当前阻塞、来源回复、已有交付和验收版本，再处理本轮指令。
+仅需要已有任务上下文时，不创建新会话或重复子任务。回合结束不等于交付或阻塞解除；证据、仍缺的条件和下一步写回原任务，实际交付或验收使用派发时授予的任务级 `task:workflow` 能力。
+详细输出和分页语义见 `references/operations.md`「任务上下文与阻塞处理」。
 
 ## 一次性网页登录
 
