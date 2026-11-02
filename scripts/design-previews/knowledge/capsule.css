@@ -1,0 +1,15 @@
+.composer-input-surface{background:var(--bg-primary);border:1px solid var(--border-default);border-radius:8px;padding:9px 12px;display:flex;flex-direction:column;gap:6px;transition:border-color var(--motion-fast) var(--ease-out-expo),box-shadow var(--motion-fast) var(--ease-out-expo)}
+.composer-input-surface:focus-within{border-color:var(--sidebar-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--sidebar-accent) 15%,transparent)}
+.composer-input-surface textarea{padding:0!important;background:transparent!important;color:var(--text-primary)!important;font-size:13px!important;line-height:1.8!important}
+
+/* 真正的纯正单体胶囊 */
+.mention-capsule{display:inline-flex;align-items:center;border-radius:9999px;background:var(--sidebar-selected);border:1px solid color-mix(in srgb,var(--sidebar-accent) 30%,transparent);padding:2px 8px 2px 4px;font-size:11px;align-self:flex-start;max-width:100%;box-shadow:0 1px 2px rgba(0,0,0,0.04);color:var(--sidebar-accent);user-select:none}
+.capsule-part{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:9999px;border:0;background:transparent;cursor:pointer;color:inherit;font-size:11px;line-height:1.4;transition:background var(--motion-fast) var(--ease-out-expo)}
+.capsule-part:hover{background:color-mix(in srgb,var(--sidebar-accent) 16%,transparent)}
+.part-text{font-weight:600;white-space:nowrap;color:inherit}
+.part-caret{color:inherit;opacity:.7;margin-left:1px}
+.capsule-cli-logo{width:13px;height:13px;flex:none}
+.model-part .part-text.model-code{font-family:var(--font-mono,monospace);font-size:11px}
+.capsule-divider{width:1px;height:12px;background:color-mix(in srgb,var(--sidebar-accent) 30%,transparent);margin-inline:2px;flex:none}
+.capsule-close-btn{border:0;background:transparent;color:inherit;opacity:.7;cursor:pointer;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;margin-left:3px;flex:none;transition:all var(--motion-fast)}
+.capsule-close-btn:hover{opacity:1;color:var(--danger);background:color-mix(in srgb,var(--danger) 15%,transparent)}
