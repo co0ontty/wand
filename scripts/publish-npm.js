@@ -34,7 +34,21 @@ export async function readPublication(version, tag, fetchImpl = fetch) {
     throw new Error("Registry verification returned the wrong package version");
   }
   const taggedVersion = typeof tags[tag] === "string" ? tags[tag] : null;
-  return { exists: document?.version === version, tagged: taggedVersion === version, taggedVersion };
+  let downloadable = false;
+  if (document) {
+    const tarball = new URL(document.dist?.tarball);
+    if (tarball.origin !== "https://registry.npmjs.org") throw new Error("Registry returned an unexpected tarball origin");
+    try {
+      const response = await fetchImpl(tarball, {
+        method: "HEAD", headers: { "Cache-Control": "no-cache" },
+        cache: "no-store", signal: AbortSignal.timeout(15_000),
+      });
+      downloadable = response.status === 200;
+    } catch {
+      // Preserve the known version so a delayed or unavailable blob cannot cause a republish.
+    }
+  }
+  return { exists: document?.version === version, tagged: taggedVersion === version, taggedVersion, downloadable };
 }
 
 function newerStableVersion(actual, expected) {
@@ -70,7 +84,7 @@ export async function publish(version, tag, overrides = {}) {
   };
   const superseded = state => tag === "latest" && newerStableVersion(state.taggedVersion, version);
   const confirmed = state => {
-    if (!state.exists) return false;
+    if (!state.exists || !state.downloadable) return false;
     if (state.tagged) return true;
     if (superseded(state)) {
       deps.log(`${PACKAGE}@${version} is published; keeping newer latest ${state.taggedVersion}.`);
@@ -79,24 +93,25 @@ export async function publish(version, tag, overrides = {}) {
     return false;
   };
   const wait = async () => {
-    const deadline = deps.now() + 360_000;
+    const deadline = deps.now() + 15 * 60_000;
     while (true) {
       const state = await read();
       if (confirmed(state)) return true;
       if (deps.now() >= deadline) return false;
-      deps.log(`Waiting for ${PACKAGE}@${version}: version visible=${state.exists}, ${tag}=${state.taggedVersion ?? "unavailable"}...`);
+      deps.log(`Waiting for ${PACKAGE}@${version}: version visible=${state.exists}, tarball available=${!!state.downloadable}, ${tag}=${state.taggedVersion ?? "unavailable"}...`);
       await deps.sleep(Math.min(10_000, deadline - deps.now()));
     }
   };
   const existing = await read();
   if (confirmed(existing)) return true;
+  if (existing.exists) {
+    if (!existing.tagged && !superseded(existing)
+      && !await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
+    return await wait();
+  }
   if (superseded(existing)) {
     deps.log(`Refusing to publish ${version} over newer latest ${existing.taggedVersion}. Use a newer stable version.`);
     return false;
-  }
-  if (existing.exists) {
-    if (!await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
-    return await wait();
   }
   for (let attempt = 1; attempt <= 5; attempt++) {
     if (await deps.npm(["publish", "--ignore-scripts", "--access", "public", "--tag", tag])) {
@@ -105,13 +120,14 @@ export async function publish(version, tag, overrides = {}) {
     }
     const state = await read();
     if (confirmed(state)) return true;
+    if (state.exists) {
+      if (!state.tagged && !superseded(state)
+        && !await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
+      return await wait();
+    }
     if (superseded(state)) {
       deps.log(`A newer latest ${state.taggedVersion} appeared; not retrying publication of ${version}.`);
       return false;
-    }
-    if (state.exists) {
-      if (!await deps.npm(["dist-tag", "add", `${PACKAGE}@${version}`, tag])) return false;
-      return await wait();
     }
     if (attempt < 5) await deps.sleep(attempt * 30_000);
   }
