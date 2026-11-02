@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Alert, Flex, Typography } from "antd";
 import { FolderPickerOptions } from "../folder-picker/options";
+import { HttpNewSessionRepository } from "../new-session/repository";
 import { httpFolderPickerRepository } from "../folder-picker/repository";
 import type { FolderPickerListing } from "../folder-picker/types";
 import { WandButton, WandIcon, WandInput, WandPopover } from "../ui";
@@ -12,6 +13,15 @@ export function ConversationComposerDirectory({ value, defaultCwd, disabled, onC
   const [open, setOpen] = React.useState(false);
   const [path, setPath] = React.useState("");
   const [listing, setListing] = React.useState<FolderPickerListing | null>(null);
+  const [recent, setRecent] = React.useState<readonly { path: string; name: string }[]>([]);
+  React.useEffect(() => {
+    if (!open) return;
+    const abort = new AbortController();
+    void new HttpNewSessionRepository().load({ signal: abort.signal }).then(value => {
+      if (!abort.signal.aborted) setRecent(value.recentPaths);
+    }).catch(() => {});
+    return () => abort.abort();
+  }, [open]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [activeIndex, setActiveIndex] = React.useState(-1);
@@ -41,6 +51,8 @@ export function ConversationComposerDirectory({ value, defaultCwd, disabled, onC
     <Flex vertical gap={8} className="conversation-directory-picker">
       <Typography.Text strong>本次消息运行目录</Typography.Text>
       <WandInput autoFocus aria-label="临时聊天目录（本页共用）" placeholder="输入服务端目录路径" value={path} onChange={event => setPath(event.currentTarget.value)}/>
+      {recent.length ? <Flex vertical gap={4}><Typography.Text type="secondary">最近执行目录</Typography.Text>
+        {recent.slice(0, 6).map(item => <WandButton key={item.path} kind="ghost" title={item.path} onClick={() => { onChange(item.path); setOpen(false); }}>{item.name}</WandButton>)}</Flex> : null}
       {error ? <Alert type="error" showIcon title={error}/> : null}
       <FolderPickerOptions id={id} optionPrefix={id} items={listing?.items} loading={loading} error={error}
         activeIndex={activeIndex} itemRefs={itemRefs} onActiveIndex={setActiveIndex} onActivate={item => setPath(item.path)}/>

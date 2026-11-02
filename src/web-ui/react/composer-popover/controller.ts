@@ -14,6 +14,10 @@ export interface ComposerPopoverState {
   /** 终端交互开关是否应在 popover 里露出（结构化会话、非终端视图下隐藏）。 */
   readonly interactiveVisible: boolean;
   readonly interactiveOn: boolean;
+  /** 「预测下一条」只在空闲的 Codex 结构化会话露出；草稿非空时禁用。 */
+  readonly predictionVisible: boolean;
+  readonly predictionBlocked: boolean;
+  readonly predictionBusy: boolean;
 }
 
 export interface ComposerPopoverMount extends ComposerPopoverState {
@@ -22,6 +26,7 @@ export interface ComposerPopoverMount extends ComposerPopoverState {
   /** `keyboard` 表示触发来自键盘（`event.detail === 0`），用于决定关闭后焦点归位。 */
   readonly onAttach: (keyboard: boolean) => void;
   readonly onToggleInteractive: () => void;
+  readonly onPredict: () => void;
 }
 
 export interface ComposerPopoverSnapshot extends MountSnapshot<ComposerPopoverMount> {}
@@ -30,7 +35,10 @@ export interface ComposerPopoverSnapshot extends MountSnapshot<ComposerPopoverMo
 function sameMount(a: ComposerPopoverMount, b: ComposerPopoverMount): boolean {
   return a.target === b.target
     && a.interactiveVisible === b.interactiveVisible
-    && a.interactiveOn === b.interactiveOn;
+    && a.interactiveOn === b.interactiveOn
+    && a.predictionVisible === b.predictionVisible
+    && a.predictionBlocked === b.predictionBlocked
+    && a.predictionBusy === b.predictionBusy;
 }
 
 export class ComposerPopoverController extends MountStore<ComposerPopoverMount> {

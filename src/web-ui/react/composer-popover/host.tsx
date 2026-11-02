@@ -23,6 +23,17 @@ export function ComposerPopoverItems({ mount }: { mount: ComposerPopoverMount })
         label="上传附件"
         onClick={(event) => mount.onAttach(event.detail === 0)}
       />
+      {mount.predictionVisible ? <ComposerPopoverAction
+        id="plus-predict-item"
+        icon="sparkle"
+        label={mount.predictionBusy ? "正在预测…" : "预测下一条"}
+        title={mount.predictionBlocked
+          ? "先清空当前草稿再预测；预测只填入空输入框，不会自动发送"
+          : "让 Codex 根据本会话预测你的下一条输入（会调用模型）"}
+        busy={mount.predictionBusy}
+        disabled={mount.predictionBlocked}
+        onClick={() => mount.onPredict()}
+      /> : null}
       <WandButton kind="ghost"
         className={interactiveClass}
         id="terminal-interactive-toggle-top"

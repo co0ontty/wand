@@ -1225,6 +1225,58 @@ import { compactSessionFetch } from "./session-fetch.js";
         flashComposerPhase("failed", reason, composerResultDwellMs("failed"), sessionId);
       }
 
+      // 预测下一条输入：只由用户显式点击触发（会调用模型），结果只填入空草稿，
+      // 期间用户已经开始输入就放弃落地；永不自动发送，也不覆盖已有草稿/附件。
+      export function predictNextInput(): void {
+        var session = state.sessions.find(function(item) { return item.id === state.selectedId; });
+        if (!session || session.provider !== "codex" || !isStructuredSession(session)) return;
+        if (state.codexPredictionBusy) return;
+        if (session.structuredState && session.structuredState.inFlight) {
+          showActionError("本轮仍在执行，结束后再预测下一条。");
+          return;
+        }
+        var draft = composerStore.read(session.id);
+        if (String(draft.text || "").trim() || draft.attachments.length) {
+          showActionError("先清空当前草稿再预测；预测只填入空输入框。");
+          return;
+        }
+        var sessionId = session.id;
+        state.codexPredictionBusy = true;
+        updateInteractiveControls();
+        fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/prediction", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        }).then(function(response) {
+          return response.json().then(function(body) { return { ok: response.ok, body: body || {} }; });
+        }).then(function(result) {
+          if (!result.ok) throw new Error(result.body.error || "预测失败。");
+          if (result.body.state !== "ready") throw new Error(result.body.reason || "当前账户不支持预测下一条。");
+          var text = String(result.body.text || "").trim();
+          if (!text) throw new Error("预测结果为空。");
+          // 迟到结果不能覆盖新输入：草稿一旦变化就只说明，不写回。
+          var latest = composerStore.read(sessionId);
+          if (String(latest.text || "").trim() || latest.attachments.length) {
+            showActionError("预测已返回，但当前草稿已变化，未覆盖。");
+            return;
+          }
+          if (state.selectedId !== sessionId) return;
+          setDraftValueForSession(sessionId, text);
+          var predictionBox = document.getElementById("input-box");
+          // 草稿是外部写入的：has-text 与发送按钮状态必须立即同步，不能等下一次输入事件。
+          if (predictionBox) syncComposerHasText(predictionBox);
+          closePlusPopover();
+          focusInputWithSelection(predictionBox);
+          flashComposerDone("已填入预测，可编辑或直接发送", sessionId);
+        }).catch(function(error) {
+          flashComposerFailed(error && error.message ? error.message : "预测失败。", sessionId);
+        }).finally(function() {
+          state.codexPredictionBusy = false;
+          updateInteractiveControls();
+        });
+      }
+
       // 服务端已接受这次提交（WS status：structured inFlight=true），或提交链路自己
       // 走到终点：把「正在发送」推进到「已送达」，驻留后回落到结构相位（运行中且
       // 无草稿 → 停止按钮）。只允许同一会话、同一 token 的链路推进；已经被更具体的
@@ -2358,15 +2410,24 @@ import { compactSessionFetch } from "./session-fetch.js";
         if (!draftOnly) {
         // 终端交互 toggle 挂在加号 popover 内，条目由 React portal 渲染；
         // 这里只发布可见性与开关状态，不再直接改写 class / aria / 文案。
+        // 「预测下一条」只对空闲的 Codex 结构化会话露出；草稿非空时禁用，
+        // 保证预测永远只填进空输入框，不覆盖用户已经写下的内容。
+        var predictionDraft = composerStore.read(state.selectedId);
+        var predictionVisible = !!(isCodex && structured && !isRunning);
+        var predictionBlocked = !!(String(predictionDraft.text || "").trim() || predictionDraft.attachments.length);
         syncBrowserComposerPopover({
           resolve: function() {
             return {
               interactiveVisible: !(structured || state.currentView !== "terminal" || !selectedSession || terminalPassthrough),
               interactiveOn: state.terminalInteractive,
+              predictionVisible: predictionVisible,
+              predictionBlocked: predictionBlocked,
+              predictionBusy: !!state.codexPredictionBusy,
             };
           },
           onAttach: function(keyboard) { openComposerFilePicker(keyboard); },
           onToggleInteractive: toggleTerminalInteractive,
+          onPredict: predictNextInput,
         });
         // 历史会话只要可自动恢复（Claude/Codex PTY + 有历史 id），输入框/发送按钮
         // 就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
@@ -2481,21 +2542,11 @@ import { compactSessionFetch } from "./session-fetch.js";
         }
       }
 
-      // 会话区持续可见的「正在执行」状态条。只在聊天视图投影，终端视图不抢位置。
+      // 会话区持续可见的「正在执行」状态条：已统一迁移到左侧菜单栏任务图标，会话最底部不再展示文字条。
       function paintSelectedRunningStatus() {
         var host = document.getElementById("chat-running-host");
         if (!host) return;
-        var selected = state.sessions.find(function(session) { return session.id === state.selectedId; });
-        var chatVisible = !!selected && document.getElementById("chat-output") != null
-          && !(document.getElementById("chat-output") as HTMLElement).classList.contains("hidden");
-        if (!chatVisible) {
-          clearRunningStatusBar(host);
-          return;
-        }
-        paintRunningStatusBar(host, selected
-          ? { ...selected, ptyRunning: computeRunningSignal(selected).ptyRunning,
-              turnStartedAt: selected.ptyTurnStartedAt, lastActivityAt: selected.ptyLastActivityAt }
-          : null);
+        clearRunningStatusBar(host);
       }
 
       // COPY-2/COPY-4: 是否存在落在终端输出区(#output)内的活动文本选区。用于：

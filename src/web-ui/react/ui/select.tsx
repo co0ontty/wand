@@ -42,13 +42,14 @@ export interface WandSelectProps extends Pick<React.ButtonHTMLAttributes<HTMLBut
   popupOwner?: string;
   onValueChange?(value: string): void;
   onOpenChange?(open: boolean): void;
+  popupAction?: { label: string; onClick(): void };
 }
 
 
 /** A real button ref and popup-owned search are required by the composer focus lease. */
 export function WandSelect({ value, defaultValue, options, placeholder = "请选择", displayValue, startSlot, displayTitle,
   ariaLabel, id, "aria-describedby": describedBy, "aria-invalid": invalid, triggerRef, disabled, triggerKind, searchable, searchPlaceholder = "搜索", className, contentClassName,
-  itemClassName, side = "bottom", align = "start", sideOffset = 6, collisionPadding = 12, popupOwner = ariaLabel, onValueChange, onOpenChange }: WandSelectProps) {
+  itemClassName, side = "bottom", align = "start", sideOffset = 6, collisionPadding = 12, popupOwner = ariaLabel, onValueChange, onOpenChange, popupAction }: WandSelectProps) {
   const portal = usePortalContainer();
   const parentOwner = useParentPopupOwner();
   React.useEffect(() => registerPopupOwner(popupOwner, parentOwner), [popupOwner, parentOwner]);
@@ -148,6 +149,7 @@ export function WandSelect({ value, defaultValue, options, placeholder = "请选
             }
           }}/> }
         {filtered.length ? menuNode : <div role="status">没有匹配的选项</div>}
+        {popupAction ? <WandButton kind="ghost" onClick={() => { changeOpen(false); popupAction.onClick(); }}>{popupAction.label}</WandButton> : null}
       </div>}/>
     : pendingTriggerButton}</WandUiBoundary>;
 }

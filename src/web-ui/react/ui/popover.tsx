@@ -19,17 +19,19 @@ export interface WandPopoverProps {
   contentId?: string;
   popupOwner?: string;
   contentRole?: AriaRole;
+  /** Stable fallback when closing a surface also removes its trigger. */
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
   onOpenChange?(open: boolean): void;
   onAfterOpenChange?: PopoverProps["afterOpenChange"];
 }
 export function WandPopover({ trigger, triggerActions = "click", children, ariaLabel, align = "center", side = "bottom", sideOffset = 8,
-  className, open, contentId, contentRole, popupOwner = contentId ?? ariaLabel, onOpenChange, onAfterOpenChange }: WandPopoverProps) {
+  className, open, contentId, contentRole, popupOwner = contentId ?? ariaLabel, returnFocusRef, onOpenChange, onAfterOpenChange }: WandPopoverProps) {
   const portal = usePortalContainer();
   const triggerRef = React.useRef<React.ComponentRef<typeof Popover>>(null);
   const [internalOpen, setInternalOpen] = React.useState(false);
   const shown = open ?? internalOpen;
   const change = (next: boolean): void => { setInternalOpen(next); onOpenChange?.(next); };
-  usePopupDismiss(shown, () => { change(false); triggerRef.current?.nativeElement?.focus({ preventScroll: true }); });
+  usePopupDismiss(shown, () => { change(false); (returnFocusRef?.current ?? triggerRef.current?.nativeElement)?.focus({ preventScroll: true }); });
   return <WandUiBoundary><Popover ref={triggerRef} open={shown} onOpenChange={change} afterOpenChange={onAfterOpenChange} trigger={triggerActions} arrow={false}
     placement={popupPlacement(side, align)} destroyOnHidden getPopupContainer={() => portal ?? document.body}
     align={{ offset: popupOffset(side, sideOffset) }}

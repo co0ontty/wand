@@ -3,7 +3,7 @@
 :root { --wand-safe-top: max(var(--app-inset-top), env(safe-area-inset-top, 0px)); --wand-safe-bottom: max(var(--app-inset-bottom), env(safe-area-inset-bottom, 0px)); }
 :root { --wand-safe-left: max(var(--app-inset-left), env(safe-area-inset-left, 0px)); --wand-safe-right: max(var(--app-inset-right), env(safe-area-inset-right, 0px)); --safe-bottom: var(--wand-safe-bottom); --input-safe-bottom: var(--safe-bottom); }
 :root { --motion-press: 110ms; --motion-fast: 150ms; --motion-normal: 240ms; --motion-morph: 200ms; --motion-indicator: 260ms; --motion-quick-exit: 90ms; --motion-dwell-sent: 720ms; --motion-dwell-failed: 1500ms; --motion-spin: 2.4s; }
-:root { --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1); --transition-fast: 0.14s ease-out; --transition-normal: 0.22s ease-out; --chat-column-width: 940px; --chat-content-max-width: none; }
+:root { --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1); --transition-fast: 0.14s ease-out; --transition-normal: 0.22s ease-out; --chat-column-width: 940px; --chat-content-inset: var(--wand-page-inset,20px); --chat-content-max-width: none; }
 html { height: 100%; font-size: 16px; -webkit-font-smoothing: antialiased; background: var(--bg-primary, #faf8f5); }
 body { margin: 0; height: 100dvh; overflow: hidden; font-family: var(--font-sans, sans-serif); color: var(--text-primary, #29241f); background: var(--bg-primary, #faf8f5); }
 #app { height: 100%; }
@@ -105,10 +105,9 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 }
 .chat-loading-more, .chat-empty { margin: auto; text-align: center; }
 .msg-copy-btn { visibility: hidden; }
-/* 持续可见的「正在执行」状态条：读数来自服务端本轮锚点，出现/消失只展开自身高度，
-   不推动 composer 触发点；reduced-motion 下退化为瞬时。 */
-#chat-running-host:empty { display: none; }
-.chat-running-bar { display: flex; align-items: center; gap: 8px; box-sizing: border-box; flex-shrink: 0; width: 100%; padding: 6px 16px; color: var(--text-secondary); font-size: var(--font-size-xs); overflow: hidden; transform-origin: bottom center; animation: chat-running-in var(--motion-normal) var(--ease-out-expo) both; }
+/* 持续可见的「正在执行」状态条（已迁移到左侧菜单栏任务图标，会话底部不再展示） */
+#chat-running-host { display: none !important; }
+.chat-running-bar { display: none !important; }
 .chat-running-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chat-running-pulse { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--accent, var(--text-secondary)); animation: chat-running-breathe var(--motion-spin) var(--ease-in-out-smooth) infinite; }
 .chat-running-pulse.is-instant, .chat-running-bar[data-phase="waiting"] .chat-running-pulse { animation: none; }
@@ -117,6 +116,109 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 @keyframes chat-running-in { from { opacity: 0; transform: scaleY(.6); } to { opacity: 1; transform: scaleY(1); } }
 @keyframes chat-running-breathe { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .chat-running-bar { animation: none; } .chat-running-pulse { animation: none; } }
+
+/* 菜单栏任务状态动效图标（A, B, B, B 方案） */
+.wand-status-glyph-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* 1. 运行中：方案 A（圆圈延伸填满 + 顺滑擦除消失） */
+.wand-status-glyph.is-running {
+  animation: wand-status-spin var(--motion-spin, 2.2s) linear infinite;
+  transform-origin: center;
+}
+.wand-status-glyph.is-running .task-status-track {
+  stroke: color-mix(in srgb, var(--accent, #3b82f6) 20%, transparent);
+}
+.wand-status-glyph.is-running .task-status-fill {
+  stroke: var(--accent, #3b82f6);
+  stroke-linecap: round;
+  stroke-dasharray: 44;
+  animation: wand-status-stroke-fill var(--motion-spin, 2.2s) var(--ease-in-out-smooth, ease-in-out) infinite;
+  transform-origin: center;
+}
+
+@keyframes wand-status-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes wand-status-stroke-fill {
+  0% { stroke-dashoffset: 44; }
+  50% { stroke-dashoffset: 6; }
+  100% { stroke-dashoffset: -44; }
+}
+
+/* 2. 完成：方案 B（浅绿弹性果冻徽章 Soft Pop Badge） */
+.wand-status-glyph.is-completed {
+  border-radius: var(--radius-full, 50%);
+  background: color-mix(in srgb, var(--success, #10b981) 18%, transparent);
+  color: var(--success, #10b981);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: wand-status-pop-bounce var(--motion-normal, 360ms) cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+@keyframes wand-status-pop-bounce {
+  0% { transform: scale(0.4); opacity: 0; }
+  70% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* 3. 出错：方案 B（轻度横向微震颤错号 Subtle Shake Alert） */
+.wand-status-glyph.is-failed {
+  border-radius: var(--radius-full, 50%);
+  background: color-mix(in srgb, var(--danger, #ef4444) 18%, transparent);
+  color: var(--danger, #ef4444);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: wand-status-alert-shake var(--motion-normal, 360ms) ease-in-out forwards;
+}
+
+@keyframes wand-status-alert-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-1.5px); }
+  40%, 80% { transform: translateX(1.5px); }
+}
+
+/* 4. 等你处理：琥珀徽章 + 慢呼吸，与「失败」的红色错号严格区分 */
+.wand-status-glyph.is-attention {
+  border-radius: var(--radius-full, 50%);
+  background: color-mix(in srgb, var(--warning, #a96a2f) 18%, transparent);
+  color: var(--warning, #a96a2f);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: chat-running-breathe 2.4s var(--ease-in-out-smooth, ease-in-out) infinite;
+}
+
+/* 5. 排队：方案 B（微型小时钟步进跳格走动 Stepping Clock） */
+.wand-status-glyph.is-queued {
+  color: var(--text-secondary);
+}
+.wand-status-glyph.is-queued .task-status-minute-hand {
+  transform-origin: 8px 8px;
+  animation: wand-status-spin 4s steps(12) infinite;
+}
+
+/* reduced motion 无障碍降级 */
+@media (prefers-reduced-motion: reduce) {
+  .wand-status-glyph.is-running { animation: none; }
+  .wand-status-glyph.is-running .task-status-fill {
+    animation: none;
+    stroke-dashoffset: 12;
+  }
+  .wand-status-glyph.is-completed { animation: none; transform: none; }
+  .wand-status-glyph.is-failed { animation: none; transform: none; }
+  .wand-status-glyph.is-attention { animation: none; opacity: 1; }
+  .wand-status-glyph.is-queued .task-status-minute-hand { animation: none; }
+}
 .chat-message:hover .msg-copy-btn, .chat-message:focus-within .msg-copy-btn, .msg-copy-btn.visible { visibility: visible; }
 .code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .chat-message-content :is(pre, table) { max-width: 100%; overflow: auto; }
@@ -256,7 +358,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .status-bar-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .status-bar-timer { font-variant-numeric: tabular-nums; }
 .structured-status-bar.completed { color: var(--success); }
-.input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, .composer-attachments-host) { display: none; }
+.input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config) { display: none; }
 .input-composer.is-terminal-interactive #send-input-button:not([data-phase="running"]) { display: none; }
 /* One PTY key row stays with the composer; Ant owns the key visuals. */
 .terminal-shortcuts:not([hidden]) { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: 0; }
@@ -266,221 +368,35 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
   .todo-progress-header.ant-btn { min-height: 44px; height: 44px; }
   .terminal-shortcuts-row > button { min-width: 44px; min-height: 44px; }
 }
-.notification-bubble {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(420px, calc(100vw - 32px));
-  z-index: 20020;
-  pointer-events: none;
-  transition: top var(--motion-normal) var(--ease-out-expo),
-              opacity var(--motion-fast) var(--ease-in-out-smooth),
-              transform var(--motion-fast) var(--ease-in-out-smooth);
+/* One bounded flow stack: async mounting and status text never overlap other notices. */
+.wand-notification-stack { position:fixed; inset-block-start:var(--wand-safe-top); left:50%; transform:translateX(-50%); width:min(452px,calc(100vw - var(--wand-safe-left) - var(--wand-safe-right))); max-height:calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom)); box-sizing:border-box; padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; overscroll-behavior:contain; z-index:20020; pointer-events:none; }
+.notification-bubble { flex:none; min-width:0; pointer-events:auto; }
+.notification-bubble .wand-notice-card { animation:wand-notice-in var(--motion-normal) var(--ease-out-expo) both; }
+.notification-bubble.slide-out { pointer-events:none; animation:wand-notice-out var(--motion-fast) var(--ease-in-out-smooth) both; }
+.wand-notice-header { display:grid; grid-template-columns:20px minmax(0,1fr) 32px; align-items:start; gap:12px; }
+.wand-notice-icon { display:flex; padding-top:3px; }
+.wand-notice-copy { min-width:0; overflow-wrap:anywhere; }
+.wand-notice-description { white-space:pre-wrap; }
+.wand-notice-close.ant-btn { width:32px; height:32px; padding:0; }
+.wand-notice-versions { margin-top:12px; color:var(--text-tertiary); overflow-wrap:anywhere; }
+.wand-notice-versions .ant-tag { margin-inline-end:0; white-space:normal; overflow-wrap:anywhere; }
+.wand-notice-actions { margin-top:16px; }
+.wand-notice-update-action.ant-btn { width:132px; flex:none; }
+.wand-notice-action-labels { display:grid; }
+.wand-notice-action-labels > span { grid-area:1 / 1; opacity:0; transition:opacity var(--motion-fast) var(--ease-in-out-smooth); }
+.wand-notice-action-labels > span[data-active=true] { opacity:1; }
+.wand-notice-feedback { overflow-wrap:anywhere; }
+.wand-notice-feedback:not(:empty) { margin-top:12px; }
+@keyframes wand-notice-in { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+@keyframes wand-notice-out { from { opacity:1; transform:translateY(0); } to { opacity:0; transform:translateY(-8px); } }
+@media (pointer:coarse), (max-width:640px) {
+  .wand-notice-header { grid-template-columns:20px minmax(0,1fr) 44px; }
+  .wand-notice-close.ant-btn { width:44px; height:44px; min-width:44px; min-height:44px; }
+  .wand-notice-actions .ant-btn { min-height:44px; }
 }
-.notification-bubble > * {
-  pointer-events: auto;
-}
-.notification-bubble.slide-out {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-10px) scale(0.96);
-  pointer-events: none;
-}
-.wand-notice-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  background: var(--bg-elevated);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 16px 38px -6px rgba(0, 0, 0, 0.14),
-              0 6px 16px -2px rgba(0, 0, 0, 0.08),
-              0 0 0 1px rgba(0, 0, 0, 0.02);
-  animation: wand-notice-in var(--motion-normal) var(--ease-out-expo) both;
-  transform-origin: top center;
-  box-sizing: border-box;
-}
-.wand-notice-card.is-leaving {
-  animation: wand-notice-out var(--motion-fast) var(--ease-in-out-smooth) both;
-}
-@keyframes wand-notice-in {
-  from { opacity: 0; transform: translateY(-12px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-@keyframes wand-notice-out {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to { opacity: 0; transform: translateY(-8px) scale(0.96); }
-}
-.wand-notice-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-width: 0;
-}
-.wand-notice-icon-wrapper {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.wand-notice-icon-wrapper.update-icon {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-}
-.wand-notice-icon-wrapper.success {
-  background: color-mix(in srgb, var(--success, #52c41a) 14%, transparent);
-  color: var(--success, #52c41a);
-}
-.wand-notice-icon-wrapper.warning {
-  background: color-mix(in srgb, var(--warning, #faad14) 14%, transparent);
-  color: var(--warning, #faad14);
-}
-.wand-notice-icon-wrapper.error {
-  background: color-mix(in srgb, var(--danger, #ff4d4f) 14%, transparent);
-  color: var(--danger, #ff4d4f);
-}
-.wand-notice-title-group {
-  flex: 1;
-  min-width: 0;
-}
-.wand-notice-title {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-  color: var(--text-primary);
-  margin-bottom: 2px;
-}
-.wand-notice-subtitle {
-  font-size: 12.5px;
-  line-height: 18px;
-  color: var(--text-secondary);
-  word-break: break-word;
-  white-space: pre-wrap;
-}
-.wand-notice-subtitle.is-error {
-  color: var(--danger);
-  font-weight: 500;
-}
-.wand-notice-close-btn.ant-btn {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  padding: 0;
-  border-radius: 6px;
-  color: var(--text-tertiary);
-  display: grid;
-  place-items: center;
-  margin-top: -2px;
-  margin-right: -4px;
-}
-.wand-notice-close-btn.ant-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-surface);
-}
-.wand-update-version-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-}
-.wand-version-tag {
-  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
-  font-size: 12px;
-  font-weight: 500;
-}
-.wand-version-tag.current {
-  color: var(--text-tertiary);
-}
-.wand-version-arrow {
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
-.wand-version-tag.latest {
-  color: var(--accent);
-  font-weight: 600;
-}
-.wand-version-badge {
-  margin-left: auto;
-  padding: 0 5px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 16px;
-  border-radius: 4px;
-  background: var(--success, #52c41a);
-  color: #fff;
-  letter-spacing: 0.02em;
-}
-.wand-notice-progress-bar {
-  height: 3px;
-  border-radius: var(--radius-full);
-  background: var(--border-subtle);
-  overflow: hidden;
-  position: relative;
-  margin-top: 8px;
-}
-.wand-notice-progress-indicator {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 40%;
-  background: var(--accent);
-  border-radius: var(--radius-full);
-  animation: wand-notice-pulse 1.4s var(--ease-in-out-smooth) infinite;
-}
-@keyframes wand-notice-pulse {
-  0% { left: -40%; width: 30%; }
-  50% { width: 50%; }
-  100% { left: 100%; width: 30%; }
-}
-.wand-notice-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 2px;
-}
-.wand-notice-cancel-btn.ant-btn {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12.5px;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-}
-.wand-notice-cancel-btn.ant-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-surface);
-}
-.wand-notice-action-btn.ant-btn {
-  height: 28px;
-  padding: 0 14px;
-  font-size: 12.5px;
-  font-weight: 500;
-  border-radius: var(--radius-sm);
-}
-@media (pointer: coarse), (max-width: 640px) {
-  .wand-notice-cancel-btn.ant-btn,
-  .wand-notice-action-btn.ant-btn {
-    min-height: 40px;
-  }
-  .wand-notice-close-btn.ant-btn {
-    min-width: 36px;
-    min-height: 36px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .wand-notice-card { animation: none; }
-  .wand-notice-card.is-leaving { animation: none; opacity: 0; }
-  .notification-bubble { transition: none; }
-  .wand-notice-progress-indicator { animation: none; width: 100%; }
+@media (prefers-reduced-motion:reduce) {
+  .notification-bubble .wand-notice-card, .notification-bubble.slide-out { animation:none; }
+  .wand-notice-action-labels > span { transition:none; }
 }
 /* The local SVG illustration is a drawing, not a second control theme. */
 .login-page { height: 100%; overflow: auto; display: flex; padding: max(40px, var(--wand-safe-top)) 48px max(40px, var(--wand-safe-bottom)); background: var(--bg-primary); }
@@ -557,7 +473,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 /* One column owner for IM and workspace chat. Narrow screens naturally fill their host;
    terminal grids and native input roots are not resized by this preference. */
 @media (min-width: 1280px) { html[data-chat-width="column"] { --chat-content-max-width: var(--chat-column-width); } }
-:is(.chat-messages, .chat-running-bar, .input-panel, .conversation-message-scroll > *, .conversation-composer, .conversation-task-context, .conversation-session-activity) { box-sizing:border-box; min-width:0; width:100%; max-width:var(--chat-content-max-width); margin-inline:auto; }
+:is(.chat-messages, .chat-running-bar, .input-panel, .new-work-page .new-work-composer, .conversation-message-scroll > *, .conversation-composer, .conversation-task-context, .conversation-session-activity) { box-sizing:border-box; min-width:0; width:100%; max-width:var(--chat-content-max-width); margin-inline:auto; }
 @media (max-width: 640px) {
   .composer-status-line:not([data-tone]), .composer-status-row [data-config-scope="mode"], [data-models-refresh-scope="runtime"], .login-page .left-spacer { display: none; }
   .input-textarea { --input-max-height: min(160px, 35dvh); }

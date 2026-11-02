@@ -1,3 +1,4 @@
+import { worktreeDirectoryHierarchy } from "./worktree-presentation";
 import { createWorkspaceSection } from "./section-create";
 import { isArchiveBlocked } from "../../../archive-policy.js";
 import { isSidebarSessionVisible } from "../../group-chat-visibility.js";
@@ -11,6 +12,7 @@ import { confirmSidebarAction, confirmClearSessions } from "./sidebar-menu-confi
 import { Badge, Checkbox, Flex, Menu, Skeleton, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import * as React from "react";
+import { AddWorkspaceButton } from "./create-workspace";
 import { usePageRouteState, routeEnum } from "../use-page-route";
 import { SidebarActivityFilter } from "./sidebar-activity-filter";
 import { workspacesStore } from "./controller";
@@ -45,11 +47,15 @@ import { sidebarSelection } from "./sidebar-task-meta";
 import { filterSidebarGroups, filterSidebarTaskSessions } from "./sidebar-search";
 import { defaultDirectoryTask, isDefaultTaskSelected, toggleDefaultTaskSelection } from "./sidebar-default-task";
 import { SidebarSessionPreview } from "./sidebar-session-preview";
+import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { SidebarSessionArea } from "./sidebar-session-area";
+import { TaskStatusGlyph, type TaskExecutionVisualStatus } from "./task-status-glyph";
 import {
   useSidebarPresentation,
   SidebarPresentationContext,
   filterActiveGroups,
+  isSessionRunning,
+  isSessionQueued,
   type SidebarDisplayMode,
 } from "./sidebar-display-mode";
 import { nonTeamSessions, splitTeamSessions } from "./team-sessions";
@@ -137,7 +143,6 @@ function TaskSessionItem({
   selected = false,
   onToggleSelect,
   onOpen,
-  onDelete,
   onArchive,
   intoNewTask,
 }: {
@@ -149,7 +154,6 @@ function TaskSessionItem({
   selected?: boolean;
   onToggleSelect?(): void;
   onOpen(): void;
-  onDelete(): Promise<void>;
   /** 归档保留空闲会话与历史；恢复用原来的会话 ID 续上。归档行传 false 表示恢复。 */
   onArchive?(archived: boolean): Promise<void>;
   /** 未分组会话所在的目录组：给出「归纳为新任务」入口；任务内的会话不传。 */
@@ -218,14 +222,14 @@ function TaskSessionItem({
   );
   return <SidebarSessionMenu row={row} session={session} label={label} disabled={manageMode}
     intoNewTask={session.workspaceTaskId ? undefined : intoNewTask}
-    onOpen={onOpen} onArchive={onArchive} onDelete={onDelete}/>;
+    onOpen={onOpen} onArchive={onArchive}/>;
 }
 
 // ── 任务行 ──
 
 /**
  * 「已归档」会话区：与任务的归档同一套逻辑，收起在触发点原位、可展开、可恢复。
- * 归档不是破坏性操作，所以默认不起来；删除统一走 confirmSessionDelete 的公共确认。
+ * 会话通过归档进入保留期清理，侧栏只提供归档与恢复。
  */
 function ArchivedSessionsFold({
   id,
@@ -235,7 +239,6 @@ function ArchivedSessionsFold({
   activeSessionId,
   liveTitles,
   onOpen,
-  onDelete,
   onArchive,
 }: {
   id: string;
@@ -245,7 +248,6 @@ function ArchivedSessionsFold({
   activeSessionId: string | null;
   liveTitles?: Readonly<Record<string, string>>;
   onOpen(session: WorkspaceSessionSummary): void;
-  onDelete(session: WorkspaceSessionSummary, index: number): Promise<void>;
   onArchive(sessionId: string, archived: boolean): Promise<void>;
 }) {
   const [open, setOpen] = useSidebarExpansion(storageKey, true);
@@ -276,7 +278,6 @@ function ArchivedSessionsFold({
               liveTitle={liveTitles?.[session.id]}
               active={activeSessionId === session.id}
               onOpen={() => onOpen(session)}
-              onDelete={() => onDelete(session, index)}
               onArchive={(archived) => onArchive(session.id, archived)}
             />
           ))}
@@ -311,11 +312,11 @@ function TaskItem({
   isOnlyTask = false,
   onClearSessions,
   onClearTeamHistory,
-  onDeleteSession,
   onArchiveSession,
   onRename,
   onArchive,
   onDelete,
+  onMergeWorktree,
   onMoveSession,
   defaultGroup,
 }: {
@@ -353,7 +354,6 @@ function TaskItem({
   onClearSessions(): Promise<void>;
   /** 只清空已结束运行的团队会话，人工会话和任务本身不动。 */
   onClearTeamHistory(sessionIds: readonly string[]): Promise<void>;
-  onDeleteSession(session: WorkspaceSessionSummary, index?: number): Promise<void>;
   /** 归档 / 恢复会话（批量入口，内部按单个处理）；与任务同一套逻辑。 */
   onArchiveSession(sessionIds: readonly string[], archived: boolean): Promise<void>;
   onRename?(name: string): Promise<void>;
@@ -361,6 +361,7 @@ function TaskItem({
   onArchive?(): Promise<void>;
   /** 硬删除；只有隔离任务还留着它，用来清理 worktree。 */
   onDelete?(): Promise<void>;
+  onMergeWorktree?(): void;
   onMoveSession?(sessionId: string): Promise<void>;
 }) {
   const [teamOpen, setTeamOpen] = useSidebarExpansion(`team.${task.id}`, true);
@@ -406,6 +407,17 @@ function TaskItem({
   const toggleSessionsOpen = (): void => setSessionsOpen(!open);
   const teamActivity = sidebarAggregateState(shownTeamSplit.live);
   const taskAggregate = sidebarAggregateState(visibleSessions, task);
+  const isExecuting = visibleSessions.some(isSessionRunning) || task.sessions.some(isSessionRunning) || task.executionStatus === "running";
+  const hasFailed = visibleSessions.some((s) => s.status === "failed") || task.sessions.some((s) => s.status === "failed");
+  const isQueued = !isExecuting && (task.executionStatus === "queued" || visibleSessions.some(isSessionQueued) || task.sessions.some(isSessionQueued));
+  const isCompleted = !isExecuting && !isQueued && !hasFailed && (visibleSessions.some(isSessionJustCompleted) || task.sessions.some(isSessionJustCompleted) || taskAggregate.label === "刚完成");
+  const taskVisualStatus: TaskExecutionVisualStatus | null =
+    isExecuting ? "running"
+      : hasFailed ? "failed"
+      : isQueued ? "queued"
+      : isCompleted ? "completed"
+      : taskAggregate.label === "待处理" ? "attention"
+      : null;
   const canArchive = task.canArchive !== false && !task.sessions.some(isArchiveBlocked);
   const countId = React.useId();
   const hasDisclosure = visibleSessions.length > 0 || hasChildExecution || archivedSessions.length > 0;
@@ -573,18 +585,19 @@ function TaskItem({
           }} onKeyDown={manageMode ? undefined : event => sidebarDisclosureKeys(event, open, setSessionsOpen)}/>}
         >
           {manageMode && <ManageCheck checked={selected} label={`选择任务 ${task.name}`}/>}
-          <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-task-name">{task.name}</span>
+          <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-task-name">{task.worktree ? <><WandIcon name="branch" size={13}/> {task.worktree.path.split("/").filter(Boolean).at(-1) || task.name}</> : task.name}</span>
         </WandNavigationLink>
+        {taskVisualStatus ? (
+          <span className="workspace-task-status-mark" aria-hidden="true">
+            <TaskStatusGlyph status={taskVisualStatus} size={15} title={taskAggregate.description} ariaLabel={taskAggregate.label} />
+          </span>
+        ) : null}
         {countLabel ? <span id={countId} className="workspace-task-count"
           title={`${childTaskCount ? `${childTaskCount} 个直接子任务，` : ""}${taskAggregate.description}，自身 ${totalSessionCount} 个会话${descendantSessionCount ? `，后代 ${descendantSessionCount} 个会话（去重）` : ""}`}>{countLabel}</span> : null}
-        {taskAggregate.label ? <span className={`sidebar-task-status tone-${taskAggregate.tone}`} title={taskAggregate.description}
-          aria-label={taskAggregate.label}>
-          <WandIcon name={taskAggregate.label === "排队中" ? "history" : taskAggregate.label === "待处理" ? "warning" : taskAggregate.label === "刚完成" ? "check" : "circle"} size={11}/>
-          <span>{taskAggregate.label}</span>
-        </span> : null}
       </Flex>} menu={{ items: [
         ...(onOpen ? [{ key: "open", disabled: busy, icon: <WandIcon name="task"/>, label: task.kind === "section" ? "打开分区" : "打开任务" }] : []),
         { key: "new", disabled: busy, icon: <WandIcon name="plus"/>, label: "新建会话" },
+        ...(isolated && onMergeWorktree ? [{ key: "merge-worktree", icon: <WandIcon name="merge"/>, label: "合并到工作区分支…", disabled: busy }] : []),
         ...(onRequestNewDirectory ? [{ key: "new-directory", disabled: busy, icon: <WandIcon name="folder"/>, label: "创建目录" }] : []),
         ...((task.worktree?.path || task.cwd)?.trim() ? [{ key: "copy-cwd", disabled: busy, icon: <WandIcon name="copy"/>, label: "复制工作目录" }] : []),
         ...(onRename ? [{ key: "rename", disabled: busy, icon: <WandIcon name="edit"/>, label: task.kind === "section" ? "重命名分区" : "重命名任务" }] : []),
@@ -598,6 +611,7 @@ function TaskItem({
         if (busy) return;
         if (key === "open") { setTaskMenuOpen(false); onOpen?.(); }
         else if (key === "new") { setTaskMenuOpen(false); onRequestNewSession(); }
+        else if (key === "merge-worktree") { setTaskMenuOpen(false); onMergeWorktree?.(); }
         else if (key === "new-directory") { setTaskMenuOpen(false); onRequestNewDirectory?.(); }
         else if (key === "copy-cwd") {
           setTaskActionError("");
@@ -636,7 +650,6 @@ function TaskItem({
               selected={selectedSessionIds?.has(session.id) ?? false}
               onToggleSelect={() => onToggleSession?.(session.id)}
               onOpen={() => onOpenSession(session)}
-              onDelete={() => onDeleteSession(session)}
               onArchive={manageMode ? undefined : (archived) => onArchiveSession([session.id], archived)}
               intoNewTask={defaultGroup}
             />
@@ -670,7 +683,6 @@ function TaskItem({
                       liveTitle={liveTitles?.[session.id]}
                       active={activeSessionId === session.id}
                       onOpen={() => onOpenSession(session)}
-                      onDelete={() => onDeleteSession(session)}
                       onArchive={(archived) => onArchiveSession([session.id], archived)}
                       intoNewTask={defaultGroup}
                     />
@@ -702,7 +714,6 @@ function TaskItem({
                               liveTitle={liveTitles?.[session.id]}
                               active={activeSessionId === session.id}
                               onOpen={() => onOpenSession(session)}
-                              onDelete={() => onDeleteSession(session)}
                               onArchive={(archived) => onArchiveSession([session.id], archived)}
                               intoNewTask={defaultGroup}
                             />
@@ -726,7 +737,6 @@ function TaskItem({
           activeSessionId={activeSessionId}
           liveTitles={liveTitles}
           onOpen={(session) => onOpenSession(session)}
-          onDelete={(session, index) => onDeleteSession(session, index)}
           onArchive={(sessionId, archived) => onArchiveSession([sessionId], archived)}
         />
       )}
@@ -763,6 +773,7 @@ function TaskGroupSection({
   onActiveTaskOpen,
   onOpenSession,
   onRequestNewSessionInTask,
+  nestedGroups,
   onTasksChanged,
   onOpenDialog,
 }: {
@@ -789,12 +800,14 @@ function TaskGroupSection({
   onActiveTaskOpen(group: TaskDirectoryGroup, task: TaskSummary): void;
   onOpenSession(group: TaskDirectoryGroup, session: WorkspaceSessionSummary): void;
   onRequestNewSessionInTask(task: TaskSummary): void;
+  nestedGroups?: React.ReactNode;
   onTasksChanged(): Promise<void>;
   onOpenDialog?: () => void;
 }) {
   const visibleSessionCount = new Set([...group.standaloneSessions, ...group.tasks.flatMap(task => filterSidebarTaskSessions(group, task, searchQuery, liveTitles))].map(session => session.id)).size;
   const hasQueuedTasks = group.tasks.some(task => task.executionStatus === "queued");
   const [directoryOpen, setDirectoryOpen] = useSidebarExpansion(`project.${group.workspaceId}`, false, true, undefined, visibleSessionCount > 0 || hasQueuedTasks);
+  const [mergeSourcePath, setMergeSourcePath] = React.useState<string | undefined>();
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [directoryActionError, setDirectoryActionError] = React.useState("");
@@ -892,12 +905,13 @@ function TaskGroupSection({
     const rt = runtime();
     if (!rt) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
     await rt.startWorktreeMergeAgent({
-      workspaceId: group.workspaceId,
-      cwd: group.workspaceCwd,
+      workspaceId: group.worktree?.parentWorkspaceId || group.workspaceId,
+      cwd: brief.targetCwd || group.workspaceCwd,
+      sourceBranches: brief.sourceBranches, requestId: brief.requestId, sourcePaths: brief.sourcePaths, targetBranch: brief.targetBranch, employeeId: brief.employeeId, agent: brief.agent,
       systemPrompt: brief.system,
       prompt: brief.message,
     });
-    rt.toast(`已启动 Agent，准备合并所选 Worktree 到项目默认分支。`, "success");
+    rt.toast(`已启动 Agent，准备合并所选 Worktree 到 ${brief.targetBranch || "项目默认分支"}。`, "success");
   };
 
   const handleDeleteSessions = async (sessionIds: readonly string[], task: TaskSummary | null, label: string) => {
@@ -1006,7 +1020,7 @@ function TaskGroupSection({
           </span>
           <Flex vertical style={{ minWidth: 0, flex: 1 }} className="workspace-row-label">
             <Flex align="center" gap={4} style={{ minWidth: 0 }} className="workspace-row-name">
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-row-title">{group.workspaceName}</span>
+              <WandIcon name={group.worktree ? "branch" : "folder"} size={14}/><span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-row-title">{group.worktree?.name || group.workspaceName}</span>
             </Flex>
             {!group.global && <Typography.Text type="secondary" ellipsis className="workspace-row-path" title={group.workspaceCwd}
               style={{ fontSize: 12 }}>{shortenWorkspacePath(group.workspaceCwd)}</Typography.Text>}
@@ -1027,7 +1041,7 @@ function TaskGroupSection({
         ...(!group.global && group.workspaceCwd.trim() ? [{ key: "copy-cwd", disabled: deleting, icon: <WandIcon name="copy"/>, label: "复制工作目录" }] : []),
         { key: "organize", disabled: deleting, icon: <WandIcon name="folder"/>, label: organization.label, children: organization.items },
         ...(canRenameDirectory ? [{ key: "rename", disabled: deleting, icon: <WandIcon name="edit"/>, label: "重命名目录" }] : []),
-        ...(group.tasks.some(task => task.worktree) ? [{ key: "merge", disabled: deleting, icon: <WandIcon name="merge"/>, label: "查看并合并 Worktree" }] : []),
+        ...(group.worktree || group.tasks.some(task => task.worktree) ? [{ key: "merge", disabled: deleting, icon: <WandIcon name="merge"/>, label: "查看并合并 Worktree" }] : []),
         ...(clearSessionIds.length || canDelete ? [{ key: "danger-divider", type: "divider" as const }] : []),
         ...(clearSessionIds.length ? [{ key: "clear", disabled: deleting, danger: true, icon: <WandIcon name="terminal"/>, label: `清空所列会话（${clearSessionIds.length}）` }] : []),
         ...(canDelete ? [{ key: "delete", disabled: deleting, danger: true, icon: <WandIcon name="trash"/>, label: "删除目录…" }] : []),
@@ -1059,7 +1073,7 @@ function TaskGroupSection({
             .catch(cause => setDirectoryActionError(describeError(cause, "无法复制工作目录。")));
         } else if (key === "rename") {
           setMenuOpen(false); setDirectoryNameValue(group.workspaceName); setDirectoryNameError(""); setRenamingDirectory(true);
-        } else if (key === "merge") { setMenuOpen(false); setWorktreeDialogOpen(true); }
+        } else if (key === "merge") { setMenuOpen(false); setMergeSourcePath(group.worktree?.path); setWorktreeDialogOpen(true); }
         else if (key === "delete") void handleDeleteDirectory();
         else if (key === "clear") void handleClearDirectory();
       } }}/>}
@@ -1079,14 +1093,6 @@ function TaskGroupSection({
               selected={selection?.sessionIds.includes(session.id) ?? false}
               onToggleSelect={() => onToggleSession?.(session.id)}
               onOpen={() => onOpenSession(group, session)}
-              onDelete={async () => {
-                const label = sidebarSessionLabel(
-                  session,
-                  index ?? defaultTask.sessions.indexOf(session),
-                  liveTitles?.[session.id],
-                );
-                await handleDeleteSessions([session.id], null, `已删除终端「${label}」`);
-              }}
               onArchive={(archived) => handleArchiveSession([session.id], archived)}
               intoNewTask={group}
             />
@@ -1114,6 +1120,7 @@ function TaskGroupSection({
                   onToggleSession={onToggleSession}
                   onOpen={() => onActiveTaskOpen(group, task)}
                   onOpenSession={(session) => onOpenSession(group, session)}
+                  onMergeWorktree={() => { setMergeSourcePath(task.worktree?.path); setWorktreeDialogOpen(true); }}
                   onRequestNewSession={() => onRequestNewSessionInTask(task)}
                   onRequestNewDirectory={() => {
                     onOpenDialog?.();
@@ -1135,14 +1142,6 @@ function TaskGroupSection({
                   onClearTeamHistory={async (ids) => {
                     await handleDeleteSessions(ids, task, `已清空任务「${task.name}」的 ${ids.length} 个已结束团队会话`);
                   }}
-                  onDeleteSession={async (session, index) => {
-                    const label = sidebarSessionLabel(
-                      session,
-                      index ?? task.sessions.indexOf(session),
-                      liveTitles?.[session.id],
-                    );
-                    await handleDeleteSessions([session.id], task, `已删除终端「${label}」`);
-                  }}
                   onArchiveSession={handleArchiveSession}
                   onRename={async (name) => {
                     const updated = await httpWorkspacesRepository.updateTask(task.id, { name });
@@ -1163,11 +1162,13 @@ function TaskGroupSection({
           })}
 
         </Flex>
+        {nestedGroups ? <div className="workspace-worktree-children">{nestedGroups}</div> : null}
       </SidebarDisclosure>
       <WorkspaceWorktreeDialog
         open={worktreeDialogOpen}
+        sourcePath={mergeSourcePath}
         workspace={{
-          id: group.workspaceId,
+          id: group.worktree?.parentWorkspaceId || group.workspaceId,
           name: group.workspaceName,
           cwd: group.workspaceCwd,
           layout: null,
@@ -1303,7 +1304,7 @@ function SidebarWorkspacesPanel({
         : session
     );
     // Filter only the rendered projection; actions still inspect complete sourceGroups.
-    return sourceGroups.map((group) => ({ ...group,
+    return sourceGroups.filter(group => group.userAdded).map((group) => ({ ...group,
       standaloneSessions: group.standaloneSessions.filter(isSidebarSessionVisible).map(project),
       archivedSessions: group.archivedSessions?.filter(isSidebarSessionVisible).map(project),
       tasks: group.tasks.map((task) => ({ ...task,
@@ -1477,7 +1478,7 @@ function SidebarWorkspacesPanel({
     rt.selectSession(session.id);
   }, [onNavigate, openTask, sourceGroups]);
 
-  // 对话列表与目录树是同一批会话：归档 / 删除共用同一条服务端入口，不另写一套。
+  // 对话列表与目录树是同一批会话：归档共用同一条服务端入口，不另写一套。
   const archiveListedSession = React.useCallback(async (sessionId: string, archived: boolean): Promise<void> => {
     await httpWorkspacesRepository.batchArchiveSessions([sessionId], archived);
     toast(archived
@@ -1485,15 +1486,6 @@ function SidebarWorkspacesPanel({
       : "已恢复会话", "info");
     await reload();
   }, [reload]);
-
-  const deleteListedSession = React.useCallback(async (session: WorkspaceSessionSummary): Promise<void> => {
-    const owner = sourceGroups
-      .map((group) => findSessionTask(group, session, sourceGroups))
-      .find(Boolean) ?? null;
-    await removeSessions([session.id], owner);
-    toast(`已删除会话「${sidebarSessionLabel(session, 0, sessionTitles?.[session.id])}」`, "info");
-    await reload();
-  }, [reload, sessionTitles, sourceGroups]);
 
   const sessionRefresh = React.useRef(true);
   React.useEffect(() => { if (view === "recent") setView("directory"); }, [view, setView]);
@@ -1656,6 +1648,7 @@ function SidebarWorkspacesPanel({
           ) : directoryId === undefined ? (
             <>
             <Flex vertical gap="small" style={{ paddingTop: 4, paddingBottom: 8 }} className="sidebar-presentation-tools">
+              <AddWorkspaceButton onCreated={() => void reload()}/>
             <Flex align="center" gap={4} style={{ minWidth: 0 }} className={classNames("sidebar-list-heading", searchVisible && "is-searching")}>
               <div className="sidebar-search-slot">
               <Typography.Text strong className="sidebar-list-title" aria-hidden={searchVisible || undefined}>执行会话</Typography.Text>
@@ -1746,10 +1739,13 @@ function SidebarWorkspacesPanel({
             ) : null}
             {visibleGroups.length > 0 ? (
             <Flex vertical gap={8} className="workspaces-list" aria-label="目录">
-                {visibleGroups.map((group) => (
+                {(() => {
+                  const hierarchy = worktreeDirectoryHierarchy(visibleGroups);
+                  const renderGroup = (group: TaskDirectoryGroup): React.ReactNode => (
                   <TaskGroupSection
                     key={group.workspaceId}
                     group={group}
+                    nestedGroups={hierarchy.children.get(group.workspaceId)?.map(renderGroup)}
                     sourceTasks={sourceTasks}
                     searchQuery={searchQuery}
                     totalSessionCount={groupSessionCounts.get(group.workspaceId) ?? 0}
@@ -1788,7 +1784,9 @@ function SidebarWorkspacesPanel({
                     onTasksChanged={reload}
                     onOpenDialog={onOpenDialog}
                   />
-                ))}
+                  );
+                  return hierarchy.roots.map(renderGroup);
+                })()}
             </Flex>
           ) : (
             <Flex vertical gap="small" style={{ padding: 8 }} className="workspaces-section-empty">

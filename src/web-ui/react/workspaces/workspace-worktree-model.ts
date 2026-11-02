@@ -16,6 +16,13 @@ export function workspaceWorktreeSummary(worktree: WorkspaceWorktreeReview): str
  * 本次任务的实际内容（路径、目标分支、Worktree 清单）走用户消息（`message`）。
  */
 export interface WorkspaceMergeAgentBrief {
+  requestId?: string;
+  targetBranch?: string;
+  targetCwd?: string;
+  sourcePaths?: string[];
+  sourceBranches?: Record<string, string>;
+  employeeId?: string;
+  agent?: import("../../../task-types.js").WandTaskAgent;
   system: string;
   message: string;
 }
@@ -47,6 +54,8 @@ export function buildWorkspaceMergeAgentBrief(
   }));
 
   return {
+    targetBranch: overview.targetBranch, targetCwd: overview.targetCwd, sourcePaths: worktrees.map(tree => tree.path),
+    sourceBranches: Object.fromEntries(worktrees.map(tree => [tree.path, tree.branch])),
     system: [
       `你是 Wand 为项目「${workspace.name}」启动的 Worktree 合并 Agent。`,
       `项目主工作区：${overview.repoRoot || workspace.cwd}`,

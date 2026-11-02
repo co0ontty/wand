@@ -231,6 +231,12 @@ export class ConversationRepository {
    * Append-only sessions keep the comparator-max at the tail; role walks backward from that tail.
    */
   lastSessionTurn(id: string, role?: "user" | "assistant"): ConversationTurn | null {
+    if (this.s.hasSessionMessageRows(id)) {
+      const row = this.db.prepare(`SELECT turn_index FROM session_message_turns WHERE session_id = ?
+        ${role ? "AND json_extract(metadata_json, '$.role') = ?" : ""}
+        ORDER BY turn_index DESC LIMIT 1`).get(...(role ? [id, role] : [id])) as { turn_index: number } | undefined;
+      return row ? this.s.readSessionRawMessageRange(id, row.turn_index, row.turn_index + 1)[0] ?? null : null;
+    }
     const row = this.db.prepare("SELECT json_array_length(messages) AS length FROM command_sessions WHERE id = ?")
       .get(id) as { length: number | null } | undefined;
     const length = row?.length ?? 0;

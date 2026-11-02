@@ -151,6 +151,8 @@ export var state: AppState = {
   // shared. The session id keeps only the owning composer read-only while a
   // response may safely finish in the background after a session switch.
   promptOptimizeRequest: null,
+  // 用户点了「预测下一条」：请求在途期间禁用入口，结果只填入空草稿。
+  codexPredictionBusy: false,
   // 输入面板内联错误条（`#action-error`）的文案；非空时由 React 渲染。
   actionError: null,
   loginPending: false,
@@ -159,9 +161,7 @@ export var state: AppState = {
   loginLockUntil: 0,
   loginLockTicker: 0,
   sessionsDrawerOpen: readStoredBoolean("wand-sidebar-open", false),
-  // 桌面仅保留完整 / 窄栏两态，完整侧栏为默认状态。
   sidebarPinned: readStoredBoolean("wand-sidebar-pinned", true),
-  sidebarCollapsed: readStoredBoolean("wand-sidebar-collapsed", false),
   chatMode: "managed",
   chatModels: (function() {
     try {

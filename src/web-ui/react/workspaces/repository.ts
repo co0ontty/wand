@@ -79,6 +79,11 @@ export function normalizeWorkspaceWorktreeOverview(value: unknown): WorkspaceWor
     workspaceId: stringValue(result.workspaceId),
     repoRoot: stringValue(result.repoRoot),
     targetBranch: stringValue(result.targetBranch),
+    defaultBranch: stringValue(result.defaultBranch),
+    branches: Array.isArray(result.branches) ? result.branches.filter((branch): branch is string => typeof branch === "string") : [],
+    targetCwd: stringValue(result.targetCwd),
+    targetCheckedOut: result.targetCheckedOut === true,
+    execution: result.execution as WorkspaceWorktreeOverview["execution"],
     worktrees: Array.isArray(result.worktrees)
       ? result.worktrees.map(normalizeWorkspaceWorktree).filter((item): item is WorkspaceWorktreeReview => item !== null)
       : [],
@@ -367,10 +372,10 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
 
   async listWorktrees(
     workspaceId: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; targetBranch?: string; employeeId?: string } = {},
   ): Promise<WorkspaceWorktreeOverview> {
     const body = await parseJsonResponse<unknown>(await this.fetchImpl(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/worktrees`,
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/worktrees?${new URLSearchParams({ ...(options.targetBranch ? { targetBranch: options.targetBranch } : {}), ...(options.employeeId ? { employeeId: options.employeeId } : {}) })}`,
       { credentials: "same-origin", signal: options.signal },
     ));
     return normalizeWorkspaceWorktreeOverview(body);

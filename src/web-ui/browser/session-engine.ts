@@ -1327,8 +1327,8 @@ function sessionProjectionSignature(session: any): string {
             updateStructuredQueueCounter();
             persistSelectedId();
             updateShellChrome();
-            if (state.selectedId && state.gitStatusSessionId !== state.selectedId) {
-              loadGitStatus(state.selectedId);
+            if (state.selectedId && state.selectedId !== previousSelectedId) {
+              void loadGitStatus(state.selectedId, { force: true });
             }
 
             var reloadPromise = Promise.resolve();
@@ -1626,10 +1626,19 @@ function sessionProjectionSignature(session: any): string {
         return true;
       }
 
+      let activeSessionSelection: { id: string; epoch: number; promise: Promise<void> } | null = null;
+
       export function selectSession(id, options?: { focusInput?: boolean; updateRoute?: boolean }) {
         var foundSession = state.sessions.find(function(item) { return item.id === id; });
         if (!foundSession) {
           return;
+        }
+        if (activeSessionSelection?.id === id && state.selectedId === id
+          && activeSessionSelection.epoch === (state.chatRenderEpoch || 0)
+          && state.currentView === (isStructuredSession(foundSession) ? "chat" : "terminal")) {
+          if (options?.updateRoute !== false) notifyPageSelection();
+          if (options?.focusInput !== false) focusInputBox(true);
+          return activeSessionSelection.promise;
         }
         if (workspaceContextStore.getSnapshot().taskId && !foundSession.workspaceTaskId) {
           // Canonical selection also serves quick-create and restored standalone sessions.
@@ -1705,11 +1714,13 @@ function sessionProjectionSignature(session: any): string {
         // 避免慢仓库上徽章先消失、隔一两秒才出现。
         restoreGitStatusForSession(id);
         loadGitStatus(id, { force: true });
+        activeSessionSelection = { id, epoch: state.chatRenderEpoch || 0, promise: outputLoaded };
         return outputLoaded;
       }
 
       /** DOM-free home navigation used by the React shell command port. */
       export function goHome(options?: { updateRoute?: boolean }) {
+        activeSessionSelection = null;
         completionViewIntent.clear();
         if (options?.updateRoute !== false) notifyPageSelection();
         if (!state.selectedId) return;
@@ -1737,11 +1748,6 @@ function sessionProjectionSignature(session: any): string {
           // 停靠形态：hamburger 只负责临时打开/关闭；锁定常驻由图钉按钮控制。
           var willOpen = state.sidebarPinned ? false : !state.sessionsDrawerOpen;
           state.sessionsDrawerOpen = willOpen;
-          if (willOpen) {
-            // 桌面重新呼出默认回到全尺寸；窄条形态需用户主动点 collapse 按钮切换。
-            state.sidebarCollapsed = false;
-            writeStoredBoolean("wand-sidebar-collapsed", false);
-          }
           writeStoredBoolean("wand-sidebar-open", state.sessionsDrawerOpen);
           updateLayoutState();
           scheduleTerminalRefitAfterPaddingTransition();
@@ -1762,10 +1768,8 @@ function sessionProjectionSignature(session: any): string {
       export function openSessionsDrawer() {
         var drawerMode = isSidebarDrawerLayout();
         if (!drawerMode) {
-          if (state.sidebarPinned && !state.sidebarCollapsed) return;
+          if (state.sidebarPinned) return;
           state.sessionsDrawerOpen = true;
-          state.sidebarCollapsed = false;
-          writeStoredBoolean("wand-sidebar-collapsed", false);
           writeStoredBoolean("wand-sidebar-open", true);
           updateLayoutState();
           scheduleTerminalRefitAfterPaddingTransition();
@@ -1807,7 +1811,7 @@ function sessionProjectionSignature(session: any): string {
           closeSessionsDrawer();
           return;
         }
-        if (state.sidebarPinned || state.sidebarCollapsed || !state.sessionsDrawerOpen) return;
+        if (state.sidebarPinned || !state.sessionsDrawerOpen) return;
         state.sessionsDrawerOpen = false;
         writeStoredBoolean("wand-sidebar-open", false);
         updateLayoutState();
@@ -1877,7 +1881,7 @@ function sessionProjectionSignature(session: any): string {
       }
 
       // 直接调 closeSessionsDrawer() 会在桌面把 state.sidebarPinned 置 false，
-      // 进而让 .pinned/.collapsed 这两个类一起脱落，窄条整体消失 —— 这是
+      // 进而让 .pinned 类脱落，常驻侧栏整体消失 —— 这是
       // sidebar-collapsed-tile 点击后侧栏整个不见的根因。
       export function dismissDrawerIfOverlay() {
         if (isSidebarDrawerLayout() && state.sessionsDrawerOpen) {
@@ -1886,7 +1890,7 @@ function sessionProjectionSignature(session: any): string {
       }
 
       // 桌面 padding-left transition 结束后重新拟合终端尺寸。
-      // 抽出来给 toggleSessionsDrawer / closeSessionsDrawer / toggleSidebarCollapsed 复用。
+      // 抽出来给 toggleSessionsDrawer / closeSessionsDrawer 复用。
       export function scheduleTerminalRefitAfterPaddingTransition() {
         var mainLayout = document.querySelector(".main-layout");
         if (mainLayout) {
@@ -1901,42 +1905,8 @@ function sessionProjectionSignature(session: any): string {
         setTimeout(function() { scheduleTerminalResize(true); }, 350);
       }
 
-      export function toggleSidebarCollapsed() {
-        var drawerMode = isSidebarDrawerLayout();
-        // 任何形态下点窄条按钮都意味着「我要常驻」，确保 pinned 写上。
-        if (!state.sidebarPinned) {
-          state.sidebarPinned = true;
-          writeStoredBoolean("wand-sidebar-pinned", true);
-        }
-        state.sidebarCollapsed = !state.sidebarCollapsed;
-        writeStoredBoolean("wand-sidebar-collapsed", state.sidebarCollapsed);
-        if (state.sidebarCollapsed) {
-          // 进入窄条形态：sessionsDrawerOpen 设 false，避免抽屉形态下 .drawer-backdrop
-          // 仍带 .open 类导致背景遮罩误显示（窄条已经常驻显示，不需要遮罩）。
-          state.sessionsDrawerOpen = false;
-        } else if (drawerMode) {
-          // 抽屉形态展开窄条：不允许「pin 但不窄条」的 300px 全栏（太占地），
-          // 改为回到 drawer 模式并自动打开抽屉，让用户看到完整会话列表。
-          state.sidebarPinned = false;
-          state.sessionsDrawerOpen = true;
-          writeStoredBoolean("wand-sidebar-pinned", false);
-        } else {
-          // 桌面端展开窄条 → 300px 全栏常驻。
-          state.sessionsDrawerOpen = true;
-        }
-        writeStoredBoolean("wand-sidebar-open", state.sessionsDrawerOpen);
-        // 轻量更新而非全量 render()：render() 会 teardown 并重建整个终端 DOM，
-        // 导致收窄/展开时终端闪烁、丢失滚动与渲染状态。这里只切布局 class
-        // （宽度 56↔300 走 CSS width transition）、重渲侧栏列表内容、刷新
-        // 收窄按钮自身的图标/文案，终端区保持不动。
-        updateLayoutState();
-        updateSessionsList();
-        updateSidebarCollapseButton();
-        scheduleTerminalRefitAfterPaddingTransition();
-      }
-
       // 常驻（图钉）开关：把侧栏「留在原地」并排停靠 ⟷ 悬浮抽屉。
-      //   - 常驻 ON：停靠并推开内容；配合「收起为窄条」可在全尺寸/窄条间切换。
+      //   - 常驻 ON：停靠并推开内容。
       //   - 常驻 OFF：变为悬浮抽屉，交互时自动收起（非常驻）。
       // 手机端不支持常驻（屏幕太窄），保持抽屉行为。
       // 「图钉」只切换「是否锁定常驻」，绝不收起 / 隐藏侧栏——这是用户两次反馈的核心：
@@ -1944,7 +1914,6 @@ function sessionProjectionSignature(session: any): string {
       //   - 锁定（pinned）：常驻停靠，不会被「关闭(X)」一键收走的语义区分开。
       //   - 解除锁定（unpinned）：仍然停靠可见（因为 isAnchored 把 open 也算停靠），
       //     只是变成「可被 X 关闭」的临时态。
-      // 全尺寸 / 窄条由「收起为窄条」按钮控制，与图钉正交。
       export function toggleSidebarPin() {
         if (isSidebarDrawerLayout()) return;
         state.sidebarPinned = !state.sidebarPinned;
@@ -1954,11 +1923,6 @@ function sessionProjectionSignature(session: any): string {
         writeStoredBoolean("wand-sidebar-open", true);
         updateLayoutState();
         scheduleTerminalRefitAfterPaddingTransition();
-      }
-
-      // 收窄按钮的图标/title/状态归 React 渲染。
-      export function updateSidebarCollapseButton() {
-        notifyLegacyUiChange("layout:collapse-button");
       }
 
       function openSessionModalNow(initialCwd?: string) {
@@ -2523,7 +2487,6 @@ function sessionProjectionSignature(session: any): string {
           return pooledHost.dataset.ptySessionId;
         }
         if (target.closest("#output, .xterm")) return state.selectedId;
-        if (state.terminalInteractive && target.closest("#input-box")) return state.selectedId;
         return null;
       }
 
@@ -2648,7 +2611,6 @@ function sessionProjectionSignature(session: any): string {
       export function addPendingAttachments(files) {
         var list = Array.from(files || []) as File[];
         if (!list.length) return;
-        if (state.terminalInteractive && pasteFilesIntoPty(list)) return;
         for (var i = 0; i < list.length; i++) {
           addPendingAttachment(list[i]);
         }
@@ -2657,7 +2619,6 @@ function sessionProjectionSignature(session: any): string {
       export function addPendingAttachment(file) {
         if (!file) return;
         if (!state.selectedId) return;
-        if (state.terminalInteractive && pasteFilesIntoPty([file])) return;
         var entries = validAttachmentEntries([file]);
         if (!entries.length) return;
         var entry = entries[0];
@@ -2784,7 +2745,6 @@ function sessionProjectionSignature(session: any): string {
         var imageFiles = clipboardImageFiles(event);
         if (imageFiles.length) {
           event.preventDefault();
-          if (state.terminalInteractive && pasteFilesIntoPty(imageFiles)) return;
           addPendingAttachments(imageFiles);
           return;
         }

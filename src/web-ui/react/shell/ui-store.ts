@@ -97,7 +97,6 @@ export interface UiSnapshotData {
   layout: Readonly<{
     sessionsDrawerOpen: boolean;
     sidebarPinned: boolean;
-    sidebarCollapsed: boolean;
     /** true = 抽屉（覆盖主内容）；false = 停靠（推开主内容）。 */
     sidebarDrawer: boolean;
     sidebarAnchored: boolean;
@@ -167,7 +166,6 @@ export type UiAction =
   | { type: "layout.drawer.open" }
   | { type: "layout.drawer.close" }
   | { type: "layout.drawer.pin" }
-  | { type: "layout.drawer.collapse" }
   | { type: "layout.drawer.expandGroup"; group: "automation" | "history" }
   | { type: "layout.drawer.group.set"; group: "automation" | "history"; expanded: boolean }
   | { type: "layout.files.toggle" }
@@ -257,6 +255,18 @@ function isolateSnapshot(data: UiSnapshotData, revision: number, freeze: boolean
     revision,
   }) as UiSnapshot;
   return freeze ? freezeValue(snapshot) : snapshot;
+}
+
+/** Shell snapshots contain only plain view data, never messages or mutable DOM state. */
+function sameSnapshotValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every(key => Object.prototype.hasOwnProperty.call(right, key)
+    && sameSnapshotValue((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
 }
 
 function normalizeBatchMs(value: number | undefined): number {
@@ -385,11 +395,18 @@ class UiStoreCore implements UiStore {
 
   private flush(): void {
     if (this.disposed) return;
-    this.snapshot = isolateSnapshot(
+    const next = isolateSnapshot(
       this.readSnapshot(),
-      this.snapshot.revision + 1,
+      this.snapshot.revision,
       this.freezeSnapshots,
     );
+    // A selection dispatch, its legacy notifications and its settled promise
+    // often project the same chrome. Keep the cached identity in that case so
+    // React does not redraw the entire shell for each notification.
+    if (sameSnapshotValue(this.snapshot, next)) return;
+    this.snapshot = this.freezeSnapshots
+      ? freezeValue({ ...next, revision: this.snapshot.revision + 1 })
+      : { ...next, revision: this.snapshot.revision + 1 };
     for (const listener of [...this.listeners]) {
       try {
         listener();

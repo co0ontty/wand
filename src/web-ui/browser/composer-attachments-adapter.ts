@@ -1,4 +1,5 @@
 import { syncPortalMounts } from "./mount-sync";
+import { state } from "./state.js";
 import {
   composerAttachmentsController,
   type ComposerAttachmentItem,
@@ -20,6 +21,8 @@ export function syncBrowserComposerAttachments(config: BrowserComposerAttachment
     selector: "[data-composer-attachments-host]",
     store: composerAttachmentsController,
     build(target) {
+      const session = state.sessions.find(s => s.id === state.selectedId);
+      if (session?.sessionKind === "structured") return null;
       const items = config.resolve();
       if (items.length === 0) return null;
       return {

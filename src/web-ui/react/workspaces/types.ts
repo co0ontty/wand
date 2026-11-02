@@ -73,6 +73,7 @@ export interface Workspace {
   name: string;
   cwd: string;
   kind?: "project" | "global";
+  userAdded?: boolean;
   defaultProvider?: WorkspaceProvider;
   layout: LayoutNode | null;
   createdAt: string;
@@ -85,6 +86,7 @@ export interface Workspace {
 
 /** GET /api/workspaces/:id 额外带回该项目下的会话列表。 */
 export interface WorkspaceSessionSummary {
+  worktree?: { path: string; branch: string; repoRoot?: string };
   id: string;
   sessionSource?: string;
   /** Server-owned provenance; system calls are read-only employee history, not task work. */
@@ -216,9 +218,12 @@ export type TaskSummary = WorkspaceTaskDetail & {
  * 目录没有项目实体，仅用于展示，不能在其中建任务）。
  */
 export interface TaskDirectoryGroup {
+  userAdded?: boolean;
+  directoryVisible?: boolean;
   workspaceId: string;
   workspaceName: string;
   workspaceCwd: string;
+  worktree?: import("../../../worktree-directory-contract.js").DirectoryWorktree;
   /** Folder birth time. New folders sort first; opening never changes this. */
   createdAt?: string;
   synthetic?: boolean;
@@ -255,6 +260,11 @@ export interface WorkspaceWorktreeReview {
 }
 
 export interface WorkspaceWorktreeOverview {
+  defaultBranch?: string;
+  branches?: string[];
+  targetCwd?: string;
+  targetCheckedOut?: boolean;
+  execution?: { employeeId: string; agent: import("../../../task-types.js").WandTaskAgent };
   workspaceId: string;
   repoRoot: string;
   targetBranch: string;
@@ -291,6 +301,7 @@ export interface UpdateWorkspaceTaskRequest {
 }
 
 export interface CreateWorkspaceRequest {
+  userAdded?: boolean;
   name: string;
   cwd: string;
   defaultProvider?: WorkspaceProvider;
@@ -346,7 +357,7 @@ export interface WorkspacesRepository {
   batchArchiveSessions(sessionIds: readonly string[], archived: boolean): Promise<void>;
   saveTaskLayout(taskId: string, layout: TaskWindowLayout | null, layoutRevision?: number): Promise<{ layout: TaskWindowLayout | null; layoutRevision?: number }>;
   /** Project-level review data used by the multi-worktree merge Agent launcher. */
-  listWorktrees(workspaceId: string, options?: { signal?: AbortSignal }): Promise<WorkspaceWorktreeOverview>;
+  listWorktrees(workspaceId: string, options?: { signal?: AbortSignal; targetBranch?: string; employeeId?: string }): Promise<WorkspaceWorktreeOverview>;
   /** 关闭工作窗口 / 终端时批量结束并删除其底层会话。 */
   deleteSessions(sessionIds: readonly string[]): Promise<void>;
 }
@@ -385,6 +396,12 @@ export interface NewTaskSessionPayload {
 }
 
 interface StartWorkspaceMergeAgentPayload {
+  requestId?: string;
+  targetBranch?: string;
+  sourcePaths?: string[];
+  sourceBranches?: Record<string, string>;
+  employeeId?: string;
+  agent?: import("../../../task-types.js").WandTaskAgent;
   workspaceId: string;
   cwd: string;
   provider?: WorkspaceProvider;

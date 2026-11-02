@@ -230,6 +230,12 @@ export function installWorkspacesLegacyAdapter(): void {
         body: JSON.stringify({
           prompt: payload.prompt,
           systemPrompt: payload.systemPrompt,
+          targetBranch: payload.targetBranch,
+          sourcePaths: payload.sourcePaths,
+          sourceBranches: payload.sourceBranches,
+          requestId: payload.requestId,
+          employeeId: payload.employeeId,
+          agent: payload.agent,
         }),
       })
         .then(function(res) { return res.json(); })

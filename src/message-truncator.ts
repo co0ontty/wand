@@ -100,11 +100,29 @@ export function collapsedBlockFlags(
  * 单块在传输层的大致字节数（与 truncateMessagesForTransport 的截断口径一致，
  * 否则「体积预算」会把已经截断的大块算得过重）。
  */
+export type BlockByteMeasures = ReadonlyMap<ContentBlock, readonly [expanded: number, collapsed: number]>;
+
+/** Persist these tiny measures alongside the formatted blocks, never their payloads. */
+export function measureTransportBlocks(content: ContentBlock[]): Array<readonly [number, number]> {
+  const names = toolNamesForTransport(content);
+  return content.map(block => [
+    blockTransportBytes(block, { inlineTools: true, terminal: true, editCards: true, thinking: true }, names),
+    blockTransportBytes(block, {}, names),
+  ] as const);
+}
+
 function blockTransportBytes(
   block: ContentBlock,
   cardDefaults: CardExpandDefaults,
   toolNameById: Map<string, string>,
+  measures?: BlockByteMeasures,
 ): number {
+  const measured = measures?.get(block);
+  if (measured) {
+    const collapsed = block.type === "tool_result" && block.semantic?.kind !== "decision"
+      && isToolDefaultCollapsed(toolNameById.get(block.tool_use_id) ?? "", cardDefaults);
+    return measured[collapsed ? 1 : 0];
+  }
   switch (block.type) {
     case "text":
       return block.text.length;
@@ -141,11 +159,12 @@ export function contentTransportBytes(
   content: ContentBlock[],
   cardDefaults: CardExpandDefaults,
   limit: number = Number.POSITIVE_INFINITY,
+  measures?: BlockByteMeasures,
 ): number {
   const toolNameById = toolNamesForTransport(content);
   let total = 0;
   for (const block of content) {
-    total += blockTransportBytes(block, cardDefaults, toolNameById) + 32;
+    total += blockTransportBytes(block, cardDefaults, toolNameById, measures) + 32;
     if (total > limit) return total;
   }
   return total;
@@ -160,6 +179,7 @@ function fitsBudgets(
   cardDefaults: CardExpandDefaults,
   visibleBudget: number,
   byteBudget: number,
+  measures?: BlockByteMeasures,
 ): boolean {
   let visible = 0;
   let bytes = 0;
@@ -167,7 +187,7 @@ function fitsBudgets(
     const content = turns[i].content;
     visible += visibleBlockCount(content, cardDefaults, content.length);
     if (visible > visibleBudget) return false;
-    bytes += contentTransportBytes(content, cardDefaults, byteBudget - bytes);
+    bytes += contentTransportBytes(content, cardDefaults, byteBudget - bytes, measures);
     if (bytes > byteBudget) return false;
   }
   return true;
@@ -182,6 +202,7 @@ function cutStartByBudget(
   cardDefaults: CardExpandDefaults,
   visibleBudget: number,
   byteBudget: number,
+  measures?: BlockByteMeasures,
 ): number {
   if (content.length === 0) return 0;
   const collapsed = collapsedBlockFlags(content, cardDefaults);
@@ -191,7 +212,7 @@ function cutStartByBudget(
   let cut = content.length;
   for (let i = content.length - 1; i >= 0; i -= 1) {
     const nextVisible = visible + (collapsed[i] ? 0 : 1);
-    const nextBytes = bytes + blockTransportBytes(content[i], cardDefaults, toolNameById) + 32;
+    const nextBytes = bytes + blockTransportBytes(content[i], cardDefaults, toolNameById, measures) + 32;
     if (nextVisible > visibleBudget || nextBytes > byteBudget) break;
     visible = nextVisible;
     bytes = nextBytes;
@@ -233,6 +254,7 @@ export function alignedBlockStart(
   rawStart: number,
   forwardLimit: number = content.length,
   maxSnapBackBytes: number = MAX_BLOCK_SNAP_BACK_BYTES,
+  measures?: BlockByteMeasures,
 ): number {
   const total = content.length;
   const start = Math.min(Math.max(rawStart, 0), total);
@@ -254,7 +276,7 @@ export function alignedBlockStart(
     if (next === cursor) break;
     cursor = next;
   }
-  const snapBackBytes = contentTransportBytes(content.slice(cursor, start), cardDefaults);
+  const snapBackBytes = contentTransportBytes(content.slice(cursor, start), cardDefaults, Number.POSITIVE_INFINITY, measures);
   if (snapBackBytes <= maxSnapBackBytes) return cursor;
 
   // 折叠段太长：不再往回吃，跳到该段之后，保证首屏载荷不因吸附膨胀。
@@ -302,6 +324,7 @@ export function blockWindowMessagesForTransport(
   blockBudget: number = MESSAGE_BLOCK_WINDOW,
   byteBudget: number = MESSAGE_FIRST_PAINT_BYTES,
   strictByteBudget = false,
+  measures?: BlockByteMeasures,
 ): BlockWindowedMessages {
   const turns = all ?? [];
   const total = turns.length;
@@ -318,10 +341,10 @@ export function blockWindowMessagesForTransport(
   const visibleBudget = Math.max(1, blockBudget);
 
   // 整段历史放得下就不做窗口化：短会话（一条提示词 + 一段长回复）不该出现「更早消息」。
-  if (fitsBudgets(turns, cardDefaults, visibleBudget, byteBudget)) {
+  if (fitsBudgets(turns, cardDefaults, visibleBudget, byteBudget, measures)) {
     const last = turns[total - 1];
     return {
-      messages: truncateMessagesForTransport(turns, cardDefaults),
+      messages: measures ? turns : truncateMessagesForTransport(turns, cardDefaults),
       messageOffset: 0,
       messageTotal: total,
       leadingBlockOffset: 0,
@@ -337,7 +360,7 @@ export function blockWindowMessagesForTransport(
   for (let i = total - 1; i >= 0; i -= 1) {
     const content = turns[i].content;
     const visible = visibleBlockCount(content, cardDefaults, content.length);
-    const bytes = contentTransportBytes(content, cardDefaults, byteBudget - accBytes);
+    const bytes = contentTransportBytes(content, cardDefaults, byteBudget - accBytes, measures);
     if (accVisible + visible <= visibleBudget && accBytes + bytes <= byteBudget) {
       accVisible += visible;
       accBytes += bytes;
@@ -355,6 +378,7 @@ export function blockWindowMessagesForTransport(
       cardDefaults,
       Math.max(remainVisible, 1),
       Math.max(remainBytes, 1),
+      measures,
     );
     break;
   }
@@ -363,7 +387,7 @@ export function blockWindowMessagesForTransport(
   const headContent = turns[startTurn].content;
   const startOffset = leadingBlockOffset > 0
     ? alignedBlockStart(headContent, cardDefaults, leadingBlockOffset, headContent.length,
-      strictByteBudget ? Math.min(MAX_BLOCK_SNAP_BACK_BYTES, byteBudget) : MAX_BLOCK_SNAP_BACK_BYTES)
+      strictByteBudget ? Math.min(MAX_BLOCK_SNAP_BACK_BYTES, byteBudget) : MAX_BLOCK_SNAP_BACK_BYTES, measures)
     : 0;
 
   const windowedTurns: ConversationTurn[] = [];
@@ -376,7 +400,7 @@ export function blockWindowMessagesForTransport(
   }
 
   return {
-    messages: truncateMessagesForTransport(windowedTurns, cardDefaults),
+    messages: measures ? windowedTurns : truncateMessagesForTransport(windowedTurns, cardDefaults),
     messageOffset: startTurn,
     messageTotal: total,
     leadingBlockOffset: startOffset,

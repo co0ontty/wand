@@ -3,6 +3,7 @@ import { mountLoginControls } from "./login-controls-adapter.js";
 import { mountComposerSender } from "./composer-sender-adapter.js";
 import { mountBrowserButtons } from "./library-buttons.js";
 import { state } from "./state";
+import { openMcpAppPanel } from "./mcp-app-adapter";
 import { piExecutionController } from "../react/pi-execution/controller";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 import { syncPiSettingsComposer } from "./pi-settings-adapter";
@@ -189,6 +190,11 @@ import { setupVisualViewportHandlers } from "./viewport";
         if (img instanceof HTMLImageElement) openMessageImage(img);
         else if (img) imageViewerController.open(String(img), typeof label === "string" ? label : "");
       };
+      // MCP Apps 插件面板：工具卡上的入口只带 tool_use id，入参/结果在渲染时登记。
+      (window as any).__wandOpenMcpApp = function(el: any) {
+        var toolUseId = el && el.dataset ? el.dataset.mcpAppTool : "";
+        if (toolUseId) openMcpAppPanel(String(toolUseId));
+      };
       // 工具结果内联图片的加载终态：ready 收掉占位行，error 整块隐藏（对齐安卓不渲染失败图）。
       (window as any).__inlineToolImageState = function(img: any, state: any) {
         if (img) setInlineToolImageState(img, state === "error" ? "error" : "ready");
@@ -354,6 +360,11 @@ import { setupVisualViewportHandlers } from "./viewport";
         document.addEventListener("paste", function(event) {
           if (handlePtyImagePaste(event)) {
             event.stopPropagation();
+            return;
+          }
+          var target = event.target as HTMLElement | null;
+          if (target && typeof target.closest === "function" && target.closest(".input-composer") && !target.closest("#input-box")) {
+            handleInputPaste(event);
           }
         }, true);
 

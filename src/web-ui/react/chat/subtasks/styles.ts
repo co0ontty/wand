@@ -20,8 +20,8 @@ export function installSubtaskStyles(): void {
     .chat-subtasks-toolbar[hidden] { display:none; }
     .chat-subtasks-toolbar .chat-subtasks-trigger { width:300px; height:30px; justify-content:flex-start; gap:6px; font-size:12px; }
     .chat-subtasks-counts { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-secondary); }
-    #chat-output:has(.chat-subtasks-toolbar:not([hidden])) > .chat-turn-navigation-host { top:50px; }
-    #chat-output[data-subtasks-open="true"] > .chat-turn-navigation-host { right:calc(var(--chat-subtask-width) + 12px); }
+    #chat-output:has(.chat-subtasks-toolbar:not([hidden])) > .chat-turn-navigation-host { top:calc(50% + 25px); }
+    #chat-output[data-subtasks-open="true"] > .chat-turn-navigation-host { right:auto; }
     /* The viewport already has width:100%; margins alone only create overflow.
        Constrain its actual border box so every message reflows beside details. */
     #chat-output > .chat-messages { transition:width var(--motion-normal) var(--ease-out-expo); }

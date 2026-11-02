@@ -24,7 +24,7 @@ const EmployeeProfileHost = deferredFeature(
 
 export type ShellLayoutState = Pick<
   UiSnapshotData["layout"],
-  "sessionsDrawerOpen" | "sidebarAnchored" | "sidebarPinned" | "sidebarCollapsed"
+  "sessionsDrawerOpen" | "sidebarAnchored" | "sidebarPinned"
 >;
 
 interface ShellAppFrameProps {
@@ -40,7 +40,6 @@ export function getShellLayoutClassName(layout: Readonly<ShellLayoutState>): str
   const classes = ["main-layout"];
   if (layout.sessionsDrawerOpen) classes.push("sidebar-open");
   if (layout.sidebarAnchored) classes.push("sidebar-pinned");
-  if (layout.sidebarPinned && layout.sidebarCollapsed) classes.push("sidebar-collapsed");
   return classes.join(" ");
 }
 
@@ -51,7 +50,7 @@ function ShellAppFrame({ legacyRefs }: ShellAppFrameProps = {}) {
     <Layout className="app-container" style={{ position: "fixed", top: "calc(var(--app-viewport-top, 0px) + var(--conversation-frame-top, 0px))", left: "var(--conversation-frame-inline, 0px)", right: "var(--conversation-frame-inline, 0px)", height: "calc(var(--app-viewport-height, 100dvh) - var(--conversation-frame-top, 0px) - var(--conversation-frame-bottom, 0px))", overflow: "hidden", paddingTop: "var(--wand-safe-top, 0px)", paddingBottom: "var(--wand-safe-bottom, 0px)" }}>
       <PageRouteNotice/>
       <Layout hasSider className={getShellLayoutClassName(snapshot.layout.sidebarDrawer
-        ? { ...snapshot.layout, sidebarAnchored: false, sidebarCollapsed: false }
+        ? { ...snapshot.layout, sidebarAnchored: false }
         : snapshot.layout)} style={{ flex: 1, minHeight: 0 }}>
         <ShellSidebar/>
         <QuickTerminalWorkspace><ShellMainContent legacyRefs={legacyRefs}/></QuickTerminalWorkspace>

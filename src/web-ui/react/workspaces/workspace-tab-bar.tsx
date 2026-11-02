@@ -27,6 +27,7 @@ import { StandaloneSessionTabBar } from "./standalone-session-tab-bar";
 import {
   activateWorkWindow,
   activeLayoutTab,
+  activeWorkWindow,
   activeWorkWindowTab,
   closeWorkWindow,
   layoutSessionIds,
@@ -108,7 +109,8 @@ export function WorkspaceTabBar({ fallback = null }: { fallback?: React.ReactEle
   // 窄屏（iOS / Android 浏览器）不放会话标签。PTY 与终端页以前仍留着这排，
   // 从左向右滑会沿历史切到上一个会话；现在滑回去的是进入页面前的那一页。
   if (mobile) return fallback;
-  if (!context.taskId) return <StandaloneSessionTabBar fallback={fallback}/>;
+  const hasSplitWindows = Boolean(context.taskId && (taskLayout.windows.length > 1 || moving || activeWorkWindow(context.layout)?.layout.type === "split"));
+  if (!hasSplitWindows) return <StandaloneSessionTabBar fallback={fallback}/>;
   // 任务还没有任何工作窗口：让主区全页 CLI 选择桌面单独出现，
   // 避免空标签栏和选择器叠在一起。
   if (taskLayout.windows.length === 0) return fallback;

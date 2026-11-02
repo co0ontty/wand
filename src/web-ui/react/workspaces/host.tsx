@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { newSessionController } from "../new-session/controller";
-import { workspacesStore } from "./controller";
+import { completeAddWorkspace, workspacesController, workspacesStore } from "./controller";
+import { CreateWorkspaceDialog } from "./create-workspace";
 import type { WorkspacesRepository } from "./types";
 import { httpWorkspacesRepository } from "./repository";
 
@@ -20,10 +21,13 @@ export function WorkspacesHost({ repository: _repository = httpWorkspacesReposit
   );
 
   useEffect(() => {
-    if (!controller.open) return;
+    if (!controller.open || controller.initialKind === "project") return;
     if (!newSessionController.isOpen()) newSessionController.open({ initialCwd: controller.initialCwd, newTask: controller.initialKind === "task" });
     workspacesStore.consumeOpen();
   }, [controller.initialCwd, controller.initialKind, controller.open]);
 
-  return null;
+  return controller.open && controller.initialKind === "project"
+    ? <CreateWorkspaceDialog key={controller.addRevision} initialCwd={controller.initialCwd} popupOwner={controller.popupOwner}
+        onClose={() => workspacesController.close()} onCreated={completeAddWorkspace}/>
+    : null;
 }

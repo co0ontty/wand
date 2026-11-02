@@ -1,5 +1,6 @@
 import { reportClientError } from "../client-feedback";
-import { clearNoticeView, paintNotificationNotice, paintUpdateNotice } from "./notice-view-adapter";
+import { clearNoticeView, paintNotificationNotice, paintUpdateNotice, type UpdateNoticeOptions } from "./notice-view-adapter";
+import { readMotionTokenMs } from "../react/ui/motion-tokens";
 import { state, writeStoredBoolean } from "./state";
 import { WAND_FAVICON_URL } from "../brand-identity.js";
 import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
@@ -63,11 +64,9 @@ export function showToast(message: string, type?: string) {
 
   // The feature-flag fallback reuses the existing notification channel instead
   // of maintaining a second hand-written toast DOM implementation.
-  // 气泡通道只有 info / warning / success 三个 class（styles.css 里也只有这三条），
-  // 没有 error 语义，所以错误只能压成 warning；success 通道支持，原样透传。
   showNotificationBubble({
     title: message,
-    type: isError ? "warning" : type === "success" ? "success" : "info",
+    type: isError ? "error" : type === "success" ? "success" : "info",
     duration: duration,
   });
 }
@@ -182,98 +181,114 @@ export function wandPrompt(message: any, defaultValue?: any, options?: any): Pro
 
 // ── Notification Bubble System ──
 
-var notificationStack: { id: number; el: HTMLElement }[] = [];
-var notificationIdCounter = 0;
-var NOTIFICATION_GAP = 6;
-var NOTIFICATION_TOP = 16;
+interface NotificationEntry {
+  id: number;
+  el: HTMLElement;
+  timer?: number;
+  returnFocus: HTMLElement | null;
+}
+const notificationStack = new Map<number, NotificationEntry>();
+let notificationIdCounter = 0;
+let notificationRegion: HTMLElement | null = null;
 
-/**
- * Show an in-app notification bubble at the top, horizontally centred
- * （CSS：.notification-bubble { position: fixed; left: 50%; transform: translateX(-50%) }，
- * 垂直起点由下面的 NOTIFICATION_TOP 给）。多条气泡按 notificationStack 自上而下堆叠。
- * @param {object} opts
- * @param {string} opts.title - Notification title
- * @param {string} [opts.body] - Body text
- * @param {string} [opts.type] - "info" | "warning" | "success" (default "info")
- * @param {string} [opts.icon] - Icon character (default derived from type)
- * @param {number} [opts.duration] - Auto-dismiss ms, 0 = manual only (default 8000)
- * @param {string} [opts.actionLabel] - Action button label
- * @param {function} [opts.action] - Action button callback
- * @returns {{ dismiss: function }} handle
- */
-export function showNotificationBubble(opts: any) {
-  // Play sound for important notifications — independent of bubble setting
-  if (opts.actionLabel || opts.playSound) playNotificationSound();
-
-  // Respect user preference (skip if bubbles disabled)
-  if (!state.notifBubble) return { dismiss: function() {} };
-
-  var id = ++notificationIdCounter;
-  var type = opts.type || "info";
-  var duration = opts.duration !== undefined ? opts.duration : 8000;
-
-  var bubble = document.createElement("div");
-  bubble.className = "notification-bubble";
-  bubble.setAttribute("data-nid", String(id));
-
-  var dismissed = false;
-  function handleDismiss() {
-    if (dismissed) return;
-    dismissed = true;
-    dismissNotification(id);
+function createNotification(): NotificationEntry {
+  if (!notificationRegion?.isConnected) {
+    notificationRegion = document.createElement("div");
+    notificationRegion.className = "wand-notification-stack";
+    notificationRegion.setAttribute("aria-label", "通知");
+    document.body.appendChild(notificationRegion);
   }
+  const el = document.createElement("div");
+  el.className = "notification-bubble";
+  const entry: NotificationEntry = { id: ++notificationIdCounter, el,
+    returnFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null };
+  el.setAttribute("data-nid", String(entry.id));
+  notificationRegion.appendChild(el);
+  notificationStack.set(entry.id, entry);
+  return entry;
+}
 
-  // Stack position
-  var entry = { id: id, el: bubble };
-  notificationStack.push(entry);
-  repositionNotifications();
+/** In-app notices share a normal-flow stack, including while their views load. */
+export function showNotificationBubble(opts: {
+  title: string;
+  body?: string;
+  type?: string;
+  duration?: number;
+  actionLabel?: string;
+  action?: () => void;
+  playSound?: boolean;
+}) {
+  if (opts.actionLabel || opts.playSound) playNotificationSound();
+  if (!state.notifBubble) return { dismiss() {} };
 
-  paintNotificationNotice(bubble, {
-    title: opts.title,
-    body: opts.body,
-    type: type,
-    actionLabel: opts.actionLabel,
-    onAction: function() {
-      if (typeof opts.action === "function") opts.action();
-    },
-    onClose: handleDismiss,
-    onLayoutChange: function() {
-      repositionNotifications();
-    },
+  const entry = createNotification();
+  const dismiss = () => dismissNotification(entry.id);
+  const duration = opts.duration ?? 8000;
+  let remaining = duration;
+  let deadline = 0;
+  let ready = false;
+  const pause = () => {
+    if (!notificationStack.has(entry.id) || !entry.timer) return;
+    remaining = Math.max(0, deadline - Date.now());
+    clearTimeout(entry.timer);
+    entry.timer = undefined;
+  };
+  const resume = () => {
+    if (!ready || !notificationStack.has(entry.id) || entry.timer || duration <= 0
+      || entry.el.matches(":hover, :focus-within")) return;
+    if (remaining <= 0) { dismiss(); return; }
+    deadline = Date.now() + remaining;
+    entry.timer = window.setTimeout(dismiss, remaining);
+  };
+  entry.el.addEventListener("pointerenter", pause);
+  entry.el.addEventListener("pointerleave", resume);
+  entry.el.addEventListener("focusin", pause);
+  entry.el.addEventListener("focusout", event => {
+    if (!entry.el.contains(event.relatedTarget as Node | null)) resume();
   });
 
-  // Auto-dismiss
-  if (duration > 0) {
-    setTimeout(handleDismiss, duration);
-  }
-
-  return {
-    dismiss: handleDismiss,
-  };
+  void paintNotificationNotice(entry.el, {
+    title: opts.title,
+    body: opts.body,
+    type: opts.type,
+    actionLabel: opts.actionLabel,
+    onAction: opts.action ? () => {
+      if (!notificationStack.has(entry.id)) return;
+      try { opts.action!(); } finally { dismiss(); }
+    } : undefined,
+    onClose: dismiss,
+  }).then(painted => {
+    ready = painted;
+    resume();
+  });
+  return { dismiss };
 }
 
-function dismissNotification(id: number) {
-  var idx = -1;
-  for (var i = 0; i < notificationStack.length; i++) {
-    if (notificationStack[i].id === id) { idx = i; break; }
-  }
-  if (idx === -1) return;
-  var entry = notificationStack[idx];
-  entry.el.classList.add("slide-out");
-  notificationStack.splice(idx, 1);
-  repositionNotifications();
-  setTimeout(function() {
+function dismissNotification(id: number): void {
+  const entry = notificationStack.get(id);
+  if (!entry) return;
+  notificationStack.delete(id);
+  clearTimeout(entry.timer);
+  if (entry.el.contains(document.activeElement) && entry.returnFocus?.isConnected) entry.returnFocus.focus({ preventScroll: true });
+  entry.el.inert = true;
+  const remove = () => {
+    clearTimeout(entry.timer);
     clearNoticeView(entry.el);
-    if (entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
-  }, 200);
-}
-
-function repositionNotifications() {
-  var top = NOTIFICATION_TOP;
-  for (var i = 0; i < notificationStack.length; i++) {
-    notificationStack[i].el.style.top = top + "px";
-    top += notificationStack[i].el.offsetHeight + NOTIFICATION_GAP;
+    entry.el.remove();
+    if (!notificationRegion?.childElementCount) {
+      notificationRegion?.remove();
+      notificationRegion = null;
+    }
+  };
+  if (!entry.el.childElementCount || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    remove();
+    return;
   }
+  entry.el.classList.add("slide-out");
+  entry.el.addEventListener("animationend", event => {
+    if (event.target === entry.el) remove();
+  }, { once: true });
+  entry.timer = window.setTimeout(remove, readMotionTokenMs("--motion-fast"));
 }
 
 // ── Browser Notification API ──
@@ -745,52 +760,77 @@ function _doPlaySound() {
  * directly from the notification, without navigating to settings.
  */
 function showUpdateBubble(currentVer: string, latestVer: string) {
-  // Prevent duplicate bubbles
+  // Dismissing this reminder lasts for the current page, like the native Mac reminder.
   if (state._updateBubbleShown) return;
   state._updateBubbleShown = true;
-
   playNotificationSound();
 
-  var id = ++notificationIdCounter;
-  var card = document.createElement("div");
-  // Reuse the notification stacking system but with a richer card style.
-  card.className = "notification-bubble update-card";
-  card.setAttribute("data-nid", String(id));
-
-  document.body.appendChild(card);
-
-  var entry = { id: id, el: card };
-  notificationStack.push(entry);
-  repositionNotifications();
-
-  var dismissed = false;
-  function handleClose() {
-    if (dismissed) return;
-    dismissed = true;
-    dismissNotification(id);
-    state._updateBubbleShown = false;
-  }
-
-  paintUpdateNotice(card, {
-    current: currentVer,
-    latest: latestVer,
-    onClose: handleClose,
-    onRestart: function(detached, previousInstanceId, version) {
-      if (detached) {
-        showRestartOverlay(previousInstanceId || null, version || null);
-      } else {
-        showRestartOverlay();
+  const entry = createNotification();
+  entry.el.classList.add("update-card");
+  let phase: UpdateNoticeOptions["phase"] = "idle";
+  let message = "";
+  let retryRestart = false;
+  const paint = () => {
+    if (!notificationStack.has(entry.id)) return;
+    paintUpdateNotice(entry.el, { current: currentVer, latest: latestVer, phase, message, retryRestart,
+      onClose: () => dismissNotification(entry.id), onUpdate: () => { void update(); } });
+  };
+  const fail = (text: string) => {
+    phase = "failed";
+    message = text;
+    paint();
+  };
+  const restarting = (previousInstanceId?: string | null, version?: string | null) => {
+    dismissNotification(entry.id);
+    showRestartOverlay(previousInstanceId, version);
+  };
+  const restart = async () => {
+    phase = "restarting";
+    message = "更新已完成，正在重启服务…";
+    paint();
+    try {
+      const response = await fetch("/api/restart", { method: "POST",
+        headers: { "Content-Type": "application/json" }, credentials: "same-origin" });
+      await parseJsonResponse(response);
+      restarting();
+    } catch (error) {
+      // A definite rejection stays on the card. A disconnected service is probed by the existing overlay.
+      if (error instanceof HttpResponseError && error.status > 0) {
+        fail(getErrorMessage(error, "重启失败，请重试。"));
+        return;
       }
-    },
-    onLayoutChange: function() {
-      repositionNotifications();
-    },
-  });
+      restarting();
+    }
+  };
+  async function update(): Promise<void> {
+    if (phase === "updating" || phase === "restarting" || phase === "complete") return;
+    if (retryRestart) { await restart(); return; }
+    phase = "updating";
+    message = "正在下载并安装新版本…";
+    paint();
+    try {
+      const response = await fetch("/api/update", { method: "POST",
+        headers: { "Content-Type": "application/json" }, credentials: "same-origin" });
+      const data = await parseJsonResponse<{ detachedUpdate?: boolean; previousInstanceId?: string;
+        version?: string; restartRequired?: boolean; message?: string }>(response);
+      if (data.detachedUpdate) {
+        restarting(data.previousInstanceId || null, data.version || null);
+      } else if (data.restartRequired === false) {
+        phase = "complete";
+        message = data.message || "更新完成。";
+        paint();
+      } else {
+        retryRestart = true;
+        await restart();
+      }
+    } catch (error) {
+      reportClientError("update_failed", error);
+      fail(error instanceof HttpResponseError ? getErrorMessage(error, "更新失败，请重试。") : "请检查网络连接后重试。");
+    }
+  }
+  paint();
 }
 
-/**
- * Call POST /api/restart and show the restart overlay.
- */
 /**
  * Full-screen overlay shown during server restart or detached update.
  * An update only completes after both the process instance and package version change.

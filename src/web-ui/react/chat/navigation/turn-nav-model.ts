@@ -11,6 +11,7 @@ export interface TurnNavEntry {
   ownerKey: string;
   label: string;
   preview: string;
+  reply?: string;
   visibleIndex: number;
 }
 export function turnPreview(text: string, maxLength = 120): string {
@@ -21,11 +22,21 @@ export function turnPreview(text: string, maxLength = 120): string {
 export function buildTurnNavIndex(rows: readonly TurnNavSource[]): TurnNavEntry[] {
   const counts = new Map<string, number>();
   for (const row of rows) if (row.ownerKey) counts.set(row.ownerKey, (counts.get(row.ownerKey) ?? 0) + 1);
-  return rows.flatMap(row => {
-    if (row.role !== "user" || row.notice || row.placeholder || !row.ownerKey || counts.get(row.ownerKey) !== 1) return [];
-    const preview = turnPreview(row.visibleText);
-    return preview ? [{ ownerKey: row.ownerKey, label: "", preview, visibleIndex: row.visibleIndex }] : [];
-  }).map((entry, index) => ({ ...entry, label: `提问 ${index + 1}` }));
+  const entries: TurnNavEntry[] = [];
+  let pending: TurnNavEntry | undefined;
+  for (const row of rows) {
+    if (row.role === "user") {
+      pending = undefined;
+      if (row.notice || row.placeholder || !row.ownerKey || counts.get(row.ownerKey) !== 1) continue;
+      const preview = turnPreview(row.visibleText);
+      if (!preview) continue;
+      pending = { ownerKey: row.ownerKey, label: `提问 ${entries.length + 1}`, preview, visibleIndex: row.visibleIndex };
+      entries.push(pending);
+    } else if (pending && row.role === "assistant" && !row.notice && !row.placeholder && row.visibleText.trim()) {
+      pending.reply = turnPreview((pending.reply ? pending.reply + " " : "") + row.visibleText, 240);
+    }
+  }
+  return entries;
 }
 export function turnNavRange(count: number, earlier: "available" | "unknown" | "none", omitted = false): string {
   const range = `当前已载入 ${count} 个提问`;

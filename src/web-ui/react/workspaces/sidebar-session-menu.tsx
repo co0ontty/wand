@@ -7,11 +7,10 @@ import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { SidebarRowMenu } from "./sidebar-row-menu";
 import { useSidebarPopupState } from "./sidebar-popup-owner";
 import { useSessionMove } from "./session-move";
-import { confirmSessionDelete } from "./session-delete-confirm";
 import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "./types";
 
 /** Both sidebar projections use one action list, including archived sessions. */
-export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask, onOpen, onArchive, onDelete }: {
+export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask, onOpen, onArchive }: {
   row: React.ReactElement<React.HTMLAttributes<HTMLElement> & { ref?: React.Ref<HTMLElement> }>;
   session: WorkspaceSessionSummary;
   label: string;
@@ -19,11 +18,10 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
   intoNewTask?: TaskDirectoryGroup;
   onOpen(): void;
   onArchive?(archived: boolean): Promise<void>;
-  onDelete?(): Promise<void>;
 }): React.ReactElement {
   const [open, setOpen] = useSidebarPopupState();
   const [moveOpen, setMoveOpen] = React.useState(false);
-  const [action, setAction] = React.useState<"archive" | "delete" | null>(null);
+  const [archiving, setArchiving] = React.useState(false);
   const [error, setError] = React.useState("");
   const lock = React.useRef(false);
   const rowRef = React.useRef<HTMLElement>(null);
@@ -32,27 +30,17 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
   const canArchive = archived || (session.canArchive !== false && !isArchiveBlocked(session));
   const move = useSessionMove({ sessionId: session.id, taskId: session.workspaceTaskId, intoNewTask,
     open: open && moveOpen, onMoved: () => setOpen(false) });
-  const busy = action !== null || move.busy;
+  const busy = archiving || move.busy;
   React.useEffect(() => { if (!open) setMoveOpen(false); }, [open]);
-  const run = async (kind: "archive" | "delete"): Promise<void> => {
-    if (lock.current || busy || (kind === "archive" && !canArchive)) return;
-    lock.current = true; setError("");
+  const archive = async (): Promise<void> => {
+    if (lock.current || busy || !canArchive || !onArchive) return;
+    lock.current = true; setArchiving(true); setError("");
     try {
-      if (kind === "delete") {
-        setOpen(false);
-        // The menu item will unmount; let the dialog restore the actual row control instead.
-        rowRef.current?.querySelector<HTMLElement>("button,a[href]")?.focus({ preventScroll: true });
-        if (!await confirmSessionDelete(label)) return;
-      }
-      setAction(kind);
-      if (kind === "archive") await onArchive?.(!archived); else await onDelete?.();
+      await onArchive(!archived);
       setOpen(false);
     } catch (cause) {
-      setError(describeError(cause, kind === "delete" ? "无法删除会话。" : archived ? "无法恢复会话。" : "无法归档会话。"));
-      // A late failure must not reopen an old menu after the user has moved on.
-      // Deletion replaces the menu with a dialog; reopen only if focus still belongs to this row.
-      if (kind === "delete" && rowRef.current?.contains(document.activeElement)) setOpen(true);
-    } finally { lock.current = false; setAction(null); }
+      setError(describeError(cause, archived ? "无法恢复会话。" : "无法归档会话。"));
+    } finally { lock.current = false; setArchiving(false); }
   };
   return <SidebarRowMenu row={React.cloneElement(row, { "aria-busy": busy || undefined,
     draggable: busy ? false : row.props.draggable })} rowRef={rowRef} disabled={disabled}
@@ -80,9 +68,7 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
               { key: "retry", disabled: busy || move.loading, icon: <WandIcon name="refresh"/>, label: "重新加载分区" }] : []),
           ] }] : []),
         ...(onArchive && canArchive ? [{ key: "archive", disabled: busy, icon: <WandIcon name={archived ? "resume" : "archive"}/>,
-          label: action === "archive" ? archived ? "正在恢复…" : "正在归档…" : archived ? "恢复会话" : "归档会话" }] : []),
-        ...(onDelete ? [{ key: "danger-divider", type: "divider" as const },
-          { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: "删除会话…" }] : []),
+          label: archiving ? archived ? "正在恢复…" : "正在归档…" : archived ? "恢复会话" : "归档会话" }] : []),
       ],
       onClick: ({ key, domEvent }) => {
         domEvent.stopPropagation();
@@ -93,7 +79,7 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
           void copyTextToPlatformClipboard(session.cwd).then(() => setOpen(false))
             .catch(cause => setError(describeError(cause, "无法复制工作目录。")));
         }
-        else if (key === "archive" || key === "delete") void run(key);
+        else if (key === "archive") void archive();
         else if (key === "new-task") void move.summarize();
         else if (key === "retry") move.retry();
         else if (key.startsWith("target:")) void move.move(key.slice("target:".length));

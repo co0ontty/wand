@@ -2,6 +2,7 @@ import * as React from "react";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { WandIcon, type WandIconName } from "../ui/icons";
 import { isSessionAttention, isSessionRunning, isSessionQueued } from "./sidebar-display-mode";
+import type { TaskExecutionVisualStatus } from "./task-status-glyph";
 import type { WorkspaceSessionSummary } from "./types";
 
 export interface SidebarSessionState {
@@ -30,6 +31,21 @@ export function sidebarGlowColor(status: GlowStatus): string | undefined {
   if (status === "permission" || status === "waiting-input" || status === "reconnecting") return "var(--warning, #a96a2f)";
   if (status === "thinking") return "var(--info, #4a6fa5)";
   return "var(--success, #4f7a58)";
+}
+
+/** 行尾动效标记只看结论，不看色调：等你处理（授权、回答、重连）是琥珀等待，不是红色失败。 */
+export function glowVisualStatus(glow: GlowStatus): TaskExecutionVisualStatus | null {
+  switch (glow) {
+    case "running":
+    case "thinking": return "running";
+    case "failed": return "failed";
+    case "permission":
+    case "waiting-input":
+    case "reconnecting": return "attention";
+    case "queued": return "queued";
+    case "just-completed": return "completed";
+    case "none": return null;
+  }
 }
 
 /** 计算左侧 Logo 的呼吸灯状态 */

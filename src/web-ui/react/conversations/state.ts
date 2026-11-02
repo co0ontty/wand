@@ -1,7 +1,7 @@
 import { normalizeSessionRuntime, type SessionRuntimeFilter } from "./runtime-filter";
 import * as React from "react";
 import type { ConversationTarget } from "../../../conversation-types.js";
-import { normalizeConversationTaskStage, type ConversationTaskStage, type ConversationListFilters } from "./list-filters";
+import { normalizeWorkspaceSelection, normalizeEmployeeSelection, normalizeConversationTaskStage, type ConversationTaskStage, type ConversationListFilters } from "./list-filters";
 import { hasPageRoute, pageSearch, scheduleReplacePageRoute, subscribePageRoute, updatePageRoute } from "../../page-route";
 
 /** Device-local archive tier, shared by every conversation list projection. */
@@ -17,8 +17,11 @@ export interface ConversationUiState {
   listRuntime: SessionRuntimeFilter;
   lastCapsuleRuntime: SessionRuntimeFilter;
   lastCapsuleWorkspace: string;
+  lastCapsuleEmployee: string;
   listTaskStage: ConversationTaskStage;
   listWorkspace: string;
+  listEmployee: string;
+  listWorktree: string;
   targets: Record<string, ConversationTarget>;
   filters: Record<string, string>;
   scrolls: Record<string, number>;
@@ -40,8 +43,11 @@ function initial(): ConversationUiState {
     listRuntime: normalizeSessionRuntime(stored.listRuntime ?? (stored.activityOnly ? "active" : "all")),
     lastCapsuleRuntime: normalizeSessionRuntime(stored.lastCapsuleRuntime ?? stored.listRuntime) === "all" ? "working" : normalizeSessionRuntime(stored.lastCapsuleRuntime ?? stored.listRuntime),
     lastCapsuleWorkspace: typeof (stored.lastCapsuleWorkspace ?? stored.listWorkspace) === "string" ? (stored.lastCapsuleWorkspace ?? stored.listWorkspace)! : "",
+    lastCapsuleEmployee: typeof (stored.lastCapsuleEmployee ?? stored.listEmployee) === "string" ? (stored.lastCapsuleEmployee ?? stored.listEmployee)! : "",
+    listWorktree: typeof stored.listWorktree === "string" ? stored.listWorktree : "",
     listTaskStage: normalizeConversationTaskStage(stored.listTaskStage),
-    listWorkspace: typeof stored.listWorkspace === "string" && (stored.listWorkspace === "none" || stored.listWorkspace.startsWith("id:")) ? stored.listWorkspace : "all",
+    listWorkspace: normalizeWorkspaceSelection(typeof stored.listWorkspace === "string" ? stored.listWorkspace : "all"),
+    listEmployee: normalizeEmployeeSelection(typeof stored.listEmployee === "string" ? stored.listEmployee : "all"),
     targets: stored.targets ?? {}, filters: stored.filters ?? {}, scrolls: stored.scrolls ?? {}, focusRequest: null };
 }
 function fromRoute(base: ConversationUiState): ConversationUiState {
@@ -52,14 +58,18 @@ function fromRoute(base: ConversationUiState): ConversationUiState {
   const taskId = params.get("conversationTask") ?? "";
   const runId = params.get("conversationRun");
   const runtime = normalizeSessionRuntime(params.get("chatRuntime") ?? (params.get("chatActivity") === "true" ? "active" : "all"));
-  const workspace = params.get("chatWorkspace") ?? "all";
+  const workspace = normalizeWorkspaceSelection(params.get("chatWorkspace") ?? "all");
+  const employee = normalizeEmployeeSelection(params.get("chatEmployee") ?? "all");
   return { ...base, mode: params.get("sidebar") === "tasks" ? "tasks" : params.get("sidebar") === "chats" || view === "chats" || view === "contacts" ? "chats" : "tasks",
     active: view === "chats" || view === "contacts", directory: view === "contacts", selectedId: id,
     listRuntime: runtime,
     lastCapsuleRuntime: runtime === "all" ? base.lastCapsuleRuntime : runtime,
     lastCapsuleWorkspace: workspace === "all" ? base.lastCapsuleWorkspace : workspace,
+    lastCapsuleEmployee: employee === "all" ? base.lastCapsuleEmployee : employee,
     listTaskStage: normalizeConversationTaskStage(params.get("chatTaskStage")),
-    listWorkspace: params.get("chatWorkspace") ?? "all",
+    listWorkspace: workspace,
+    listEmployee: employee,
+    listWorktree: params.get("chatWorktree") ?? "",
     listFilter: normalizeListFilter(params.get("chatFilter")), activityOnly: params.get("chatActivity") === "true",
     filters: { "list-query": params.get("chatQuery") ?? "", ...(id ? { [id]: taskId } : {}) },
     targets: id ? { [id]: taskId && runId ? { taskId, runId } : null } : {}, focusRequest: base.selectedId === id ? base.focusRequest : null };
@@ -79,7 +89,9 @@ function update(patch: Partial<ConversationUiState>): void {
   }
   if ("listRuntime" in patch) params.chatRuntime = state.listRuntime === "all" ? null : state.listRuntime;
   if ("listTaskStage" in patch) params.chatTaskStage = state.listTaskStage === "all" ? null : state.listTaskStage;
+  if ("listWorktree" in patch) params.chatWorktree = state.listWorktree || null;
   if ("listWorkspace" in patch) params.chatWorkspace = state.listWorkspace === "all" ? null : state.listWorkspace;
+  if ("listEmployee" in patch) params.chatEmployee = state.listEmployee === "all" ? null : state.listEmployee;
   if ("listFilter" in patch) params.chatFilter = state.listFilter === "all" ? null : state.listFilter;
   if ("activityOnly" in patch) params.chatActivity = state.activityOnly ? "true" : null;
   if ("filters" in patch) { params.chatQuery = state.filters["list-query"] ?? ""; params.conversationTask = state.filters[state.selectedId] ?? ""; }
@@ -115,14 +127,17 @@ export const conversationUi = {
   suspend: () => { ++selectionRevision; update({ active: false, directory: false, focusRequest: null }); },
   directory: (open: boolean) => { ++selectionRevision; update({ directory: open, active: open ? true : state.active, focusRequest: null }); },
   mode: (mode: "chats" | "tasks") => update({ mode, active: mode === "chats", directory: false, focusRequest: null }),
+  worktree: (value: string) => update({ listWorktree: state.listWorktree === value ? "" : value }),
+  clearWorktree: () => update({ listWorktree: "" }),
   listFilter: (value: string) => update({ listFilter: normalizeListFilter(value) }),
   activityOnly: (value: boolean) => update({ activityOnly: value, listRuntime: value ? "active" : "all" }),
   listFacets: (value: ConversationListFilters) => {
     const runtime = normalizeSessionRuntime(value.runtime === "active" && !value.activityOnly ? "all" : value.activityOnly && (!value.runtime || value.runtime === "all") ? "active" : value.runtime);
-    update({ listTaskStage: value.taskStage, listWorkspace: value.workspace,
+    update({ listTaskStage: value.taskStage, listWorkspace: value.workspace, listEmployee: value.employee,
       listFilter: normalizeListFilter(value.archive), activityOnly: value.activityOnly, listRuntime: runtime,
       ...(runtime !== "all" ? { lastCapsuleRuntime: runtime } : {}),
-      ...(value.workspace !== "all" ? { lastCapsuleWorkspace: value.workspace } : {}) });
+      ...(value.workspace !== "all" ? { lastCapsuleWorkspace: value.workspace } : {}),
+      ...(value.employee !== "all" ? { lastCapsuleEmployee: value.employee } : {}) });
   },
   target: (id: string, target: ConversationTarget) => update({ targets: { ...state.targets, [id]: target } }),
   filter: (id: string, filter: string) => update({ filters: { ...state.filters, [id]: filter } }),

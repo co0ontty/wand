@@ -10,6 +10,7 @@ export const WandIconFamily = IconFamilyContext.Provider;
  * 名字即语义：folder 是文件夹，gear 是齿轮，branch 只表示 git 分支 / worktree。
  */
 export type WandIconName =
+  | "clock"
   | "layers"
   | "folders"
   | "messageWarning"
@@ -113,7 +114,7 @@ export function WandIcon({
   slot?: WandIconSlot;
 }): React.ReactElement {
   const family = React.useContext(IconFamilyContext);
-  const glyph = family === "lucide" || ["layers", "folders", "messageQuestion", "messageWarning", "activity", "circleX"].includes(name) ? lucideGlyph(name) : undefined;
+  const glyph = family === "lucide" || ["clock", "layers", "folders", "messageQuestion", "messageWarning", "activity", "circleX"].includes(name) ? lucideGlyph(name) : undefined;
   const weight = glyph ? 2 : strokeWidth;
   const common = {
     width: size,
@@ -132,7 +133,7 @@ export function WandIcon({
     "data-icon": slot ?? name,
   };
 
-  if (glyph || name === "messageWarning" || name === "activity" || name === "layers" || name === "folders" || name === "messageQuestion" || name === "circleX") return <svg {...common} data-wand-icon-family="lucide">{glyph}</svg>;
+  if (glyph || name === "clock" || name === "messageWarning" || name === "activity" || name === "layers" || name === "folders" || name === "messageQuestion" || name === "circleX") return <svg {...common} data-wand-icon-family="lucide">{glyph}</svg>;
   switch (name) {
     case "archive":
       return <svg {...common}><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>;

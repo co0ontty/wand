@@ -33,13 +33,15 @@ export function installSidebarStyles(): void {
 .sidebar-unified .sidebar-profile-button { margin:0; }
 .sidebar-filter-capsules { width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 0; }
 .sidebar-capsule-label { font-size:11px; line-height:16px; color:var(--text-secondary); white-space:nowrap; }
-.sidebar-filter-capsule { display:flex; flex-direction:column; align-items:center; flex:none; gap:4px; padding:6px 3px; border:1px solid var(--border-subtle); border-radius:28px; background:var(--sidebar-surface); }
+.sidebar-filter-capsule { display:flex; flex-direction:column; align-items:center; flex:none; gap:4px; padding:3px; border:1px solid var(--border-subtle); border-radius:999px; background:var(--sidebar-surface); }
 .sidebar-filter-capsule .wand-ui-icon-button { width:40px; min-width:40px; height:40px; border-radius:50%; }
 .sidebar-filter-capsule [data-filter-active="true"] { color:var(--sidebar-accent); background:var(--sidebar-selected); }
 .sidebar-filter-capsule [data-filter-active="true"]::after { content:""; position:absolute; inset-inline-end:3px; top:6px; width:4px; height:4px; border-radius:50%; background:currentColor; }
-.sidebar-capsule-rest { width:40px; display:flex; flex-direction:column; align-items:center; gap:4px; max-height:min(240px, 32dvh); overflow-y:auto; overflow-x:hidden; scrollbar-width:none; }
-.sidebar-workspace-symbol { position:relative; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; }
-.sidebar-workspace-symbol .sidebar-workspace-monogram { position:absolute; right:-3px; bottom:-2px; min-width:12px; max-width:22px; padding:0 2px; border-radius:3px; background:var(--sidebar-surface); font-size:9px; line-height:12px; font-weight:600; }
+.sidebar-capsule-rest { width:max-content; display:flex; flex-direction:column; align-items:center; gap:4px; max-height:min(240px, 32dvh); overflow-y:auto; overflow-x:hidden; scrollbar-width:none; }
+.sidebar-capsule-symbol { position:relative; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; }
+.sidebar-capsule-symbol .sidebar-capsule-monogram { position:absolute; right:-3px; bottom:-2px; min-width:12px; max-width:22px; padding:0 2px; border-radius:3px; background:var(--sidebar-surface); font-size:9px; line-height:12px; font-weight:600; }
+.sidebar-capsule-avatar { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; pointer-events:none; }
+.sidebar-capsule-avatar .wand-employee-avatar { transform:none; }
 .sidebar-capsule-picker { display:flex; flex-direction:column; gap:12px; width:260px; max-width:calc(100vw - 36px); }
 .sidebar-capsule-choice { display:flex; align-items:center; gap:8px; }
 .unified-sidebar-section { display:flex; justify-content:space-between; padding:12px 8px 6px; font-size:11px; font-weight:600; color:var(--text-secondary); }
@@ -48,17 +50,19 @@ export function installSidebarStyles(): void {
 .sidebar-capsule-options .ant-btn > span:first-child { overflow:hidden; text-overflow:ellipsis; }
 .unified-sidebar-list { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; }
 .unified-sidebar-tools { flex:none; display:flex; flex-direction:column; gap:10px; padding:0 12px 12px; }
-.unified-sidebar-tools .sidebar-new-task { width:100%; }
-.unified-sidebar-tools .wand-ui-search { flex:1; min-width:0; }
-.unified-sidebar-tools .conversation-list-filter-trigger { width:34px; min-width:34px; }
-.unified-sidebar-tools .conversation-list-filter-trigger > span:last-child { display:none; }
 .unified-sidebar-tools > [role="status"] { font-size:12px; }
 .unified-sidebar-rows { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:0 8px 12px; scroll-padding-block:8px; }
-.unified-sidebar-row { min-width:0; display:flex; align-items:center; border-radius:var(--control-radius); }
-.unified-sidebar-row > .ant-btn:first-child { flex:1; min-width:0; }
-.unified-sidebar-row .unified-sidebar-more { width:28px; min-width:28px; height:32px; flex:none; opacity:0; }
-.unified-sidebar-row:hover .unified-sidebar-more, .unified-sidebar-row:focus-within .unified-sidebar-more { opacity:1; }
-@media (pointer:coarse) { .unified-sidebar-row .unified-sidebar-more { opacity:1; } }
+.unified-sidebar-row { min-width:0; display:grid; grid-template-columns:minmax(0,1fr); align-items:center; border-radius:var(--control-radius); }
+.unified-sidebar-row > .ant-btn:first-child { width:100%; min-width:0; }
+.unified-sidebar-row.is-selected { background:var(--bg-active); }
+.unified-sidebar-row .session-worktree-tag { grid-column:1; grid-row:2; justify-self:start; max-width:calc(100% - 44px); margin:0 0 8px 44px; height:24px; padding:2px 6px; font-size:11px; background:var(--bg-tertiary); border:1px solid var(--border); }
+.session-worktree-tag > span, .sidebar-worktree-filter > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.unified-sidebar-row .session-worktree-tag[aria-pressed="true"] { color:var(--accent); background:var(--accent-muted); border-color:var(--accent); }
+.sidebar-worktree-filter { width:100%; min-width:0; justify-content:flex-start; }
+.worktree-directory-option { max-width:100%; min-width:0; width:100%; justify-content:flex-start; }
+.worktree-directory-option > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.worktree-directory-project { min-width:0; }
+.workspace-worktree-children { margin-inline-start:18px; padding-inline-start:8px; border-inline-start:1px solid var(--border); }
 .unified-sidebar-row .im-sidebar-item-name { font-size:13px; }
 .unified-sidebar-row .wand-sidebar-session-row { min-height:58px; }
 .unified-sidebar-current { display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:8px; border-radius:var(--control-radius); background:var(--sidebar-selected); font-size:12px; }
@@ -66,20 +70,19 @@ export function installSidebarStyles(): void {
 @media (pointer:coarse) { .sidebar-filter-capsule .wand-ui-icon-button { min-width:44px; width:44px; height:44px; } .sidebar-capsule-options .ant-btn { min-height:44px; } }
 /* A continuous directory list, with one indent per real ownership boundary. */
 .sidebar .conversation-navigation { width:100%; }
-.sidebar:not(.collapsed) .conversation-navigation > .wand-ui-stretch-tabs,
-.sidebar:not(.collapsed) .conversation-navigation .ant-segmented { width:100%; }
-.sidebar:not(.collapsed) .conversation-navigation .ant-segmented-group { display:flex; }
-.sidebar:not(.collapsed) .conversation-navigation .ant-segmented-item { flex:1; text-align:center; }
+.sidebar .conversation-navigation > .wand-ui-stretch-tabs,
+.sidebar .conversation-navigation .ant-segmented { width:100%; }
+.sidebar .conversation-navigation .ant-segmented-group { display:flex; }
+.sidebar .conversation-navigation .ant-segmented-item { flex:1; text-align:center; }
 .sidebar .sidebar-body { overscroll-behavior:contain; scrollbar-gutter:stable; }
 /* Keep navigation and header actions anchored when switching list modes. */
 .sidebar-header-primary { min-height:32px; }
 .sidebar-header-main { min-width:0; }
 .sidebar-header-actions { flex-shrink:0; }
-.sidebar-compact-toggle-label, .conversation-create-label { display:none; }
-.sidebar-header-actions :is(.sidebar-more-trigger,.sidebar-compact-toggle,.sidebar-close,.conversation-create-button) { width:32px; min-width:32px; height:32px; padding:0; }
-.sidebar-title { font-size:15px; letter-spacing:0; }
-.sidebar-compact-toggle[aria-pressed="true"] .sidebar-collapse-direction { transform:rotate(180deg); }
-.sidebar-new-task.ant-btn { height:34px; font-size:13px; }
+.conversation-create-label { display:none; }
+.sidebar-header-actions :is(.sidebar-more-trigger,.sidebar-close,.conversation-create-button) { width:32px; min-width:32px; height:32px; padding:0; }
+.sidebar-header .sidebar-list-search { flex:1; min-width:0; }
+.sidebar-unified .sidebar-new-session { border-radius:var(--control-radius); font-size:16px; }
 .sidebar-status:empty { display:none; }
 .sidebar-footer-actions { min-width:0; }
 .sidebar-footer:has(#back-to-native-button,#switch-server-button) { flex-wrap:wrap; }
@@ -113,11 +116,8 @@ export function installSidebarStyles(): void {
 .sidebar .workspace-task-name { font-size:13px; white-space:nowrap; }
 .sidebar .workspace-task-disclosure-slot { width:20px; height:32px; flex:none; display:inline-flex; align-items:center; }
 .sidebar .workspace-task-disclosure.ant-btn { width:20px; min-width:20px; height:32px; padding:0; color:var(--text-secondary); }
-.sidebar .sidebar-task-status { display:inline-flex; align-items:center; justify-content:flex-end; gap:3px; flex:0 0 auto; min-width:4em; white-space:nowrap; word-break:keep-all; font-size:12px; line-height:18px; color:var(--text-secondary); }
-.sidebar .sidebar-task-status > * { flex:none; white-space:nowrap; }
-.sidebar .sidebar-task-status.tone-accent { color:var(--success); }
-.sidebar .sidebar-task-status.tone-warning { color:var(--warning); }
-.sidebar .sidebar-task-status.tone-success { color:var(--success); }
+.sidebar .workspace-task-status-mark { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; flex:none; margin-inline-end:5px; }
+.sidebar .sidebar-task-status { display:none; }
 .sidebar .workspace-task-children { margin-inline-start:8px; padding-inline-start:8px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-session-name { font-size:13px; }
 .sidebar .workspace-session-kind { color:var(--text-secondary); font-size:11px; }
@@ -142,24 +142,11 @@ export function installSidebarStyles(): void {
 /* One sidebar scale across conversation and workspace pages, including the framed home. */
 .sidebar .conversation-search-host { display:flex; align-items:center; gap:6px; padding:0 4px 6px; }
 .sidebar .conversation-search-host > .conversation-search-input { flex:1; min-width:0; }
-.sidebar .conversation-list-filter-trigger { flex:none; width:64px; min-width:64px; height:34px; padding-inline:6px; gap:4px; }
 .conversation-list-filter-summary { min-width:0; min-height:28px; }
 .conversation-list-filter-summary > .ant-typography { min-width:0; font-size:12px; }
 .conversation-list-filter-summary > button { flex:none; font-size:12px; padding-inline:4px; }
-.conversation-list-filter-panel { position:relative; width:420px; max-width:calc(100vw - 48px); display:flex; flex-direction:column; gap:12px; }
-.conversation-list-filter-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
-.conversation-filter-field { min-width:0; display:flex; flex-direction:column; gap:6px; }
-.conversation-filter-field-label { font-size:12px; color:var(--text-secondary); }
-.conversation-filter-field .ant-select { width:100%; min-width:0; height:32px; }
-.conversation-list-filter-activity { font-size:12px; color:var(--text-secondary); }
-.conversation-list-filter-footer { flex:none; padding-top:10px; border-top:1px solid var(--border-subtle); }
 @media (pointer:coarse), (max-width:640px) {
-  .sidebar .conversation-list-filter-trigger, .conversation-list-filter-summary > button { min-height:44px; }
-  .conversation-filter-field .ant-select { height:44px; }
-  .conversation-list-filter-panel .ant-btn { min-height:44px; }
-  .conversation-list-filter-panel .ant-select-item-option { min-height:44px; }
-  .conversation-list-filter-activity { min-height:44px; }
-  .conversation-list-filter-activity .ant-switch { min-width:44px; }
+  .conversation-list-filter-summary > button { min-height:44px; }
 }
 .sidebar .conversation-search-input { min-height:34px; font-size:12px; background:var(--bg-surface); }
 .sidebar .conversation-list-section { padding:0 4px 10px; gap:6px; }
@@ -185,12 +172,10 @@ export function installSidebarStyles(): void {
 .sidebar .sidebar-activity-filter.ant-btn { flex:none; width:48px; height:28px; padding:0; border-radius:var(--radius-full); font-size:12px; color:var(--text-secondary); background:transparent; border-color:var(--border-subtle); }
 .sidebar .sidebar-activity-filter.ant-btn[aria-pressed="true"] { color:var(--sidebar-accent); background:var(--sidebar-selected); border-color:color-mix(in srgb,var(--sidebar-accent) 45%,var(--border-subtle)); }
 .sidebar .conversation-search-input:focus-within { border-color:var(--sidebar-accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--sidebar-accent) 14%,transparent); }
-.sidebar.collapsed .conversation-row { justify-content:center; padding:6px 0; min-height:48px; }
-.sidebar.collapsed .sidebar-body { scrollbar-gutter:auto; }
 
 @media (pointer:coarse), (max-width:640px) {
-  .sidebar-header-actions :is(.sidebar-compact-toggle,.sidebar-close,.conversation-create-button) { width:44px; min-width:44px; height:44px; }
-  .sidebar-new-task.ant-btn { min-height:44px; }
+  .sidebar-header-actions :is(.sidebar-close,.conversation-create-button) { width:44px; min-width:44px; height:44px; }
+  .sidebar-unified .sidebar-new-session { width:48px; min-width:48px; height:48px; }
   .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:32px; min-width:32px; height:44px; }
   .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:44px; }
   .sidebar .workspace-task-disclosure-slot { width:36px; height:44px; }
@@ -255,6 +240,18 @@ export function installSidebarStyles(): void {
 @keyframes sidebar-backdrop-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+.sidebar-list-panel.sidebar-list-panel-peek {
+  position: absolute;
+  left: 76px;
+  top: 0;
+  bottom: 0;
+  width: min(356px, calc(100vw - 90px));
+  z-index: 20050;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.16);
+  background: var(--bg-surface);
+  border-inline-end: 1px solid var(--border-subtle);
+  animation: sidebar-backdrop-fade-in var(--motion-fast) ease-out;
 }
 `);
 }

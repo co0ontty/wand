@@ -50,7 +50,6 @@ export interface SidebarRecentSectionProps {
   onOpenConversation?(employeeId: string): void;
   /** 与目录树同一批会话动作，右键 / 长按 / Shift+F10 打开；缺失时不提供菜单。 */
   onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
-  onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
 }
 
 export function SidebarRecentSection({
@@ -67,7 +66,6 @@ export function SidebarRecentSection({
   onOpen,
   onStartConversation,
   onArchiveSession,
-  onDeleteSession,
   onOpenConversation,
 }: SidebarRecentSectionProps): React.ReactElement {
   const groups = React.useMemo(
@@ -118,7 +116,6 @@ export function SidebarRecentSection({
               onStartConversation={startConversation}
               onOpenConversation={onOpenConversation}
               onArchiveSession={onArchiveSession}
-              onDeleteSession={onDeleteSession}
               disabled={disabled}
             />
           ))}
@@ -138,7 +135,6 @@ function RecentConversationGroup({
   onOpen,
   onStartConversation,
   onArchiveSession,
-  onDeleteSession,
   onOpenConversation,
   disabled = false,
 }: {
@@ -152,14 +148,13 @@ function RecentConversationGroup({
   onStartConversation(employeeId?: string): void;
   onOpenConversation?(employeeId: string): void;
   onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
-  onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
   disabled?: boolean;
 }): React.ReactElement {
   const [open, setOpen] = useSidebarExpansion(`recent.${group.key}`, false, false, undefined, group.entries.length > 0);
   const toggleRef = React.useRef<HTMLButtonElement>(null);
   const sessions = group.entries.map(entry => entry.session);
   const activity = sidebarAggregateState(sessions);
-  const hasMenu = Boolean(onArchiveSession || onDeleteSession);
+  const hasMenu = Boolean(onArchiveSession);
 
   const rows = group.entries.map((entry, index) => {
     const session = entry.session;
@@ -183,8 +178,7 @@ function RecentConversationGroup({
         session={session} label={label} disabled={disabled}
         intoNewTask={session.workspaceTaskId ? undefined : entry.group}
         onOpen={() => onOpen(entry)}
-        onArchive={onArchiveSession ? archived => onArchiveSession(session.id, archived) : undefined}
-        onDelete={onDeleteSession ? () => onDeleteSession(session, label) : undefined}/>
+        onArchive={onArchiveSession ? archived => onArchiveSession(session.id, archived) : undefined}/>
 
     );
   });

@@ -4,10 +4,12 @@
  * 通知只在真的出现时才需要，Card/Alert/Spin 的实现不必跟着首屏 runtime 下载；
  * 代次标记保证「先清后画」的顺序在异步加载下依然成立。
  */
+import type { NotificationNoticeOptions, UpdateNoticeOptions } from "./notice-view";
+
 type NoticeViewModule = typeof import("./notice-view");
 let viewModule: NoticeViewModule | null = null;
 let viewPending: Promise<NoticeViewModule> | null = null;
-const generations = new Map<HTMLElement, number>();
+const generations = new WeakMap<HTMLElement, object>();
 
 function loadNoticeView(): Promise<NoticeViewModule> {
   if (viewModule) return Promise.resolve(viewModule);
@@ -24,19 +26,29 @@ function loadNoticeView(): Promise<NoticeViewModule> {
   return viewPending;
 }
 
-function nextGeneration(host: HTMLElement): number {
-  const next = (generations.get(host) ?? 0) + 1;
+function nextGeneration(host: HTMLElement): object {
+  const next = {};
   generations.set(host, next);
   return next;
 }
 
-function paintNotice(host: HTMLElement, apply: (module: NoticeViewModule) => void): void {
+function paintNotice(host: HTMLElement, apply: (module: NoticeViewModule) => void, onClose?: () => void): Promise<boolean> {
   const generation = nextGeneration(host);
-  void loadNoticeView().then(module => {
-    if (generations.get(host) !== generation) return;
+  return loadNoticeView().then(module => {
+    if (generations.get(host) !== generation) return false;
     apply(module);
+    return true;
   }, () => {
+    if (generations.get(host) !== generation) return false;
     host.textContent = "通知加载失败，请重新加载页面。";
+    if (onClose) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.textContent = "关闭通知";
+      close.onclick = onClose;
+      host.appendChild(close);
+    }
+    return true;
   });
 }
 
@@ -46,26 +58,19 @@ export function clearNoticeView(host: HTMLElement): void {
 }
 
 export function paintOfflineNotice(host: HTMLElement): void {
-  paintNotice(host, module => module.paintOfflineNotice(host));
+  void paintNotice(host, module => module.paintOfflineNotice(host));
 }
 
 export function paintBootNotice(host: HTMLElement, error?: string, message?: string): void {
-  paintNotice(host, module => module.paintBootNotice(host, error, message));
+  void paintNotice(host, module => module.paintBootNotice(host, error, message));
 }
 
 export type { NotificationNoticeOptions, UpdateNoticeOptions } from "./notice-view";
 
-export function paintNotificationNotice(
-  host: HTMLElement,
-  options: import("./notice-view").NotificationNoticeOptions
-): void {
-  paintNotice(host, module => module.paintNotificationNotice(host, options));
+export function paintNotificationNotice(host: HTMLElement, options: NotificationNoticeOptions): Promise<boolean> {
+  return paintNotice(host, module => module.paintNotificationNotice(host, options), options.onClose);
 }
 
-export function paintUpdateNotice(
-  host: HTMLElement,
-  optionsOrCurrent: import("./notice-view").UpdateNoticeOptions | string,
-  latest?: string
-): void {
-  paintNotice(host, module => module.paintUpdateNotice(host, optionsOrCurrent, latest));
+export function paintUpdateNotice(host: HTMLElement, options: UpdateNoticeOptions): void {
+  void paintNotice(host, module => module.paintUpdateNotice(host, options), options.onClose);
 }

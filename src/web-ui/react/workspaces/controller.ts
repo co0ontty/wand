@@ -1,4 +1,4 @@
-import type { WorkspacesRuntimeAdapter } from "./types";
+import type { Workspace, WorkspacesRuntimeAdapter } from "./types";
 import { newSessionController } from "../new-session/controller";
 
 export type WorkspaceCreationKind = "project" | "task";
@@ -10,12 +10,26 @@ export interface WorkspacesControllerSnapshot {
   initialCwd: string;
   /** 打开对话框时的创建分类；任务可以从任意目录入口独立创建。 */
   initialKind: WorkspaceCreationKind;
+  popupOwner?: string;
   revision: number;
+  addRevision?: number;
 }
 
 type Listener = () => void;
 
 let runtime: WorkspacesRuntimeAdapter | null = null;
+let createdCallback: ((workspace: Workspace) => void) | undefined;
+let addWorkspaceRevision = 0;
+export function requestAddWorkspace(initialCwd: string, onCreated?: (workspace: Workspace) => void, popupOwner?: string): void {
+  createdCallback = onCreated;
+  publish({ open: true, dismissable: true, initialCwd, initialKind: "project", popupOwner, addRevision: ++addWorkspaceRevision });
+}
+export function completeAddWorkspace(workspace: Workspace): void {
+  const callback = createdCallback;
+  createdCallback = undefined;
+  publish({ open: false });
+  callback?.(workspace);
+}
 let snapshot: WorkspacesControllerSnapshot = {
   open: false,
   dismissable: true,
@@ -50,19 +64,21 @@ export interface WandWorkspacesController {
 
 export const workspacesController: WandWorkspacesController = {
   open(initialCwd?: string, kind: WorkspaceCreationKind = "task"): boolean {
-    newSessionController.open({ initialCwd, newTask: kind === "task" });
+    if (kind === "project") { requestAddWorkspace(initialCwd ?? ""); return true; }
+    newSessionController.open({ initialCwd, newTask: true });
     runtime?.onOpen();
     publish({ open: true, dismissable: true, initialCwd: initialCwd ?? "", initialKind: kind });
     return true;
   },
   close(): void {
-    newSessionController.close();
+    if (snapshot.initialKind !== "project") newSessionController.close();
+    createdCallback = undefined;
     if (!snapshot.open) return;
     publish({ open: false });
     runtime?.onClose();
   },
   closeIfOpen(): boolean {
-    newSessionController.closeIfOpen();
+    if (snapshot.initialKind !== "project") newSessionController.closeIfOpen();
     if (!snapshot.open || !snapshot.dismissable) return false;
     this.close();
     return true;
@@ -71,7 +87,7 @@ export const workspacesController: WandWorkspacesController = {
     return snapshot.open || newSessionController.isOpen();
   },
   setDismissable(dismissable): void {
-    newSessionController.setDismissable(dismissable);
+    if (snapshot.initialKind !== "project") newSessionController.setDismissable(dismissable);
     publishDismissable(dismissable);
   },
 };

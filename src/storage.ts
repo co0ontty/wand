@@ -23,6 +23,7 @@ import { UserMemoryRepository } from "./storage/user-memory-repository.js";
 import { AiTeamRepository } from "./storage/ai-teams-repository.js";
 import { MissionRepository } from "./storage/missions-repository.js";
 import { SessionRepository } from "./storage/sessions-repository.js";
+import { SessionMessageRepository } from "./storage/session-messages-repository.js";
 import { SessionInputRepository } from "./storage/session-input-repository.js";
 import { UploadRepository } from "./storage/uploads-repository.js";
 import { FeedbackRepository } from "./storage/feedback-repository.js";
@@ -49,6 +50,7 @@ export interface WandStorage extends
   RepositoryMethods<MissionRepository>,
   RepositoryMethods<SessionRepository>,
   RepositoryMethods<SessionInputRepository>,
+  RepositoryMethods<SessionMessageRepository>,
   RepositoryMethods<UploadRepository>,
   RepositoryMethods<FeedbackRepository> {}
 
@@ -70,6 +72,7 @@ export class WandStorage {
   readonly missions: MissionRepository;
   readonly sessions: SessionRepository;
   readonly sessionInputs: SessionInputRepository;
+  readonly sessionMessages: SessionMessageRepository;
   readonly uploads: UploadRepository;
   readonly feedback: FeedbackRepository;
   private readonly closeListeners = new Set<() => void>();
@@ -140,6 +143,7 @@ export class WandStorage {
     this.userMemory = new UserMemoryRepository(this.db, this);
     this.aiTeams = new AiTeamRepository(this.db, this);
     this.missions = new MissionRepository(this.db, this);
+    this.sessionMessages = new SessionMessageRepository(this.db, this);
     this.sessions = new SessionRepository(this.db, this);
     this.sessionInputs = new SessionInputRepository(this.db, this);
     this.uploads = new UploadRepository(this.db, this);
@@ -575,6 +579,7 @@ const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { 
   ["missions", MissionRepository],
   ["sessions", SessionRepository],
   ["sessionInputs", SessionInputRepository],
+  ["sessionMessages", SessionMessageRepository],
   ["uploads", UploadRepository],
   ["feedback", FeedbackRepository],
 ];

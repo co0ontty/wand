@@ -1,5 +1,6 @@
 import { newSessionController } from "../new-session/controller";
 import * as React from "react";
+import { WorkspaceSelect } from "../workspaces/select";
 import { CopyPageLink } from "../ui/copy-page-link";
 import { Sender } from "@ant-design/x";
 import { Alert, Descriptions, Flex, Spin, Typography } from "antd";
@@ -575,7 +576,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
             <div hidden={layer !== "task"}><Typography.Text strong>{continueTaskId ? "确认继续此任务" : "派新任务"}</Typography.Text>
               <WandInput aria-label="任务名称" placeholder="任务名称" value={title} disabled={!!continueTaskId} onChange={e => setTitle(e.currentTarget.value)}/>
               {projectsLoading ? <Flex align="center" gap={8} role="status"><Spin size="small"/>正在读取工作项目…</Flex> : projectsError ? <Alert type="error" showIcon title={projectsError} action={<WandButton size="small" onClick={() => void loadProjects()}>只读重试</WandButton>}/> : !projects.some(p => p.kind !== "global" && !!p.cwd) ? <Typography.Text type="secondary" role="status">还没有可用的工作项目，请先在工作区创建项目。</Typography.Text> : null}
-              <WandSelect ariaLabel="工作项目" popupOwner="conversation-task-panel" searchable value={projectId} onValueChange={setProjectId} disabled={projectsLoading || !!projectsError}
+              <WorkspaceSelect onWorkspaceCreated={workspace => { setProjects(previous => [...previous, workspace]); setProjectId(workspace.id); }} ariaLabel="工作项目" popupOwner="conversation-task-panel" searchable value={projectId} onValueChange={setProjectId} disabled={projectsLoading || !!projectsError}
                 options={projects.filter(p => p.kind !== "global" && !!p.cwd).map(p => ({ value: p.id, label: p.name }))}/>
               <Descriptions size="small" column={1} items={[{ key: "members", label: "执行名单", children: selected?.team ? `我 + ${selected.team.members.map(m => m.name).join("、")} · 本轮负责人 ${mentionedLeader?.name ?? leader?.name}` : `我 + ${employee?.name}（负责人 / 执行者）` },
                 { key: "version", label: "成员版本", children: capturedVersion }, { key: "approval", label: "计划审批", children: selected?.team?.requirePlanApproval === false ? "沿用团队模板自动开工" : "需用户明确批准" }]}/>

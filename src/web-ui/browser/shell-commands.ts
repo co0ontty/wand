@@ -26,7 +26,6 @@ import {
   toggleSessionsDrawer,
   openSessionsDrawer,
   closeSessionsDrawer,
-  toggleSidebarCollapsed,
   toggleSidebarPin,
 } from "./session-engine";
 import {
@@ -150,7 +149,6 @@ export function createBrowserShellCommands(): LegacyUiCommands {
     openSessionsDrawer,
     closeSessionsDrawer,
     toggleSidebarPin,
-    toggleSidebarCollapsed,
     expandSidebarGroup: (group) => {
       writeStoredBoolean(
         group === "automation"
@@ -158,7 +156,6 @@ export function createBrowserShellCommands(): LegacyUiCommands {
           : "wand-non-wand-sessions-expanded",
         true,
       );
-      toggleSidebarCollapsed();
     },
     setSidebarGroupExpanded: (group, expanded) => {
       writeStoredBoolean(

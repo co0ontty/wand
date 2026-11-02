@@ -11,6 +11,7 @@ import { employeeProfile } from "../react/agents/employee-profile-state.js";
 import { computeRunningSignal } from "../session-activity.js";
 import { latestChatUsage } from "../chat-message-meta.js";
 import { renderStructuredStatusBar } from "./utils.js";
+import { addPendingAttachment, removePendingAttachment } from "./session-engine.js";
 interface Mount { root: Root; input: HTMLTextAreaElement; chrome: HTMLElement; }
 const roots = new Map<HTMLElement, Mount>();
 const avatarRoots = new Map<HTMLElement, Root>();
@@ -58,6 +59,9 @@ const projection: SenderProjection = {
   revision: () => composer.read(state.selectedId).revision,
   text: () => composer.read(state.selectedId).text,
   isComposing: () => state.composerComposing,
+  attachments: () => composer.read(state.selectedId).attachments,
+  addAttachment: (file: File) => addPendingAttachment(file),
+  removeAttachment: (index: number) => removePendingAttachment(index),
 };
 
 export function syncComposerCompanion(): void {

@@ -3,7 +3,7 @@ import { installStyleSheet } from "../styles";
 /** Approved conversation surface; shared controls and all five themes retain ownership. */
 export function installConversationHomeStyles(): void {
   installStyleSheet("wand-conversation-home", String.raw`
-.conversation-root { --conversation-inset:clamp(16px,3vw,48px); background:var(--bg-primary); }
+.conversation-root { --conversation-inset:var(--chat-content-inset); background:var(--bg-primary); }
 .conversation-root .conversation-heading { padding:20px var(--conversation-inset) 16px; border:0; }
 /* 标题行头像位始终占位：会话详情到达前是占位块，到达后换成同一个 48px 头像。
    不占位时标题会先向右 56px、加载完再弹回，标题与发送按钮会跟着量尺寸。 */

@@ -25,7 +25,7 @@ export function installNewWorkStyles(): void {
 .new-work-inline-task:hover:not(:disabled) .new-work-inline-task-icon { color:var(--text-primary); }
 .new-work-inline-arrow { color:var(--text-secondary); opacity:0.8; transition:color 0.15s ease, opacity 0.15s ease, transform 0.15s ease; flex-shrink:0; }
 .new-work-inline-trigger:hover:not(:disabled) .new-work-inline-arrow { color:var(--text-primary); opacity:1; }
-.new-work-page .new-work-composer { width:100%; max-width:800px; box-sizing:border-box; margin-inline:auto; padding:0 var(--wand-page-inset) max(12px,var(--wand-safe-bottom,0px)); flex-shrink:0; }
+.new-work-page .new-work-composer { padding:0 var(--chat-content-inset) max(12px,var(--wand-safe-bottom,0px)); flex-shrink:0; }
 /* 面板外的上下文行：目录、执行对象、权限与工作类型，和新建任务页同一行。 */
 .new-work-page .wand-composer-context { padding-inline:4px; }
 .new-work-page .new-work-person.ant-btn, .new-work-page .new-work-directory.ant-btn { min-width:0; max-width:240px; height:24px; min-height:24px; padding-inline:4px; gap:4px; font-size:var(--font-size-xs); color:var(--text-secondary); }

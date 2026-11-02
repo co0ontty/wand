@@ -21,7 +21,6 @@ export interface LegacySnapshotState {
   isOnline?: boolean;
   sessionsDrawerOpen?: boolean;
   sidebarPinned?: boolean;
-  sidebarCollapsed?: boolean;
   filePanelOpen?: boolean;
   topbarMoreOpen?: boolean;
   currentView?: string;
@@ -310,7 +309,6 @@ export function deriveLegacyUiSnapshot(
   });
   const drawerOpen = Boolean(state.sessionsDrawerOpen);
   const sidebarPinned = Boolean(state.sidebarPinned);
-  const sidebarCollapsed = !sidebarDrawer && sidebarPinned && Boolean(state.sidebarCollapsed);
   const filePanelOpen = Boolean(state.filePanelOpen);
   const structuredSelected = selected?.kind === "structured";
   const currentView = structuredSelected || state.currentView === "chat" ? "chat" : "terminal";
@@ -342,7 +340,6 @@ export function deriveLegacyUiSnapshot(
     layout: {
       sessionsDrawerOpen: drawerOpen,
       sidebarPinned,
-      sidebarCollapsed,
       sidebarDrawer,
       sidebarAnchored: !sidebarDrawer && (sidebarPinned || drawerOpen),
       sessionsBackdropVisible: drawerOpen && (sidebarDrawer || !sidebarPinned),

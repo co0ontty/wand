@@ -30,7 +30,6 @@ export interface LegacyUiCommands {
   openSessionsDrawer?(): void | Promise<unknown>;
   closeSessionsDrawer(): void | Promise<unknown>;
   toggleSidebarPin(): void | Promise<unknown>;
-  toggleSidebarCollapsed(): void | Promise<unknown>;
   expandSidebarGroup(group: "automation" | "history"): void | Promise<unknown>;
   setSidebarGroupExpanded(group: "automation" | "history", expanded: boolean): void | Promise<unknown>;
   toggleFilePanel(): void | Promise<unknown>;
@@ -83,7 +82,6 @@ export function applyLegacyUiAction(
         : commands.toggleSessionsDrawer();
     case "layout.drawer.close": return commands.closeSessionsDrawer();
     case "layout.drawer.pin": return commands.toggleSidebarPin();
-    case "layout.drawer.collapse": return commands.toggleSidebarCollapsed();
     case "layout.drawer.expandGroup": return commands.expandSidebarGroup(action.group);
     case "layout.drawer.group.set": return commands.setSidebarGroupExpanded(action.group, action.expanded);
     case "layout.files.toggle": return commands.toggleFilePanel();

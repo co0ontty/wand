@@ -12,6 +12,7 @@ import { installChatSurfaceStyles } from "./styles";
 export { installChatSurfaceStyles } from "./styles";
 import { registerChatPresentation } from "./presentation-runtime";
 import { preserveDisclosurePosition } from "./disclosure-position.js";
+import { EmployeeAvatar } from "../agents/employee-avatar";
 import { InlineHtmlPreview } from "../local-preview/inline";
 
 type Kind = "html" | "bubble" | "call" | "activity" | "tool" | "thinking" | "file" | "agent" | "agent-detail" | "agent-rail" | "agent-process" | "agent-timeline" | "agent-result" | "agent-receipt" | "question" | "section" | "terminal" | "diff" | "inline" | "preview" | "typography" | "notice" | "answer" | "unknown";
@@ -19,7 +20,7 @@ interface Projection { root: Root; slots: Map<string, HTMLElement>; kind: Kind; 
 const projections = new Map<HTMLElement, Projection>();
 const replies = new Map<HTMLElement, Root>();
 const slotNames: Partial<Record<Kind, string[]>> = {
-  bubble: ["chat-message-text", "chat-message-content", "chat-message-time"],
+  bubble: ["chat-message-text", "chat-message-content", "chat-message-time", "chat-message-read"],
   activity: ["chat-process-summary", "chat-activity-menu"],
   tool: ["chat-tool-header", "tool-preview", "chat-tool-body", "tool-use-downgrade-chip", "decision-tool-details"],
   call: ["chat-call-button", "chat-call-detail"],
@@ -113,6 +114,7 @@ function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<strin
   return <ChatMessage own={user}
     // 助手的回复头部（时间 + 署名 + 收起）由 presentAssistantReply 持有，这里不再重复一份时间行。
     header={user ? timeRow : undefined}
+    footer={user && slots.get("chat-message-read") ? <span className="chat-message-read" aria-label="服务端已接收并开始处理">已读</span> : undefined}
     // 助手回复不设阅读栏宽：横向用满可用宽度（对齐 Android 回复正文），只有自己的发言按气泡收口。
     styles={{ body: { minWidth: 0, width: user ? undefined : "100%", maxWidth: user ? "calc(100% - 44px)" : "100%", marginInlineStart: user ? "auto" : undefined },
       content: { overflowWrap: "anywhere", ...(user ? {} : { padding: 0 }) } }}
@@ -324,7 +326,7 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
 
 
 /** The message owner keeps the fold choice; Ant owns its single keyboard control. */
-export function presentAssistantReply(element: HTMLElement, key: string, preview: string, expanded: boolean, toggle: (expanded: boolean) => void, meta?: { time?: string; dateTime?: string; duration?: string; author?: string; employee?: { id: string; name?: string; avatar?: string; provider?: string; engine?: "cli" | "sdk" | "core" } }): void {
+export function presentAssistantReply(element: HTMLElement, key: string, preview: string, expanded: boolean, toggle: (expanded: boolean) => void, meta?: { replying?: boolean; time?: string; dateTime?: string; duration?: string; author?: string; employee?: { id: string; name?: string; avatar?: string; provider?: string; engine?: "cli" | "sdk" | "core" } }): void {
   // 署名只是「谁在做这件事」的说明：会话自带员工快照就署员工，团队 relay 的 msg.author 次之，
   // 都取不到才回落 Wand 名称（与 Android AssistantReplyHeader 同一套优先级）。
   const employee = meta?.employee?.id ? meta.employee : null;
@@ -337,15 +339,17 @@ export function presentAssistantReply(element: HTMLElement, key: string, preview
   let root = replies.get(host);
   if (!root) { root = createRoot(host); replies.set(host, root); }
   // One reply metadata row keeps the body prominent; the source owner keeps its fold preference.
-  flushSync(() => root!.render(<WandUiProvider><div className="assistant-reply-head">
+  flushSync(() => root!.render(<WandUiProvider><div className={`assistant-reply-head${meta?.replying ? " is-replying" : ""}`}>
     <Button type="text" block className="assistant-reply-disclosure"
       data-expand-key={key} aria-expanded={expanded} aria-label={`${authorName} 的回复，${expanded ? "收起" : "展开"}`}
       onClick={event => preserveDisclosurePosition(event.currentTarget, () => {
         toggle(!expanded); presentAssistantReply(element, key, preview, !expanded, toggle, meta);
       })}>
       <span className="assistant-author">
-        <span className="assistant-author-name">{authorName}</span>
+        <span className="assistant-author-avatar">{employee ? <EmployeeAvatar employee={{ ...employee, name: authorName }} provider="" size="sm" renderMode="static"/> : <WandIcon name="sparkle" size={28}/>}</span>
+        <span className="assistant-author-name" title={authorName}>{authorName}</span>
       </span>
+      {meta?.replying ? <span className="assistant-reply-status" role="status"><span className="assistant-reply-dots" aria-hidden="true"><span/><span/><span/></span>正在回复</span> : null}
       {!expanded && preview ? <span className="assistant-author-preview" title={preview}>{preview}</span> : <span className="assistant-author-space"/>}
       {meta?.time ? <span className="chat-message-time" title={meta.duration ? `耗时 ${meta.duration}` : undefined}>
         {meta.duration ? <span className="chat-message-duration">耗时 {meta.duration}</span> : null}

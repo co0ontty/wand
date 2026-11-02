@@ -487,4 +487,33 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
     }
   } },
   { version: 27, name: "workspace-session-sections", up: db => db.exec("ALTER TABLE workspace_tasks ADD COLUMN container_kind TEXT NOT NULL DEFAULT 'task'") },
+  // Legacy rows have no reliable creation provenance. Keep their IDs and history,
+  // but only an explicit add operation can register them as a user workspace.
+  { version: 28, name: "explicit-workspaces", up: db => db.exec("ALTER TABLE workspaces ADD COLUMN user_added INTEGER NOT NULL DEFAULT 0") },
+  { version: 29, name: "indexed-formatted-session-messages", up: db => db.exec(`
+  CREATE TABLE IF NOT EXISTS session_message_heads (
+    session_id TEXT PRIMARY KEY REFERENCES command_sessions(id) ON DELETE CASCADE,
+    turn_count INTEGER NOT NULL, format_version INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS session_message_turns (
+    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+    turn_index INTEGER NOT NULL, raw_json TEXT NOT NULL, digest TEXT NOT NULL,
+    metadata_json TEXT NOT NULL, outline_json TEXT NOT NULL, block_count INTEGER NOT NULL,
+    PRIMARY KEY(session_id, turn_index)
+  );
+  CREATE INDEX IF NOT EXISTS idx_session_message_role ON session_message_turns(session_id, json_extract(metadata_json, '$.role'), turn_index);
+  CREATE TABLE IF NOT EXISTS session_message_blocks (
+    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+    turn_index INTEGER NOT NULL, block_index INTEGER NOT NULL,
+    formatted_json TEXT NOT NULL, compact_json TEXT NOT NULL,
+    tool_id TEXT, block_type TEXT NOT NULL, raw_json TEXT NOT NULL,
+    PRIMARY KEY(session_id, turn_index, block_index)
+  );
+  CREATE INDEX IF NOT EXISTS idx_session_message_tool ON session_message_blocks(session_id, tool_id, block_type, turn_index DESC, block_index DESC);
+  CREATE TRIGGER IF NOT EXISTS delete_session_message_rows AFTER DELETE ON command_sessions BEGIN
+    DELETE FROM session_message_heads WHERE session_id = OLD.id;
+    DELETE FROM session_message_turns WHERE session_id = OLD.id;
+    DELETE FROM session_message_blocks WHERE session_id = OLD.id;
+  END;
+`) },
 ];

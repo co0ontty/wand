@@ -9,6 +9,7 @@ export interface BrowserComposerPopoverConfig {
   resolve(): ComposerPopoverState;
   onAttach(keyboard: boolean): void;
   onToggleInteractive(): void;
+  onPredict(): void;
 }
 
 const HOST_SELECTOR = "[data-composer-popover-host]";
@@ -32,6 +33,7 @@ export function syncBrowserComposerPopover(config: BrowserComposerPopoverConfig)
         ...config.resolve(),
         onAttach: config.onAttach,
         onToggleInteractive: config.onToggleInteractive,
+        onPredict: config.onPredict,
       };
     },
   });

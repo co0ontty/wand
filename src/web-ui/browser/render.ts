@@ -355,7 +355,6 @@ export function restoreLoginSession() {
 document.addEventListener("click", function(e) {
   if (isSidebarDrawerLayout()) return;
   if (state.sidebarPinned) return;
-  if (state.sidebarCollapsed) return;
   if (!state.sessionsDrawerOpen) return;
   var target = e.target;
   if (!target || !(target instanceof Element)) return;
@@ -400,10 +399,8 @@ export function render(options?: any) {
   document.documentElement.classList.add("no-transition");
 
   // Apply persisted pin state before rendering.
-  // 窄条（collapsed）形态不靠 .open 显示，靠 .pinned.collapsed 的 width:56px
-  // 常驻；此时强制 sessionsDrawerOpen=true 会与 toggleSidebarCollapsed 里设的
-  // false 打架，并在手机端误触发背景遮罩。窄条态下不强制 open。
-  if (state.sidebarPinned && !state.sidebarCollapsed && !isSidebarDrawerLayout()) {
+  // 抽屉形态（手机、触摸矮屏）不常驻，强制 open 会在手机端误触发背景遮罩。
+  if (state.sidebarPinned && !isSidebarDrawerLayout()) {
     state.sessionsDrawerOpen = true;
     writeStoredBoolean("wand-sidebar-open", true);
   }
@@ -452,11 +449,6 @@ export function render(options?: any) {
     }
     document.documentElement.classList.remove("no-transition");
   });
-
-  // 初始加载或会话切换后惰性触发 git 状态拉取（loadGitStatus 自带节流）。
-  if (isLoggedIn && state.selectedId && state.gitStatusSessionId !== state.selectedId) {
-    loadGitStatus(state.selectedId);
-  }
 
   refreshTailMarqueePaths();
 }

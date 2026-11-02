@@ -35,6 +35,7 @@ import { activityLabel } from "../react/chat/activity-label.js";
 import { activityDetailText, activityFilePath, activityOpensFile } from "./tool-activity-detail.js";
 import { clearActivityTimelines, holdActivityTimeline, syncActivityTimelines } from "./tool-activity-timeline.js";
 import { extractToolResultImages, extractToolResultText, toolResultPreview } from "./tool-result-display.js";
+import { registerMcpAppTool } from "./mcp-app-adapter.js";
 export { extractToolResultImages, extractToolResultText } from "./tool-result-display.js";
 export { parseMessages } from "./pty-chat-parser.js";
 import { ensureChatMessagesContainer } from "./chat-host.js";
@@ -58,7 +59,8 @@ import "./local-preview-adapter";
 const replyIdentities = new WeakMap<Element, readonly unknown[]>();
 function replyIdentity(session): readonly unknown[] {
   return [session.id, session.employeeId, session.employeeName, session.employeeAvatar,
-    session.provider, session.structuredState?.engine];
+    session.provider, session.structuredState?.engine, session.status, session.structuredState?.inFlight,
+    session.ptyBusy, session.isResponding];
 }
 
 // Activity details survive streaming DOM refreshes, but are fetched only after
@@ -103,7 +105,7 @@ function syncTurnNavigation(output: HTMLElement, session: any): void {
     ownerKey: chatOwnerPlan?.messages[index]?.key || null, visibleIndex: index,
     role: message.role, notice: !!message.notice,
     placeholder: Array.isArray(message.content) && message.content.some((block: any) => block.__processing || block.__queued),
-    visibleText: message.role === "user" && !message.notice ? visibleText(message) : "",
+    visibleText: !message.notice ? visibleText(message) : "",
   })));
   const earlier = session.messageOffset > 0 || session.leadingBlockOffset > 0;
   const omitted = messages.some((message: any, index: number) => message.role === "user" && !message.notice
@@ -1462,6 +1464,11 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         return (d.getMonth() + 1) + "/" + d.getDate() + " " + clock;
       }
 
+      function renderChatReadReceipt(msg) {
+        return msg.role === "user" && !msg.notice && msg.readAt
+          ? '<div class="chat-message-read" data-chat-key="meta:read" aria-label="服务端已接收并开始处理">已读</div>' : "";
+      }
+
       function renderChatMessageTime(msg) {
         var iso = (msg && (msg.completedAt || msg.createdAt)) || "";
         var label = formatChatClock(iso);
@@ -1535,7 +1542,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var groupedAttr = isGrouped ? ' data-grouped="true"' : "";
         return '<div class="chat-message ' + msg.role + '"' + groupedAttr + ' data-role="' + escapeHtml(msg.role) + '">' +
           renderChatMessageTime(msg) +
-          '<div class="chat-message-text">' + bubbleContent + '</div>' +
+          '<div class="chat-message-text">' + bubbleContent + '</div>' + renderChatReadReceipt(msg) +
         '</div>';
       }
 
@@ -1653,6 +1660,18 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           if (allMessages[i] && allMessages[i].role === "user") { lastUserIdx = i; break; }
         }
 
+        // A turn may end in tool-only messages; keep its last visible reply header live.
+        var activeReplyIndex = -1;
+        if (_currentActivitySessionBusy) {
+          for (var replyIndex = allMessages.length - 1; replyIndex > lastUserIdx; replyIndex--) {
+            if (allMessages[replyIndex]?.role === "assistant" &&
+                !isToolActivityOnly(allMessages[replyIndex].content || [], _currentDecisionToolIds)) {
+              activeReplyIndex = replyIndex;
+              break;
+            }
+          }
+        }
+
         function clearAll() {
           var prev = chatMessages.querySelector(".chat-history-summary");
           if (prev) prev.remove();
@@ -1700,6 +1719,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
             engine: replySession.structuredState?.engine,
           } : null;
           var replyMeta = {
+            replying: idx === activeReplyIndex,
             time: formatChatClock(replyIso),
             dateTime: replyIso,
             duration: chatReplyDuration(replyMsg),
@@ -2005,10 +2025,9 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var groupKey = activityGroupKey(items, messageKey, segmentFirstIndex);
         var expandKey = buildExpandKey("activity-menu", [groupKey]);
         var persisted = getPersistedExpandState(expandKey);
-        // Android 最新运行组默认向下展开；Web 不按网络或设备分类。
-        // 默认值每轮重新派生，绝不写进手动偏好；查详情/滚动会显式保留展开。
         var activityLive = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
-        var expanded = persisted ?? activityLive;
+        // Web 桌面端工具调用活动默认折叠成一行摘要，保持对话流整洁；仅在用户显式点击时展开详情。
+        var expanded = persisted === true;
         // 全段只有一个活跃条目：没回执的调用优先，其次最后一轮思考。
         // 摘要的 running 标记与时间线行的 loading 都读它，两处不会同时闪。
         var liveRow = activityLiveRow(items, _currentActivitySessionBusy && _currentLatestPendingCommandId
@@ -2349,7 +2368,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           }
           return '<div class="chat-message ' + role + ' empty-message"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
             timeHtml +
-            '<div class="chat-message-content"><span class="empty-message-hint">（空消息）</span></div>' +
+            '<div class="chat-message-content"><span class="empty-message-hint">（空消息）</span></div>' + renderChatReadReceipt(msg) +
           '</div>';
         }
 
@@ -2404,7 +2423,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
         return '<div class="chat-message ' + role + queuedClass + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           timeHtml +
-          '<div class="chat-message-content">' + resourceHtml + bodyHtml + queuedBadge + '</div>' +
+          '<div class="chat-message-content">' + resourceHtml + bodyHtml + queuedBadge + '</div>' + (isQueued ? "" : renderChatReadReceipt(msg)) +
         '</div>';
       }
 
@@ -3156,6 +3175,32 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           }
         }
 
+        // MCP Apps：这个工具调用带 ui:// 界面资源时给一个「打开插件面板」入口。
+        // 面板渲染在隔离沙箱里，工具调用回到同一条 MCP 连接，不经过模型。
+        var mcpAppHtml = "";
+        var mcpApp = block.input && block.input.mcp_app && typeof block.input.mcp_app.resource_uri === "string"
+          ? block.input.mcp_app : null;
+        if (mcpApp) {
+          var mcpServer = typeof block.input.mcp_server === "string" && block.input.mcp_server
+            ? block.input.mcp_server : String(toolName).split("__")[0];
+          registerMcpAppTool(toolId, {
+            sessionId: state.selectedId || "",
+            server: mcpServer,
+            uri: mcpApp.resource_uri,
+            toolName: toolName,
+            toolInput: block.input,
+            toolResult: toolResult ? toolResult.content : "",
+            toolError: !!(toolResult && toolResult.is_error),
+          });
+          mcpAppHtml = '<div class="tool-use-mcp-app">' +
+            '<button data-antd-control type="button" class="tool-use-mcp-app-open" data-mcp-app-tool="' + escapeHtml(toolId) + '" ' +
+            'onclick="event.stopPropagation(); if(window.__wandOpenMcpApp)window.__wandOpenMcpApp(this);">' +
+            iconSvg("image", { size: 13, strokeWidth: 1.8 }) +
+            '<span>打开插件面板</span></button>' +
+            '<span class="tool-use-mcp-app-uri">' + escapeHtml(String(mcpApp.resource_uri)) + '</span>' +
+          '</div>';
+        }
+
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
@@ -3185,6 +3230,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
             toggleHtml +
           '</button>' +
           renderToolPreview(block, toolResult) +
+          mcpAppHtml +
           '<div class="chat-tool-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
             (description ? '<div class="tool-use-meta"><span class="tool-use-meta-label">工具：</span>' + escapeHtml(toolName) + '</div>' : '') +
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +

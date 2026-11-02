@@ -6,6 +6,8 @@ import { wandOverlay } from "../overlay-controller";
 import * as React from "react";
 import { settingsController, settingsStore } from "../settings/controller";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
+import { TaskStatusGlyph } from "../workspaces/task-status-glyph";
+import { glowVisualStatus } from "../workspaces/sidebar-session-state";
 import { WAND_AGENT_LABEL, normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
 import { openSessionWithOwningTask } from "../workspaces/session-open";
@@ -22,6 +24,7 @@ import { DaemonUpdateNotice } from "./daemon-update-notice";
 import { WandButton, WandIconButton } from "../ui/button";
 import { WandDropdownMenu, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator, WandDropdownMenuTrigger } from "../ui/dropdown-menu";
 import { WandIcon, type WandIconName } from "../ui/icons";
+import { WandSearchField } from "../ui/search-field";
 import { classNames } from "../ui/class-names";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
 import {
@@ -305,6 +308,8 @@ function SessionEntry({
       ? "just-completed"
     : "none";
 
+  const visualStatus = glowVisualStatus(glow);
+
   return (
     <div
       className={classNames(
@@ -330,9 +335,14 @@ function SessionEntry({
             style={{ flex: 1, minWidth: 0, height: "auto", whiteSpace: "normal", padding: 8, display: "flex", flexDirection: "column", alignItems: "stretch", textAlign: "start" }}
             aria-current={entry.active ? "page" : undefined} onClick={activate}>
             <Flex align="center" gap="small" className="session-title-row">
+              {visualStatus ? (
+                <span className="session-status-mark" aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, height: 16, flexShrink: 0, marginInlineEnd: 2 }}>
+                  <TaskStatusGlyph status={visualStatus} size={15} />
+                </span>
+              ) : null}
               <span
-                className={classNames("session-leading-slot", glow !== "none" && `wand-logo-glow glow-${glow}`)}
-                data-glow={glow}
+                className={classNames("session-leading-slot", !visualStatus && glow !== "none" && `wand-logo-glow glow-${glow}`)}
+                data-glow={visualStatus ? "none" : glow}
                 style={{ display: "inline-flex", width: 20, height: 20, flexShrink: 0 }}
               >
                 <ProviderMark entry={entry}/>
@@ -460,21 +470,6 @@ function SidebarListErrorBadge() {
   );
 }
 
-export interface ShellSidebarPrimaryAction {
-  readonly action: UiAction;
-  readonly label: string;
-  readonly ariaLabel: string;
-}
-
-export function getShellSidebarPrimaryAction(): ShellSidebarPrimaryAction {
-  // 统一创建器创建的是会话，是否归入任务由用户在创建器中选择。
-  return {
-    action: { type: "workspace.new" },
-    label: "新建会话",
-    ariaLabel: "新建会话",
-  };
-}
-
 export function sidebarActionLeavesPage(action: UiAction): boolean {
   switch (action.type) {
     case "session.select":
@@ -506,31 +501,6 @@ export async function confirmSidebarLogout(onConfirm: () => void, onCancel?: () 
 
 
 
-function SidebarCompactToggle({
-  active,
-  onToggle,
-}: {
-  active: boolean;
-  onToggle(): void;
-}) {
-  const label = active ? "展开完整侧边栏" : "收起为窄栏";
-  return (
-    <WandIconButton
-      className={classNames("sidebar-compact-toggle", active && "active")}
-      kind="ghost"
-      size="small"
-      aria-label={label}
-      aria-pressed={active}
-      data-pressed={active || undefined}
-      title={label}
-      onClick={onToggle}
-    >
-      <WandIcon name="chevronLeft" className="sidebar-collapse-direction"/>
-      <span className="sidebar-compact-toggle-label">{active ? "展开" : "收起"}</span>
-    </WandIconButton>
-  );
-}
-
 export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const conversationState = useConversationUi();
@@ -546,15 +516,27 @@ export function ShellSidebar() {
   const presentation = useSidebarPresentation();
   // 报错清单默认收起：头部徽标只显示条数，点开才在下方就地展开。
   const [attentionOpen, setAttentionOpen] = React.useState(false);
-  // Secondary management surfaces borrow the list space without changing the user's pinned/collapsed preference.
+  // Secondary management surfaces borrow the list space without changing the user's pinned preference.
   const contextRail = !snapshot.layout.sidebarDrawer && (settings.open || conversationState.directory
     || taskBoard.open || knowledge.open || snapshot.layout.filePanelOpen);
-  const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
+  const [chatsPeekOpen, setChatsPeekOpen] = React.useState(false);
+  const peekTimerRef = React.useRef<number>(0);
+  const isListPeek = Boolean(contextRail && chatsPeekOpen);
+  const handleChatsHover = (hovering: boolean): void => {
+    if (!contextRail) { setChatsPeekOpen(false); return; }
+    window.clearTimeout(peekTimerRef.current);
+    if (hovering) {
+      peekTimerRef.current = window.setTimeout(() => setChatsPeekOpen(true), 120);
+    } else {
+      peekTimerRef.current = window.setTimeout(() => setChatsPeekOpen(false), 200);
+    }
+  };
+  React.useEffect(() => () => window.clearTimeout(peekTimerRef.current), []);
+  React.useEffect(() => { if (!contextRail) setChatsPeekOpen(false); }, [contextRail]);
   const sidebarClass = classNames(
     "sidebar sidebar-refined sidebar-unified",
     snapshot.layout.sessionsDrawerOpen && "open",
     !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored && "pinned",
-    narrow && !contextRail && "collapsed",
     contextRail && "context-rail",
 
   );
@@ -577,12 +559,14 @@ export function ShellSidebar() {
     if (overlay) void dispatch({ type: "layout.drawer.close" });
   };
   const createSession = (): void => {
+    setChatsPeekOpen(false);
     const workspace = model.groups.find(group => `id:${group.workspaceId}` === model.facets.workspace && !group.synthetic && !group.global);
     settingsController.close(); taskBoardController.close(); knowledgeController.close();
     newSessionController.open(workspace ? { workspaceId: workspace.workspaceId, initialCwd: workspace.workspaceCwd } : undefined);
     dismissSidebarSurfaces();
   };
   const openEntry = (entry: UnifiedSidebarEntry): void => {
+    setChatsPeekOpen(false);
     settingsController.close(); taskBoardController.close(); knowledgeController.close();
     dismissSidebarSurfaces();
     if (entry.conversation) conversationUi.select(entry.conversation.id);
@@ -599,11 +583,11 @@ export function ShellSidebar() {
     void dispatch(action);
   };
   // Native CLI histories retain their resume/delete commands, flattened beside managed sessions.
-  const historyEntries = model.facets.runtime === "all" && model.facets.taskStage === "all" && model.facets.workspace === "all" && model.facets.archive === "all" && !model.facets.activityOnly
+  const historyEntries = !model.worktree && model.facets.runtime === "all" && model.facets.taskStage === "all" && model.facets.workspace === "all" && model.facets.archive === "all" && !model.facets.activityOnly
     ? snapshot.sidebar.groups.filter(group => group.kind === "history").flatMap(group => group.entries)
       .filter(entry => !model.entries.some(candidate => candidate.session.id === entry.id)
         && sidebarSearchMatches(model.query, entry.title, entry.description, entry.cwd, entry.provider)) : [];
-  React.useEffect(() => { setMoreOpen(false); }, [visible, narrow, contextRail]);
+  React.useEffect(() => { setMoreOpen(false); }, [visible, contextRail]);
   React.useEffect(() => { if (!visible) setAttentionOpen(false); }, [visible]);
 
   return (
@@ -617,7 +601,7 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width={contextRail ? 76 : "min(356px, calc(100vw - 24px))"} collapsedWidth={76} collapsed={narrow && !contextRail} theme="light"
+        width={contextRail ? 76 : "min(356px, calc(100vw - 24px))"} theme="light"
         style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
         styles={{ body: { display: "flex", flexDirection: "row", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
@@ -626,9 +610,12 @@ export function ShellSidebar() {
         <Flex vertical align="center" className="sidebar-navigation-rail">
           <div className="sidebar-rail-scroll">
             <WandBrandMark className="sidebar-brand-mark" style={{ width: "var(--conversation-brand-size, 24px)", height: "var(--conversation-brand-size, 24px)" }} />
-            {!snapshot.layout.sidebarDrawer && <SidebarCompactToggle active={narrow} onToggle={() => { void dispatch({ type: "layout.drawer.collapse" }); }}/>}
+            <WandIconButton id="drawer-new-session-button" kind="primary" className="sidebar-new-session" aria-label="新建会话" title="新建会话" onClick={createSession}>
+              <WandIcon name="plus" size={20}/>
+            </WandIconButton>
             <ConversationNavigation activePage={settings.open ? null : knowledge.open ? "knowledge" : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : taskBoard.page === "calendar" ? "calendar" : "teams"
               : conversationState.directory ? "teams" : "chats"} teamAttention={teamAttention}
+              onChatsHover={handleChatsHover}
               onNavigate={(page) => {
                 setAttentionOpen(false);
                 settingsController.close();
@@ -681,28 +668,47 @@ export function ShellSidebar() {
             </WandDropdownMenuContent>
           </WandDropdownMenu>
         </Flex>
-        <Flex vertical className="sidebar-list-panel" hidden={contextRail || narrow} inert={contextRail || narrow}>
-          <Flex align="center" justify="space-between" className="sidebar-header" style={{ padding: "10px 12px", flexShrink: 0 }}>
-            <Typography.Text strong className="sidebar-title">会话</Typography.Text>
+        <Flex vertical className={classNames("sidebar-list-panel", isListPeek && "sidebar-list-panel-peek")}
+          hidden={contextRail && !isListPeek} inert={contextRail && !isListPeek}
+          onPointerEnter={() => {
+            if (isListPeek) {
+              window.clearTimeout(peekTimerRef.current);
+              setChatsPeekOpen(true);
+            }
+          }}
+          onPointerLeave={() => {
+            if (isListPeek) {
+              window.clearTimeout(peekTimerRef.current);
+              peekTimerRef.current = window.setTimeout(() => setChatsPeekOpen(false), 200);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (isListPeek && event.key === "Escape") {
+              setChatsPeekOpen(false);
+              event.stopPropagation();
+            }
+          }}>
+          <Flex align="center" gap={8} className="sidebar-header" style={{ padding: "10px 12px", flexShrink: 0 }}>
+            <WandSearchField className="conversation-search-input sidebar-list-search" label="搜索会话" value={model.query} onValueChange={query => conversationUi.filter("list-query", query)}/>
             {snapshot.layout.sidebarDrawer && <WandIconButton id="close-drawer-button" aria-label="关闭侧栏" onClick={() => void dispatch({ type: "layout.drawer.close" })}><SidebarToggleIcon open/></WandIconButton>}
           </Flex>
-          <UnifiedSidebarList model={model} titles={sessionTitles} enabled={visible && !contextRail && !narrow} selectedSessionId={snapshot.selected?.id ?? null}
+          <UnifiedSidebarList model={model} titles={sessionTitles} enabled={visible && (!contextRail || isListPeek)} selectedSessionId={snapshot.selected?.id ?? null}
             selectedConversationId={conversationState.active && !conversationState.directory ? conversationState.selectedId : null}
             onOpen={openEntry} onCreate={createSession} historyCount={historyEntries.length}
             historyRows={historyEntries.map(entry => <SessionEntry key={`${entry.source}:${entry.id}`} entry={entry} manageMode={false} dispatch={navigate}/>)}/>
-          {(snapshot.layout.sidebarDrawer || snapshot.capabilities.backToNative || snapshot.capabilities.switchServer) && <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
-            <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
+          {(snapshot.layout.sidebarDrawer || snapshot.capabilities.backToNative || snapshot.capabilities.switchServer) && <Flex align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
+            <Flex component="nav" wrap gap={4} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
               {snapshot.layout.sidebarDrawer && <WandIconButton id="file-panel-toggle-btn" title="查看文件" aria-label="文件"
                 aria-pressed={snapshot.layout.filePanelOpen} onClick={() => navigate({ type: "layout.files.toggle" })}>
                 <WandIcon name="explorer" size={16}/><span>文件</span>
               </WandIconButton>}
               {snapshot.capabilities.backToNative && <WandIconButton id="back-to-native-button" title="返回 App 原生界面" aria-label="返回 App"
                 onClick={() => navigate({ type: "native.back" })}>
-                <WandIcon name="back" size={16}/><span hidden={narrow}>返回App</span>
+                <WandIcon name="back" size={16}/><span>返回App</span>
               </WandIconButton>}
               {snapshot.capabilities.switchServer && <WandIconButton id="switch-server-button" title="切换服务器" aria-label="切换服务器"
                 onClick={() => navigate({ type: "native.switchServer" })}>
-                <WandIcon name="server" size={16}/><span hidden={narrow}>切换</span>
+                <WandIcon name="server" size={16}/><span>切换</span>
               </WandIconButton>}
             </Flex>
           </Flex>}

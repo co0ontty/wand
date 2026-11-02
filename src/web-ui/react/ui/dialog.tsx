@@ -56,6 +56,7 @@ export interface WandDialogSurfaceProps {
   showClose?: boolean;
   closeContent?: ReactNode;
   testId?: string;
+  popupOwner?: string;
   dismissable?: boolean;
   onOpenChange(open: boolean): void;
   /** Route Escape/back through the feature's existing dirty/saving guard. */
@@ -77,7 +78,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
   className = "wand-ui-dialog-content", overlayClassName = "wand-ui-dialog-overlay",
   titleClassName = "wand-ui-dialog-title", descriptionClassName = "wand-ui-dialog-description",
   headerClassName = "wand-ui-dialog-heading", closeLabel = "关闭", closeContent = <WandIcon name="close" size={18}/>,
-  testId, showClose = true, dismissable = true, onOpenChange, onEscape, dismissalPriority = "normal", focusTriggerAfterClose, onAfterClose }: WandDialogSurfaceProps) {
+  testId, popupOwner, showClose = true, dismissable = true, onOpenChange, onEscape, dismissalPriority = "normal", focusTriggerAfterClose, onAfterClose }: WandDialogSurfaceProps) {
   const portal = usePortalContainer();
   const descriptionId = React.useId();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -119,7 +120,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
         performance.now(), onOpenChange);
     }}
     afterOpenChange={shown => { if (shown) focus(); }}
-    modalRender={node => <div ref={contentRef} data-testid={testId} data-wand-dialog-surface="" data-slot="dialog-popup">{node}</div>}
+    modalRender={node => <div ref={contentRef} data-testid={testId} data-wand-popup-owner={popupOwner} data-wand-dialog-surface="" data-slot="dialog-popup">{node}</div>}
     title={<Flex className={headerClassName} align="flex-start" justify="space-between" gap="small">
       <Flex vertical style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
         <Typography.Text className={titleClassName} style={{ fontSize: "inherit", fontWeight: "inherit" }}>{title}</Typography.Text>

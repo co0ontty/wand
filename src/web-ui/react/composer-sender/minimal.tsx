@@ -24,8 +24,9 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
   React.useEffect(() => {
     if (phase === "failed" || phase === "unknown") { setRecovery(true); setEditing(true); }
     if (phase === "sent" && !pending) setRecovery(false);
+    if (pending) setEditing(true);
   }, [phase, pending]);
-  const expanded = editing || recovery || !!locked || !!forceExpanded || phase === "sending";
+  const expanded = editing || recovery || !!locked || !!forceExpanded || phase === "sending" || pending;
   const expandedNow = React.useRef(expanded); expandedNow.current = expanded;
   React.useEffect(() => {
     const element = input(), host = surface();
@@ -38,6 +39,7 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
     };
     const focus = (): void => { setEditing(true); };
     const edited = (): void => { setRecovery(false); setEditing(true); };
+    const pasted = (): void => { setEditing(true); };
     const dismiss = (reason: "outside" | "escape" | "back"): void => {
       const current = latest.current;
       if (borrowers.size || current.locked || ["sending", "failed", "unknown"].includes(current.phase)) return;
@@ -56,11 +58,14 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
     document.addEventListener("wand-composer-focus-borrow", borrow);
     element.addEventListener("focus", focus);
     element.addEventListener("input", edited);
+    element.addEventListener("paste", pasted);
     document.addEventListener("keydown", escape, true);
     window.addEventListener("popstate", back);
     return () => {
       document.removeEventListener("wand-composer-focus-borrow", borrow);
-      element.removeEventListener("focus", focus); element.removeEventListener("input", edited);
+      element.removeEventListener("focus", focus);
+      element.removeEventListener("input", edited);
+      element.removeEventListener("paste", pasted);
       document.removeEventListener("keydown", escape, true);
       window.removeEventListener("popstate", back);
     };

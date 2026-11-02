@@ -16,6 +16,8 @@ const CHAT_SURFACE_STYLES = String.raw`
     .wand-chat-message[data-chat-role="user"] > .wand-chat-message-body { width:auto; margin-inline-start:auto; }
     .wand-chat-message-header, .wand-chat-message-footer { font-size:var(--font-size-xs); color:var(--text-secondary); }
     .wand-chat-message-content { min-width:0; overflow-wrap:anywhere; }
+    .chat-message-read { display:block; color:var(--text-secondary); font-size:var(--font-size-xs); line-height:1.5; text-align:end; }
+    .wand-chat-message[data-chat-role="user"] .wand-chat-message-footer { text-align:end; }
     :where(.wand-chat-message[data-chat-role="user"]) > :where(.wand-chat-message-body) > .wand-chat-message-content,
     :where(.wand-chat-message[data-chat-surface="preview"]) > :where(.wand-chat-message-body) > .wand-chat-message-content { padding:8px 12px; background:var(--bg-secondary); border-radius:16px; }
     :where(.wand-chat-message[data-chat-surface="document"]) > :where(.wand-chat-message-body) > .wand-chat-message-content { padding:12px 16px; border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-surface); }
@@ -48,6 +50,7 @@ const CHAT_SURFACE_STYLES = String.raw`
     .chat-activity-meta { display:inline-flex; flex-wrap:wrap; align-items:baseline; gap:6px; }
     .chat-activity-command-time { color:var(--text-secondary); font-variant-numeric:tabular-nums; }
     .chat-activity-error { color:color-mix(in srgb,var(--ant-color-error-text-active,var(--danger)) 80%,var(--text-primary)); }
+    .chat-activity[data-expanded="false"] .chat-activity-menu { display:none; }
     .chat-activity-menu { display:block; opacity:1; pointer-events:auto; }
     .chat-activity-menu-inner { overflow:visible; }
     /* Android：摘要下方按内容长高，最多占聊天视口的 1/3（120–240px），内部滚动。 */
@@ -144,7 +147,27 @@ const CHAT_SURFACE_STYLES = String.raw`
     /* 收起态用弱底色交代「这里折起来了」，展开态回到透明标题行（对齐 Android AssistantReplyHeader）。 */
     .chat-message.assistant-reply-collapsed .assistant-reply-disclosure.ant-btn { background:color-mix(in srgb,var(--bg-secondary) 58%,transparent); }
     .assistant-author { display:inline-flex; align-items:center; gap:8px; flex:0 1 auto; min-width:0; }
-    .assistant-author-name { font-size:var(--font-size-xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); max-width:16em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .assistant-author-avatar { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; flex:none; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border-subtle)); border-radius:var(--radius-lg); background:var(--bg-surface); }
+    .assistant-author-name { font-size:var(--font-size-sm); font-weight:var(--font-weight-semibold); color:var(--text-primary); max-width:16em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .assistant-reply-disclosure.ant-btn { padding-block:8px; }
+    .assistant-reply-status { display:inline-flex; align-items:center; gap:7px; flex:none; color:var(--accent); font-size:var(--font-size-xs); font-weight:var(--font-weight-semibold); }
+    .assistant-reply-dots { display:inline-flex; align-items:center; gap:3px; height:16px; padding-inline:2px; }
+    .assistant-reply-dots > span { width:3px; height:3px; border-radius:50%; background:currentColor; animation:assistant-reply-wave 1.4s ease-in-out infinite; }
+    .assistant-reply-dots > span:nth-child(2) { animation-delay:.2s; }
+    .assistant-reply-dots > span:nth-child(3) { animation-delay:.4s; }
+    @keyframes assistant-reply-wave { 0%,100% { transform:scale(.8); opacity:.35; } 50% { transform:scale(1.3); opacity:1; } }
+    @media (prefers-reduced-motion:reduce) { .assistant-reply-dots > span { animation:none; } }
+    @media (max-width:600px) {
+      .assistant-reply-disclosure.ant-btn { display:grid; grid-template-columns:minmax(0,1fr) auto auto; column-gap:8px; row-gap:4px; }
+      .assistant-author { grid-column:1; grid-row:1; }
+      .assistant-reply-status { grid-column:1; grid-row:2; }
+      .assistant-reply-action { grid-column:2; grid-row:1; }
+      .assistant-reply-disclosure > .chat-disclosure-chevron { grid-column:3; grid-row:1; }
+      .assistant-reply-disclosure .chat-message-time { grid-column:2 / 4; grid-row:2; justify-self:end; padding:0; }
+      .assistant-reply-disclosure .assistant-author-preview { grid-column:1 / -1; grid-row:3; }
+      .assistant-author-space { display:none; }
+      .assistant-reply-disclosure .chat-message-duration { display:none; }
+    }
     .assistant-author-preview { flex:1; min-width:0; font-size:var(--font-size-2xs); font-weight:400; color:var(--text-secondary); text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .assistant-author-space { flex:1; min-width:0; }
     .assistant-reply-action { flex:none; font-size:var(--font-size-2xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); }
@@ -208,4 +231,14 @@ const CHAT_SURFACE_STYLES = String.raw`
     .chat-call-inline .chat-call-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
     .chat-call-inline .chat-disclosure-chevron { margin-inline-start:auto; }
     .chat-call-inline .chat-disclosure-body { flex-basis:100%; }
+    /* MCP Apps：带 ui:// 资源的工具调用在卡片里给一个入口，打开隔离沙箱面板。 */
+    .tool-use-mcp-app { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px 0; }
+    .tool-use-mcp-app-open { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:0 10px; border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:transparent; color:var(--text-primary); font:inherit; font-size:var(--font-size-xs); cursor:pointer; transition:background-color var(--motion-fast) var(--ease-in-out-smooth), border-color var(--motion-fast) var(--ease-in-out-smooth); }
+    .tool-use-mcp-app-open:hover { background:color-mix(in srgb,var(--accent) 6%,transparent); border-color:color-mix(in srgb,var(--accent) 28%,var(--border-subtle)); }
+    .tool-use-mcp-app-open:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .tool-use-mcp-app-uri { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:var(--font-size-2xs); color:var(--text-muted); }
+    .mcp-app-panel .mcp-app-panel-status { padding:20px 4px; }
+    .mcp-app-panel-frame { display:block; width:100%; min-height:240px; border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:#fff; }
+    .mcp-app-panel-error { display:block; margin-top:8px; }
+    .mcp-app-panel-footer { margin-top:10px; gap:12px; flex-wrap:wrap; }
   `;

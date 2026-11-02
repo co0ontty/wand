@@ -12,9 +12,9 @@ import { ConversationGroupAvatar } from "./avatar";
 import { WandButton, WandIconButton } from "../ui/button";
 import { WandIcon } from "../ui/icons";
 import { WandSearchField } from "../ui/search-field";
-import { ConversationListFilterControls, ConversationListFilterSummary } from "./list-filter-controls";
-import { DEFAULT_CONVERSATION_FILTERS, conversationFilterCount, conversationWorkspaceOptions, hasConversationFacets,
-  matchingConversationTasks, personSessionTaskStage, conversationTaskStageLabel, type ConversationListFilters } from "./list-filters";
+import { ConversationListFilterSummary } from "./list-filter-controls";
+import { DEFAULT_CONVERSATION_FILTERS, conversationFilterCount, conversationWorkspaceOptions, conversationEmployeeOptions, hasConversationFacets,
+  matchingConversationTasks, type ConversationListFilters } from "./list-filters";
 import { conversationUi, useConversationUi, type ConversationListFilter } from "./state";
 import { conversationTaskStateLabel } from "./presentation";
 import { conversationsRepository, notifyConversationChanges, useConversations } from "./repository";
@@ -24,8 +24,7 @@ import { useUserProfile } from "../user-profile-repository";
 import { taskGroupsStore, useTaskGroupsAfterIdle } from "../workspaces/task-groups-store";
 import { SidebarSessionMenu } from "../workspaces/sidebar-session-menu";
 import { SidebarSurfacesContext } from "../workspaces/sidebar-popup-owner";
-import { archiveSidebarSession, deleteSidebarSessions } from "../workspaces/sidebar-session-actions";
-import { findSessionTask } from "../workspaces/session-task-lookup";
+import { archiveSidebarSession } from "../workspaces/sidebar-session-actions";
 import { SidebarSessionPreview } from "../workspaces/sidebar-session-preview";
 import { SidebarDisclosure } from "../workspaces/sidebar-disclosure";
 import { SidebarSessionArea, SidebarSessionToggle } from "../workspaces/sidebar-session-area";
@@ -47,10 +46,11 @@ const GroupEditor = deferredComponent(
 );
 
 /** Global destinations stay in the left rail, independent of the current list. */
-export function ConversationNavigation({ activePage, teamAttention, onNavigate }: {
+export function ConversationNavigation({ activePage, teamAttention, onNavigate, onChatsHover }: {
   activePage: ConversationNavigationPage | null;
   teamAttention: number;
   onNavigate(page: ConversationNavigationPage): void;
+  onChatsHover?(hovering: boolean): void;
 }): React.ReactElement {
   const entries = [
     { value: "chats", label: "会话", icon: "chat" },
@@ -64,7 +64,9 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     {entries.filter(entry => GROUP_CHAT_VISIBLE || entry.value !== "teams").map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
       data-stretch-value={entry.value} aria-label={entry.label} title={entry.label}
       kind={selectedPage === entry.value ? "soft" : "ghost"} aria-current={selectedPage === entry.value ? "page" : undefined}
-      aria-pressed={selectedPage === entry.value} onClick={() => onNavigate(entry.value)}>
+      aria-pressed={selectedPage === entry.value} onClick={() => onNavigate(entry.value)}
+      onPointerEnter={entry.value === "chats" ? () => onChatsHover?.(true) : undefined}
+      onPointerLeave={entry.value === "chats" ? () => onChatsHover?.(false) : undefined}>
       <span className="sidebar-nav-icon" aria-hidden="true">{entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={18}/></Badge>
         : <WandIcon name={entry.icon} size={18}/>}</span>
       <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.label}</span>
@@ -167,9 +169,10 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
   const filter = ui.listFilter;
-  const facets: ConversationListFilters = { taskStage: ui.listTaskStage ?? "all", workspace: ui.listWorkspace ?? "all", archive: filter, activityOnly: ui.activityOnly };
+  const facets: ConversationListFilters = { taskStage: ui.listTaskStage ?? "all", workspace: ui.listWorkspace ?? "all", employee: ui.listEmployee ?? "all", archive: filter, activityOnly: ui.activityOnly };
   const filtered = conversationFilterCount(facets) > 0;
   const workspaceOptions = React.useMemo(() => conversationWorkspaceOptions(sessionGroups), [sessionGroups]);
+  const employeeOptions = React.useMemo(() => conversationEmployeeOptions([...sessionIndex.values()].flat()), [sessionIndex]);
   const clearFilters = (): void => conversationUi.listFacets(DEFAULT_CONVERSATION_FILTERS);
   const [actionError, setActionError] = React.useState("");
   const searchInput = React.useRef<HTMLInputElement>(null);
@@ -217,25 +220,14 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
       await conversationsRepository.updateListState(item.id, patch);
     } catch (cause) { setActionError(cause instanceof Error ? cause.message : "操作失败，请重试。"); }
   };
-  const remove = async (item: ConversationSummary): Promise<void> => {
-    const answer = await wandOverlay.dialog({ title: `删除对话「${item.title}」？`,
-      description: item.external ? "仅删除 Wand 中的群镜像、本地消息和关联执行；不会退出或解散钉钉群，也不会删除其他群共用的机器人。此操作无法撤销。" : item.kind === "group" ? `将删除这个群聊、${item.tasks.length} 个关联任务，以及它们的消息、执行记录和资源文件。此操作无法撤销。` : "将永久删除此私聊的消息记录和会话文件。员工资料及已经派出的群聊任务保留。此操作无法撤销。", actions: [
-        { label: "取消", value: false, autoFocus: true }, { label: "删除对话", value: true, kind: "danger" },
-      ] });
-    if (answer.dismissed !== true && answer.action) {
-      try { await conversationsRepository.remove(item.id); if (conversationUi.getSnapshot().selectedId === item.id) conversationUi.select(""); }
-      catch (cause) { setActionError(cause instanceof Error ? cause.message : "删除失败，请重试。"); }
-    }
-  };
   return <div className="conversation-sidebar-list" onPointerEnter={() => setEngaged(true)} onPointerLeave={() => setEngaged(false)}
     onFocusCapture={() => setEngaged(true)} onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setEngaged(false); }}>
     {!compact ? <div className="conversation-list-tools"><div className="conversation-search-host">
       <WandSearchField inputRef={searchInput} className="conversation-search-input" label="搜索对话或任务"
         value={ui.filters["list-query"] ?? ""} onValueChange={value => conversationUi.filter("list-query", value)}/>
-      <ConversationListFilterControls value={facets} workspaces={workspaceOptions} enabled={enabled} onChange={conversationUi.listFacets}/>
     </div>
     <Flex vertical align="stretch" gap={4} className="conversation-list-section">
-      <ConversationListFilterSummary value={facets} workspaces={workspaceOptions} onClear={clearFilters}/>
+      <ConversationListFilterSummary value={facets} workspaces={workspaceOptions} employees={employeeOptions} onClear={clearFilters}/>
       <Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel} role="status">{loaded && !projectionPending ? `${matches} 个对话 · ${sessionCount} 条关联会话${query || filtered ? "匹配" : ""}` : countLabel}</Typography.Text></Flex></div> : null}
     {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
     {groupsError ? <Typography.Text type="danger" role="status">任务与工作区信息读取失败：{groupsError}<WandButton size="small" onClick={() => void taskGroupsStore.reload()}>重试筛选数据</WandButton></Typography.Text> : null}
@@ -245,7 +237,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
       enabled={enabled} filter={filter} writable={!provisionalIds.has(item.id)} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
       facets={facets} filtered={filtered} sessionEntries={entriesFor(item, query)}
       sessionTitles={sessionTitles} selectedSessionId={selectedSessionId} onOpenSession={onOpenSession}
-      onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
+      onUpdate={patch => update(item, patch)}/>) }
     {!compact && unbound.length ? <ConversationOtherSessions entries={unbound} query={query} enabled={enabled}
       selectedSessionId={selectedSessionId} sessionTitles={sessionTitles} onOpenSession={onOpenSession}/> : null}
     {loaded && !projectionPending && !groupsError && !error && !rows.length && !unbound.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
@@ -257,10 +249,10 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   </div>;
 }
 
-function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, writable = true, selected, onSelect, onUpdate, onRemove,
+function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, writable = true, selected, onSelect, onUpdate,
   sessionEntries, sessionTitles, selectedSessionId, onOpenSession, facets, filtered }: {
   item: ConversationSummary; employee: React.ComponentProps<typeof EmployeeAvatar>["employee"] | null; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; writable?: boolean; selected: boolean; onSelect(): void;
-  onUpdate(patch: { pinned?: boolean; dissolved?: boolean }): Promise<void>; onRemove(): Promise<void>;
+  onUpdate(patch: { pinned?: boolean; dissolved?: boolean }): Promise<void>;
   sessionEntries: readonly PersonSessionEntry[];
   facets: ConversationListFilters;
   filtered: boolean;
@@ -330,9 +322,8 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
       ...(writable ? [{ key: "pin", disabled: busy, icon: <WandIcon name="pin"/>, label: item.pinnedAt ? "取消置顶" : "置顶" }] : []),
       ...(item.kind === "dm" ? [{ key: "sessions", disabled: busy, icon: <WandIcon name="chat"/>, label: showSessions ? "收起会话" : `查看 ${sessions.length} 个会话` }] : []),
       ...(!item.dissolvedAt && item.tasks.length > 0 ? [{ key: "tasks", disabled: busy, icon: <WandIcon name="task"/>, label: expanded ? "收起任务" : `查看 ${item.tasks.length} 个任务` }] : []),
-      ...(writable ? [{ key: "danger-divider", type: "divider" as const },
-        ...(item.kind === "group" && !item.external ? [{ key: "dissolve", disabled: busy, icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
-        { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: item.external ? "删除本地群镜像…" : item.kind === "group" ? "删除群聊…" : "删除对话…" }] : []),
+      ...(writable && item.kind === "group" && !item.external ? [{ key: "dissolve", disabled: busy,
+        icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
     ], onClick: ({ key }) => {
       if (busy) return;
       setMenu(false);
@@ -341,7 +332,6 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
       else if (key === "tasks") { setSessionsExpanded(false); setExpanded(!expanded); }
       else if (key === "sessions") toggleSessions();
       else if (key === "pin") void action(() => onUpdate({ pinned: !item.pinnedAt }));
-      else if (key === "delete") void action(onRemove);
       else if (key === "dissolve") void action(async () => {
         if (item.dissolvedAt) { await onUpdate({ dissolved: false }); return; }
         const answer = await wandOverlay.dialog({ title: `解散群聊「${item.title}」？`, description: "群聊将归档并保留在会话列表。历史记录和关联任务保留，恢复后可继续聊天。", actions: [
@@ -368,11 +358,10 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
               disabled={!enabled || busy} intoNewTask={session.workspaceTaskId ? undefined : entry.group}
               onOpen={() => onOpenSession?.(session.id)}
               onArchive={async archived => { await archiveSidebarSession(session.id, archived); await refreshSessionLists(); }}
-              onDelete={async () => { await deleteSidebarSessions([session.id], findSessionTask(entry.group, session) ?? null); await refreshSessionLists(); }}
               row={<div className="conversation-person-session"><ImSidebarItem id={session.id}
                 title={label} titleGenerating={session.titleGenerating}
                 avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)}
-                summary={[conversationTaskStageLabel(personSessionTaskStage(entry)), sidebarWorkspaceLabel(entry.group), sidebarSessionState(session).label,
+                summary={[sidebarSessionState(session).label, sidebarWorkspaceLabel(entry.group),
                   agentToolDisplayName(workspaceSessionProvider(session), session.engine)].filter(Boolean).join(" · ")}
                 active={session.id === selectedSessionId} onClick={() => onOpenSession?.(session.id)}/></div>}/>;
           })}
@@ -412,11 +401,10 @@ function ConversationOtherSessions({ entries, query, enabled, selectedSessionId,
           disabled={!enabled} intoNewTask={session.workspaceTaskId ? undefined : entry.group}
           onOpen={() => onOpenSession?.(session.id)}
           onArchive={async archived => { await archiveSidebarSession(session.id, archived); await refresh(); }}
-          onDelete={async () => { await deleteSidebarSessions([session.id], findSessionTask(entry.group, session) ?? null); await refresh(); }}
           row={<div className="conversation-person-session"><ImSidebarItem id={session.id}
             title={label} titleGenerating={session.titleGenerating}
             avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)}
-            summary={[conversationTaskStageLabel(personSessionTaskStage(entry)), sidebarWorkspaceLabel(entry.group), sidebarSessionState(session).label,
+            summary={[sidebarSessionState(session).label, sidebarWorkspaceLabel(entry.group),
               agentToolDisplayName(workspaceSessionProvider(session), session.engine)].filter(Boolean).join(" · ")}
             active={session.id === selectedSessionId} onClick={() => onOpenSession?.(session.id)}/></div>}/>;
       })}

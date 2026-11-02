@@ -54,13 +54,13 @@ export class SessionRepository {
   listSessionsByWorkspaceTask(taskId: string): SessionSnapshot[] {
     const rows = this.db
       .prepare(
-        `${sessionRowQuery("SELECT")}
+        `${sessionRowQuery("SELECT").replace(/\bmessages,/, "NULL AS messages,")}
          FROM command_sessions
          WHERE workspace_task_id = ?
          ORDER BY started_at DESC`
       )
       .all(taskId) as unknown as SessionRow[];
-    return rows.map((row) => this.mapSessionRow(row));
+    return rows.map((row) => this.mapSessionRow(row, true));
   }
 
   /**
@@ -78,7 +78,7 @@ export class SessionRepository {
          ORDER BY started_at DESC`
       )
       .all(taskId) as unknown as SessionRow[];
-    return rows.map((row) => this.mapSessionRow(row));
+    return rows.map((row) => this.mapSessionRow(row, false));
   }
 
   setSessionWorkspaceTaskId(sessionId: string, taskId: string | null): void {
@@ -110,9 +110,10 @@ export class SessionRepository {
 
   saveSession(snapshot: SessionSnapshot): void {
     const isNew = !this.s.getSessionWorkspace(snapshot.id);
-    // Existing sessions stay a single atomic statement: streaming checkpoints must not
-    // take the write lock. Only a brand-new row also links its task membership, and
-    // that link is one transaction with the insert so a crash cannot leave half of it.
+    const writeMessages = snapshot.messages !== undefined
+      ? this.s.prepareSessionMessageWrite(snapshot.id, snapshot.messages, snapshot.sessionKind === "structured") : () => {};
+    // Prepare message formatting before the write lock. Metadata, message rows,
+    // and new task membership commit together so recovery never sees half a save.
     const upsert = (): void => {
       this.db
         .prepare(
@@ -120,12 +121,13 @@ export class SessionRepository {
            ${sessionPersistFields()}
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
-             ${sessionPersistAssignments()}`
+             ${sessionPersistAssignments().replace("messages = excluded.messages,", "")}`
         )
-        .run(...sessionPersistValues(snapshot));
+        .run(...sessionPersistValues({ ...snapshot, messages: undefined }));
+      writeMessages();
     };
     if (!isNew) {
-      upsert();
+      this.s.transaction(upsert);
       return;
     }
     this.s.transaction(() => {
@@ -175,36 +177,48 @@ export class SessionRepository {
     structuredState?: StructuredSessionState | null,
     output?: string,
     ptyOutputSeq?: number,
+    immutablePrefix = false,
   ): void {
-    const assignments = ["messages = ?"];
-    const values: Array<string | number | null> = [JSON.stringify(messages)];
-    if (structuredState !== undefined) {
-      assignments.push("structured_state = ?");
-      values.push(structuredState ? JSON.stringify(structuredState) : null);
-    }
-    if (output !== undefined) {
-      assignments.push("output = ?");
-      values.push(output);
-    }
-    if (ptyOutputSeq !== undefined) {
-      assignments.push("pty_output_seq = ?");
-      values.push(ptyOutputSeq);
-    }
-    this.db
-      .prepare(`UPDATE command_sessions SET ${assignments.join(", ")} WHERE id = ?`)
-      .run(...values, id);
+    if (!this.s.getSessionWorkspace(id)) return;
+    const writeMessages = this.s.prepareSessionMessageWrite(id, messages, immutablePrefix);
+    this.s.transaction(() => {
+      writeMessages();
+      const assignments: string[] = [];
+      const values: Array<string | number | null> = [];
+      if (structuredState !== undefined) {
+        assignments.push("structured_state = ?");
+        values.push(structuredState ? JSON.stringify(structuredState) : null);
+      }
+      if (output !== undefined) {
+        assignments.push("output = ?");
+        values.push(output);
+      }
+      if (ptyOutputSeq !== undefined) {
+        assignments.push("pty_output_seq = ?");
+        values.push(ptyOutputSeq);
+      }
+      if (assignments.length) this.db
+        .prepare(`UPDATE command_sessions SET ${assignments.join(", ")} WHERE id = ?`)
+        .run(...values, id);
+    });
+  }
+
+  getSessionDisplaySnapshot(id: string): SessionSnapshot | null {
+    const fields = sessionSelectFields(false).replace(/\bmessages,/, "NULL AS messages,");
+    const row = this.db.prepare(`SELECT ${fields} FROM command_sessions WHERE id = ?`).get(id) as SessionRow | undefined;
+    return row ? this.mapSessionRow(row, false) : null;
   }
 
   getSession(id: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `${sessionRowQuery("SELECT")}
+        `${sessionRowQuery("SELECT").replace(/\bmessages,/, "NULL AS messages,")}
          FROM command_sessions
          WHERE id = ?`
       )
       .get(id) as SessionRow | undefined;
 
-    return row ? this.mapSessionRow(row) : null;
+    return row ? this.mapSessionRow(row, true) : null;
   }
 
   /** Full sessions (messages and output) for many ids, chunked; missing ids are skipped. */
@@ -212,9 +226,9 @@ export class SessionRepository {
     const byId = new Map<string, SessionSnapshot>();
     for (let offset = 0; offset < ids.length; offset += 500) {
       const chunk = ids.slice(offset, offset + 500);
-      const rows = this.db.prepare(`${sessionRowQuery("SELECT")}
+      const rows = this.db.prepare(`${sessionRowQuery("SELECT").replace(/\bmessages,/, "NULL AS messages,")}
         FROM command_sessions WHERE id IN (${chunk.map(() => "?").join(", ")})`).all(...chunk) as unknown as SessionRow[];
-      for (const row of rows) byId.set(row.id, this.mapSessionRow(row));
+      for (const row of rows) byId.set(row.id, this.mapSessionRow(row, true));
     }
     return ids.flatMap((id) => {
       const session = byId.get(id);
@@ -230,7 +244,7 @@ export class SessionRepository {
       const chunk = ids.slice(offset, offset + 500);
       const rows = this.db.prepare(`SELECT ${sessionSelectFields(true)} FROM command_sessions
         WHERE id IN (${chunk.map(() => "?").join(", ")})`).all(...chunk) as unknown as SessionRow[];
-      for (const row of rows) byId.set(row.id, this.mapSessionRow(row));
+      for (const row of rows) byId.set(row.id, this.mapSessionRow(row, false));
     }
     return ids.flatMap((id) => {
       const session = byId.get(id);
@@ -247,13 +261,13 @@ export class SessionRepository {
       )
       .get(id) as SessionRow | undefined;
 
-    return row ? this.mapSessionRow(row) : null;
+    return row ? this.mapSessionRow(row, false) : null;
   }
 
   getLatestSessionByClaudeSessionId(claudeSessionId: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `${sessionRowQuery("SELECT")}
+        `${sessionRowQuery("SELECT").replace(/\bmessages,/, "NULL AS messages,")}
          FROM command_sessions
          WHERE claude_session_id = ?
          ORDER BY started_at DESC
@@ -261,19 +275,19 @@ export class SessionRepository {
       )
       .get(claudeSessionId) as SessionRow | undefined;
 
-    return row ? this.mapSessionRow(row) : null;
+    return row ? this.mapSessionRow(row, true) : null;
   }
 
   loadSessions(): SessionSnapshot[] {
     const rows = this.db
       .prepare(
-        `${sessionRowQuery("SELECT")}
+        `${sessionRowQuery("SELECT").replace(/\bmessages,/, "NULL AS messages,")}
          FROM command_sessions
          ORDER BY started_at DESC`
       )
       .all() as unknown as SessionRow[];
 
-    return rows.map((row) => this.mapSessionRow(row));
+    return rows.map((row) => this.mapSessionRow(row, true));
   }
 
   /** List durable metadata without reading or parsing output/messages payloads. */
@@ -281,11 +295,13 @@ export class SessionRepository {
     const rows = this.db.prepare(
       `SELECT ${sessionSelectFields(true)} FROM command_sessions ORDER BY started_at DESC`
     ).all() as unknown as SessionRow[];
-    return rows.map((row) => this.mapSessionRow(row));
+    return rows.map((row) => this.mapSessionRow(row, false));
   }
 
-  mapSessionRow(row: SessionRow): SessionSnapshot {
-    return mapSessionCore(row);
+  mapSessionRow(row: SessionRow, hydrateMessages = true): SessionSnapshot {
+    const snapshot = mapSessionCore({ ...row, messages: null });
+    if (hydrateMessages) snapshot.messages = this.s.loadSessionMessageRows(row.id);
+    return snapshot;
   }
 
   /** Metadata-only indexed scan. Running or ambiguous records never count toward the history cap. */

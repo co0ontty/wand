@@ -217,6 +217,11 @@ run_wand() {
   "$NODE_FOR_WAND" "$WAND_BIN" "$@"
 }
 
+verify_storage_compatibility() {
+  "$NODE_BIN" "$REPO_ROOT/scripts/check-storage-compatibility.js" "$1" "$CONFIG_PATH" \
+    || die "数据库兼容性检查失败，未停止或替换当前服务"
+}
+
 latest_tag_version() {
   local tag
   tag="$(git tag --sort=-v:refname --list 'v*' | head -1 | sed 's/^v//' || true)"
@@ -411,6 +416,8 @@ ensure_service_installed_and_running() {
   [[ -x "$WAND_BIN" || -f "$WAND_BIN" ]] || die "找不到 wand: $WAND_BIN"
 
   # Every restart route (including --restart and --skip-install) reaches here.
+  # Reject an incompatible installed build before touching Server or daemon owners.
+  verify_storage_compatibility "$WAND_PREFIX/lib/node_modules/@co0ontty/wand"
   # Only an explicit flag permits stopping the persistent daemon owners.
   restart_requested_daemons
   if service_installed; then
@@ -830,6 +837,7 @@ else
 fi
 
 if [[ "$DO_INSTALL" == "1" ]]; then
+  verify_storage_compatibility "$REPO_ROOT"
   PACK_DIR="$(mktemp -d)"
   msg "npm pack -> install -g --prefix $WAND_PREFIX"
   repair_global_package_permissions
@@ -865,6 +873,8 @@ if [[ "$DO_INSTALL" == "1" ]]; then
 fi
 
 [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]] || die "安装后仍找不到 wand: $WAND_BIN"
+# --skip-install must check the installed build before init or config:set can open the database.
+[[ "$DO_INSTALL" == "1" ]] || verify_storage_compatibility "$WAND_PREFIX/lib/node_modules/@co0ontty/wand"
 
 if [[ ! -f "$CONFIG_PATH" ]]; then
   msg "config 不存在，初始化: $CONFIG_PATH"
