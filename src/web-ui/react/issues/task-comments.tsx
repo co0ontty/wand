@@ -10,10 +10,10 @@ import { usePortalContainer } from "../ui/portal-context";
 import { createPortal } from "react-dom";
 import { taskBoardRepository } from "./task-board-repository";
 import { TaskCommentEditor, type TaskCommentEditorHandle } from "./task-comment-editor";
-import { TaskExecutionCard } from "./task-execution-card";
+import { TaskCommentBubble } from "./task-comment-bubble";
 import type { WandTaskAgent } from "../../../task-types";
 import { installChatComposerStyles } from "../chat-composer-styles";
-import { acceptCommentDraft, commentDeliveryUncertain, commentDraft, commentMentionHeld, commentMentionQuery, commentReferenceQuery, commentRequestIdentity, commentRequestRejected, editCommentDraft, insertCommentMention, insertCommentReference, parseTaskReferenceIds, settleCommentRequest, type CommentDraft } from "./task-comment-composer";
+import { acceptCommentDraft, commentDeliveryUncertain, commentDraft, commentMentionHeld, commentMentionQuery, commentReferenceQuery, commentRequestIdentity, commentRequestRejected, editCommentDraft, insertCommentMention, insertCommentReference, parseTaskReferenceIds, resolveCommentMention, settleCommentRequest, type CommentDraft } from "./task-comment-composer";
 
 type MentionEmployee = { id: string; name: string; archivedAt?: string | null; agents?: WandTaskAgent[] };
 /** 可被 `#TASK-133` 引用的子任务；编号是引用句柄，标题与状态只用于展示。 */
@@ -73,7 +73,8 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
   React.useEffect(() => { taskGeneration.current += 1; olderRequest.current?.abort(); olderRequest.current = null; for (const request of resultRequests.current.values()) request.controller.abort(); resultRequests.current.clear(); setLoadingOlder(false); setSourceComments({}); }, [taskId]);
   const edit = (patch: Partial<CommentDraft>): void => { setDraft(editCommentDraft(taskId, patch)); setMessage(""); setOutcome("idle"); };
   const active = employees.filter(employee => !employee.archivedAt);
-  const bound = active.find(employee => employee.id === draft.employeeId);
+  // 派发目标直接由正文里的 @名字 决定：只要 @ 了在职员工就视为派发，不再要求必须从下拉重新选过。
+  const bound = resolveCommentMention(draft.body, active) ?? active.find(employee => employee.id === draft.employeeId);
   const mention = commentMentionQuery(draft.body, caret);
   const mentionKey = mention ? `${mention.start}:${mention.query}` : "";
   const matches = mention && dismissed !== mentionKey
@@ -284,7 +285,7 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
     let identity: Awaited<ReturnType<typeof commentRequestIdentity>> | undefined;
     try {
       identity = await commentRequestIdentity(taskId, submitted, submitted.employeeId ? dispatchPurpose : "execution");
-      const response = await taskBoardRepository.postComment(taskId, { requestId: identity.requestId, body: submitted.body.trim(),
+      const response = await taskBoardRepository.postComment(taskId, { requestId: identity.requestId, body: submitted.body.trim(), submissionSource: "manual",
         employeeId: submitted.employeeId || null, ...(submitted.employeeId && submitted.agent ? { agent: submitted.agent } : {}), sourceCommentId: submitted.sourceCommentId, ...(submitted.employeeId ? { purpose: identity.purpose } : {}) });
       settleCommentRequest(identity, response.comment);
       if (mounted.current) setStreamExpanded(current => ({ ...current, [response.comment.id]: true }));
@@ -332,15 +333,13 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
       <Flex vertical gap="small" className="task-board-detail-content">
       {failed ? <Alert type="warning" title="评论暂时加载失败" action={<WandButton kind="ghost" size="small" onClick={retry}>重试</WandButton>}/> : null}
       {!ordinaryComments.length && !failed ? <Typography.Text type="secondary" role="status">{loading ? "正在加载评论…" : "还没有评论。在正文里 @员工 并提交即可派发；不 @ 只是普通评论。"}</Typography.Text> : null}
-      {ordinaryComments.map(comment => comment.dispatch ? <div key={comment.id} ref={node => { if (node) rowRefs.current.set(`comment-${comment.id}`, node); }}>
-        {comment.dispatch?.executionTaskId && childTasks.find(child => child.id === comment.dispatch?.executionTaskId) ? <WandButton size="small" kind="ghost" onClick={() => onOpenTask?.(comment.dispatch!.executionTaskId!)}>{childTasks.find(child => child.id === comment.dispatch?.executionTaskId)!.identifier} · 查看子任务</WandButton> : null}
-        <TaskExecutionCard comment={comment} result={resultPages[comment.id]?.taskId === taskId ? resultPages[comment.id] : undefined}
-          onOpenSession={onOpenSession} onLoadResult={loadResult} onOpenTask={openReferencedTask}/>
-        <WandButton size="small" kind="ghost" onClick={() => replyTo(comment.id, true)}>继续此子任务 / 处理阻塞</WandButton>
-      </div> : <TaskCommentStreamRow ref={(node: HTMLDivElement | null) => { if (node) rowRefs.current.set(`comment-${comment.id}`, node); }} key={comment.id} comment={comment}
-        sourceComment={comment.sourceCommentId ? commentById.get(comment.sourceCommentId) ?? sourceComments[comment.sourceCommentId]?.comment ?? undefined : undefined}
+      {ordinaryComments.map(comment => <TaskCommentBubble key={comment.id} ref={node => { if (node) rowRefs.current.set(`comment-${comment.id}`, node); else rowRefs.current.delete(`comment-${comment.id}`); }}
+        comment={comment} sourceComment={comment.sourceCommentId ? commentById.get(comment.sourceCommentId) ?? sourceComments[comment.sourceCommentId]?.comment ?? undefined : undefined}
         expanded={streamExpanded[comment.id]} onExpanded={value => setStreamExpanded(current => ({ ...current, [comment.id]: value }))}
-        onOpenTask={openReferencedTask} onReply={replyTo}/>)}
+        onOpenTask={openReferencedTask} onOpenOriginTask={onOpenTask} onReply={replyTo} onOpenSession={onOpenSession} onViewResult={() => void loadResult(comment.id)}>
+        {resultPages[comment.id]?.taskId === taskId && <TaskCommentDispatchStreamRow comment={comment} result={resultPages[comment.id]} onOpenSession={onOpenSession} onLoadResult={loadResult} onOpenTask={openReferencedTask}/>}
+        {comment.dispatch?.executionTaskId && childTasks.find(child => child.id === comment.dispatch?.executionTaskId) ? <WandButton size="small" kind="ghost" onClick={() => onOpenTask?.(comment.dispatch!.executionTaskId!)}>{childTasks.find(child => child.id === comment.dispatch?.executionTaskId)!.identifier} · 查看子任务</WandButton> : null}
+      </TaskCommentBubble>)}
       {legacySessions.length > 0 && <details><summary>历史关联会话 · {legacySessions.length}</summary>{legacySessions.map(session => <TaskLegacySessionStreamRow key={session.id} session={session} onOpen={onOpenSession}/>)}</details>}
       {nextCursor && <WandButton kind="ghost" size="small" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "正在加载更早评论…" : "加载更早评论"}</WandButton>}
       {draft.sourceCommentId && <Flex align="center" gap="small" className="task-comment-reply-context"><Typography.Text type="secondary">回复「{replyLabel || draft.sourceCommentId.slice(0, 8)}」</Typography.Text><WandButton kind="ghost" size="small" onClick={() => { edit({ sourceCommentId: null }); setReplyLabel(""); }}>取消回复</WandButton></Flex>}
@@ -372,7 +371,8 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
         onChange={event => {
           const value = event.currentTarget.value;
           const pos = event.currentTarget.selectionStart ?? value.length;
-          const person = active.find(employee => employee.id === commentDraft(taskId).employeeId);
+          // 正文里 @ 到的在职员工就是派发目标；下拉选过的那位作为兜底。
+          const person = active.find(employee => commentMentionHeld(value, employee.name)) ?? active.find(employee => employee.id === commentDraft(taskId).employeeId);
           edit({ body: value, employeeId: person && commentMentionHeld(value, person.name) ? person.id : "" });
           setCaret(pos);
         }} onKeyDown={event => {

@@ -1,4 +1,5 @@
 import { legacyPtyRoleIdentity } from "../default-employee.js";
+import { parseTaskCommentOrigin } from "../task-comment-origin.js";
 import { isRecord } from "../object-utils.js";
 import { parseHarnessExtensionState } from "../core-extension-host.js";
 import { wrapLegacyTaskLayout } from "../layout-tree.js";
@@ -327,6 +328,7 @@ export function parseSessionOptions(raw: string | null): DurableSessionOptions {
       isRecord(value) && (value.source === "user" || value.source === "task")
         && typeof value.enqueuedAt === "string" && Number.isFinite(Date.parse(value.enqueuedAt))
         ? { source: value.source, enqueuedAt: value.enqueuedAt,
+          ...(parseTaskCommentOrigin(value.origin) ? { origin: parseTaskCommentOrigin(value.origin) } : {}),
           ...(Number.isSafeInteger(value.sequence) && Number(value.sequence) >= 0 ? { sequence: Number(value.sequence) } : {}),
           ...(isRecord(value.handoff) && typeof value.handoff.id === "string"
             && typeof value.handoff.boundaryId === "string" && typeof value.handoff.incarnationId === "string"

@@ -17,6 +17,7 @@ type QueuedExecution = { taskId: string; priority: number; createdAt: string; se
 );
 
 export interface EmployeeTaskCommentSubmission {
+  submissionSource?: "manual" | "user_dispatch";
   taskId: string;
   executionTaskId?: string | null;
   createChild?: boolean;
@@ -74,6 +75,7 @@ export class TaskExecutionQueue {
         taskId: input.taskId, requestId: input.requestId, signature: input.signature, body: input.body,
         instruction: input.instruction, sourceCommentId: input.sourceCommentId, employeeId: input.employeeId,
         employeeName: input.employeeName, taskVersion: input.taskVersion, referencedTaskIds: input.referencedTaskIds,
+        submissionSource: input.submissionSource,
         agent: input.agent, executionTaskId: input.executionTaskId, createChild: input.createChild, queued: true, purpose: input.purpose, reviewRevision: input.reviewRevision,
       });
       this.promoteTask(task, input.purpose);
@@ -193,6 +195,7 @@ export class TaskExecutionQueue {
           task, agent, employee: executionEmployee,
           employeeCandidateIndex: Math.max(0, candidateIndex),
           automationId: `wand-task-comment:${comment.id}`,
+          origin: comment.origin ? { ...comment.origin, kind: "task_dispatch" } : undefined,
           prompt: taskCommentPrompt({ taskId: task.id, contextTaskId: comment.taskId, commentId: comment.id, sourceCommentId: comment.sourceCommentId ?? null,
             taskVersion: task.updatedAt, instruction: comment.instruction ?? comment.body, referencedTasks, purpose: comment.purpose }),
           sessionCreated: session => {

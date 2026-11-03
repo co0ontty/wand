@@ -712,6 +712,8 @@ export interface ConversationSessionPreview {
 }
 
 export interface ConversationTurn {
+  /** Application dispatch provenance; independent from the model's user/assistant role. */
+  origin?: import("./task-types.js").TaskCommentOrigin;
   /** External delivery facts; not model protocol or a tool event. */
   external?: { provider: "dingtalk"; messageId?: string; senderId?: string; state: "sending" | "synced" | "unknown" | "failed" };
   /** Stable instance/target association. Legacy turns remain unchanged. */

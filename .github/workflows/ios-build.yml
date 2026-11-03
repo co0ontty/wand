@@ -62,23 +62,9 @@ jobs:
 
       - name: Resolve version
         id: version
-        run: |
-          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            VERSION="${TAG#v}"
-          else
-            VERSION="${{ github.event.inputs.version }}"
-          fi
-          BUILD_STAMP="$(TZ=Asia/Shanghai date +%Y%m%d%H%M)"
-          if [[ "$VERSION" == *+* ]]; then
-            ASSET_VERSION="${VERSION}.${BUILD_STAMP}"
-          else
-            ASSET_VERSION="${VERSION}+${BUILD_STAMP}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "build_stamp=$BUILD_STAMP" >> "$GITHUB_OUTPUT"
-          echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
-          echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: bash scripts/resolve-apple-release-version.sh
 
       # 如果相邻两个主仓库 tag 指向同一个 iOS gitlink，客户端代码没有变化。
       # 这种发布直接复用上一版 Release 的 IPA；若上一版因历史故障没有 IPA，

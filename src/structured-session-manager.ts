@@ -170,6 +170,7 @@ const EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS = 180_000;
 const STREAM_SAVE_THROTTLE_MS = 1_000;
 const DETACHED_RECOVERY_RETRY_MS = 500;
 interface StructuredSendOptions {
+  origin?: import("./task-types.js").TaskCommentOrigin;
   interrupt?: boolean;
   idempotencyKey?: string;
   preserveQueue?: boolean;
@@ -191,8 +192,9 @@ function buildUserTurn(
   requestId?: string,
   messageId?: string,
   readAt?: string,
+  origin?: import("./task-types.js").TaskCommentOrigin,
 ): ConversationTurn {
-  const identity = { ...(requestId ? { requestId } : {}), ...(messageId ? { messageId } : {}) };
+  const identity = { ...(requestId ? { requestId } : {}), ...(messageId ? { messageId } : {}), ...(origin ? { origin } : {}) };
   const readReceipt = readAt ? { readAt } : {};
   if (pendingAsk) {
     return {
@@ -502,22 +504,7 @@ export class StructuredSessionManager {
       const session = this.sessions.get(id);
       if (!session) continue;
       if (detachSafe) continue;
-      const cancelled: SessionSnapshot = {
-        ...session,
-        messages: cancelPendingResourceSelection(session.messages),
-        status: "idle",
-        exitCode: null,
-        endedAt: null,
-        pendingEscalation: null,
-        permissionBlocked: false,
-        structuredState: {
-          ...this.settleTurn(id, session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
-          inFlight: false,
-          activeRequestId: null,
-          lastError: null,
-        },
-      };
-      this.sessions.set(id, cancelled);
+      const cancelled = this.cancelTurnSnapshot(session);
       try { this.saveAuthoritativeSession(cancelled); } catch { /* best-effort shutdown flush */ }
     }
 
@@ -1096,20 +1083,7 @@ export class StructuredSessionManager {
         phase: undefined,
       },
     };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    const logicalTerminalRequestId = this.recoveredLogicalRequests.get(sessionId) ?? requestId;
-    if (interruptPrompt) {
-      // This logical turn has stopped at this exact transcript boundary even though
-      // interrupt-and-send keeps the session open for the replacement request.
-      this.emitStructuredSnapshot(finished, "output", this.commentTerminalEvent(finished, logicalTerminalRequestId, "stopped"));
-      this.recoveredLogicalRequests.delete(sessionId);
-    }
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) {
-      this.emitStructuredSnapshot(finished, "ended", this.commentTerminalEvent(finished, logicalTerminalRequestId, "done"));
-      this.recoveredLogicalRequests.delete(sessionId);
-    }
+    this.publishFinishedTurn(finished, requestId, !!interruptPrompt);
 
     if (interruptPrompt) {
       this.interruptedWith.delete(sessionId);
@@ -1701,7 +1675,7 @@ export class StructuredSessionManager {
       ? { accepted: true, acceptanceId, sessionId: id, idempotencyKey: key, acceptedAt } : undefined;
     const scheduling: EmployeeInputScheduling = { ...(opts?.scheduling
       ?? { source: opts?.source ?? "task", enqueuedAt: acceptedAt, sequence: ++this.inputSequence,
-        teamRequestStarted: opts?.teamRequestStarted }), acceptanceId };
+        teamRequestStarted: opts?.teamRequestStarted }), ...(opts?.origin ? { origin: opts.origin } : {}), acceptanceId };
     if (session.runner === "qoder-cli-acp" && session.structuredState?.inFlight && !opts?.promotion) {
       scheduling.nativeQuestionId = findUnpairedAskUserQuestion(session.messages ?? [])?.id;
     }
@@ -1731,7 +1705,7 @@ export class StructuredSessionManager {
       if (at >= 0) { queue = queue.filter((_, index) => index !== at); metadata = metadata.filter((_, index) => index !== at); }
     }
     const accepted: SessionSnapshot = relay
-      ? { ...session, messages: [...(session.messages ?? []), buildUserTurn(prompt, undefined, acceptedAt, undefined, undefined, acceptedAt)] }
+      ? { ...session, messages: [...(session.messages ?? []), buildUserTurn(prompt, undefined, acceptedAt, undefined, undefined, acceptedAt, opts?.origin)] }
       : { ...session, queuedMessages: interrupt || nativeSteering && opts?.interrupt ? [prompt, ...queue] : [...queue, prompt],
         queuedInputScheduling: interrupt || nativeSteering && opts?.interrupt ? [scheduling, ...metadata] : [...metadata, scheduling] };
     // Persist before publishing state, generating a topic, interrupting or starting a runner.
@@ -1834,7 +1808,7 @@ export class StructuredSessionManager {
     const transcriptRequestId = session.automationId?.startsWith("wand-task-comment:") ? requestId : undefined;
     const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt, transcriptRequestId,
       (session.provider === "pi" && session.structuredState?.engine !== "core") || session.provider === "qoder" ? randomUUID() : undefined,
-      userTurnAt);
+      userTurnAt, opts?.origin ?? opts?.scheduling?.origin);
     this.unacceptedTeamStarts.delete(id);
     if (this.unsupportedStructuredProviders.has(id)) {
       throw new Error(`会话使用的 provider 已不受支持，不能继续发送。`);
@@ -2699,22 +2673,7 @@ export class StructuredSessionManager {
     // from the cancelled runner can no longer mutate this session or a replacement turn.
     // 主动停止只是取消「当前回合」，结构化会话本身并没有结束——置为 idle 而非 stopped。
     // 这样前端不会进入"会话已结束/恢复会话"终止态，输入框保持可用，直接展示历史内容。
-    const cancelled: SessionSnapshot = {
-      ...session,
-      messages: cancelPendingResourceSelection(session.messages),
-      status: "idle",
-      exitCode: null,
-      endedAt: null,
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...this.settleTurn(id, session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(id, cancelled);
+    const cancelled = this.cancelTurnSnapshot(session);
 
     const runnerExecution = this.pendingRunnerExecutions.get(id);
     if (runnerExecution) {
@@ -2873,6 +2832,45 @@ export class StructuredSessionManager {
     return { ...state, lastActivityAt: isoNow() };
   }
 
+  private cancelTurnSnapshot(session: SessionSnapshot): SessionSnapshot {
+    const id = session.id;
+    const cancelled: SessionSnapshot = {
+      ...session,
+      messages: cancelPendingResourceSelection(session.messages),
+      status: "idle",
+      exitCode: null,
+      endedAt: null,
+      pendingEscalation: null,
+      permissionBlocked: false,
+      structuredState: {
+        ...this.settleTurn(id, session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
+        inFlight: false,
+        activeRequestId: null,
+        lastError: null,
+      },
+    };
+    this.sessions.set(id, cancelled);
+    return cancelled;
+  }
+
+  private publishFinishedTurn(finished: SessionSnapshot, requestId: string, interrupted: boolean): void {
+    const sessionId = finished.id;
+    this.sessions.set(sessionId, finished);
+    this.saveAuthoritativeSession(finished);
+    const logicalTerminalRequestId = this.recoveredLogicalRequests.get(sessionId) ?? requestId;
+    if (interrupted) {
+      // This logical turn has stopped at this exact transcript boundary even though
+      // interrupt-and-send keeps the session open for the replacement request.
+      this.emitStructuredSnapshot(finished, "output", this.commentTerminalEvent(finished, logicalTerminalRequestId, "stopped"));
+      this.recoveredLogicalRequests.delete(sessionId);
+    }
+    this.emitStructuredSnapshot(finished);
+    if (finished.status === "idle") {
+      this.emitStructuredSnapshot(finished, "ended", this.commentTerminalEvent(finished, logicalTerminalRequestId, "done"));
+      this.recoveredLogicalRequests.delete(sessionId);
+    }
+  }
+
   /**
    * 本轮收敛：`inFlight` 清 false 的一切路径（结束 / 失败 / 停止 / 中断 / 重启降级 /
    * 候选降级）都必须走这里——两个锚点一起回 null，静默心跳立即 cancel。
@@ -2963,7 +2961,7 @@ export class StructuredSessionManager {
       queuedMessages: current.queuedMessages?.filter((_, at) => at !== index),
       queuedInputScheduling: scheduling.filter((_, at) => at !== index),
       messages: preceding.some(turn => turn.messageId === offer.id) ? preceding
-        : [...preceding, buildUserTurn(offer.text, questionId ? { id: questionId } : undefined, isoNow(), undefined, offer.id)],
+        : [...preceding, buildUserTurn(offer.text, questionId ? { id: questionId } : undefined, isoNow(), undefined, offer.id, undefined, scheduling[index]?.origin)],
     };
     this.saveAuthoritativeSession(committed);
     state.blocks = [];
@@ -3347,7 +3345,7 @@ export class StructuredSessionManager {
           const consumed: SessionSnapshot = {
             ...current, queuedMessages: remaining,
             queuedInputScheduling: scheduling.filter((_, at) => at !== index),
-            messages: [...preceding, buildUserTurn(input, undefined, isoNow())],
+            messages: [...preceding, buildUserTurn(input, undefined, isoNow(), undefined, undefined, undefined, scheduling[index]?.origin)],
           };
           // Persist queue removal and transcript together before exposing consumption.
           this.saveAuthoritativeSession(consumed);
@@ -3511,20 +3509,7 @@ export class StructuredSessionManager {
       ...(result.state.compaction ? { harnessContext: compactionToSessionContext(result.state.compaction) } : {}),
       ...(result.state.harnessExtensionState ? { harnessExtensionState: result.state.harnessExtensionState } : {}),
     };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    const logicalTerminalRequestId = this.recoveredLogicalRequests.get(sessionId) ?? requestId;
-    if (interruptPrompt) {
-      // This logical turn has stopped at this exact transcript boundary even though
-      // interrupt-and-send keeps the session open for the replacement request.
-      this.emitStructuredSnapshot(finished, "output", this.commentTerminalEvent(finished, logicalTerminalRequestId, "stopped"));
-      this.recoveredLogicalRequests.delete(sessionId);
-    }
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) {
-      this.emitStructuredSnapshot(finished, "ended", this.commentTerminalEvent(finished, logicalTerminalRequestId, "done"));
-      this.recoveredLogicalRequests.delete(sessionId);
-    }
+    this.publishFinishedTurn(finished, requestId, !!interruptPrompt);
 
     if (interruptPrompt) {
       this.interruptedWith.delete(sessionId);

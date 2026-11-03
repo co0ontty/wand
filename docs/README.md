@@ -10,6 +10,9 @@
 
 ## 会话与执行
 
+- [服务端接口功能索引](server-api-map.md)：按功能与注册模块梳理 HTTP 接口、共享逻辑和归一化边界。
+- [服务端归一化复查](server-normalization-review.md)：业务层重复、实际分叉修复、保留边界及验证范围。
+- [服务端逐文件复查](server-file-review.md)：44 个装配/路由文件的检查结论、合并依据、保留边界和未闭环项。
 - [tmux 执行与恢复](tmux-execution.md)：CLI 所有权、执行切换与安全重启。
 - [新建会话契约](session-creation.md)：`POST /api/sessions` 的 `kind`、回执与错误语义。
 - [删除会话时清理 CLI 文件](cli-session-cleanup.md)：按 provider 原生 session ID 清理的范围。

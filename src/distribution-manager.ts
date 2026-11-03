@@ -469,17 +469,14 @@ export class DistributionManager {
   }
 
   async resolveLatestDmg(): Promise<ResolvedDistributionAsset | null> {
-    const localDmg = await this.resolveMacosDownload();
-    if (localDmg?.version) {
-      return {
-        version: localDmg.version,
-        downloadUrl: localDmg.downloadUrl,
-        fileName: localDmg.fileName,
-        size: localDmg.size,
-        source: "local",
-      };
+    return this.localOrGitHub(await this.resolveMacosDownload(), ".dmg");
+  }
+
+  private async localOrGitHub(local: LocalDistributionAsset | null, extension: ".dmg" | ".ipa"): Promise<ResolvedDistributionAsset | null> {
+    if (local?.version) {
+      return { version: local.version, downloadUrl: local.downloadUrl, fileName: local.fileName, size: local.size, source: "local" };
     }
-    const github = await this.fetchGitHubAsset(".dmg");
+    const github = await this.fetchGitHubAsset(extension);
     return github ? { ...github, source: "github" } : null;
   }
 
@@ -497,18 +494,7 @@ export class DistributionManager {
   }
 
   async resolveLatestIpa(): Promise<ResolvedDistributionAsset | null> {
-    const localIpa = await this.resolveIosDownload();
-    if (localIpa?.version) {
-      return {
-        version: localIpa.version,
-        downloadUrl: localIpa.downloadUrl,
-        fileName: localIpa.fileName,
-        size: localIpa.size,
-        source: "local",
-      };
-    }
-    const github = await this.fetchGitHubAsset(".ipa");
-    return github ? { ...github, source: "github" } : null;
+    return this.localOrGitHub(await this.resolveIosDownload(), ".ipa");
   }
 
   /** Independent app packages never participate in Wand selection or pruning. */
@@ -605,38 +591,19 @@ export class DistributionManager {
       return;
     }
     const { config } = this.options;
-    const android = asRecord(raw.android);
-    if (android) {
-      config.android = { ...(config.android ?? {}) };
-      if (typeof android.enabled === "boolean") config.android.enabled = android.enabled;
-      if (Object.hasOwn(android, "apkDir")) {
-        config.android.apkDir = typeof android.apkDir === "string" && android.apkDir.trim() ? android.apkDir.trim() : "android";
-      }
-      if (Object.hasOwn(android, "currentApkFile")) {
-        config.android.currentApkFile = typeof android.currentApkFile === "string" ? android.currentApkFile.trim() : "";
-      }
-    }
-    const macos = asRecord(raw.macos);
-    if (macos) {
-      config.macos = { ...(config.macos ?? {}) };
-      if (typeof macos.enabled === "boolean") config.macos.enabled = macos.enabled;
-      if (Object.hasOwn(macos, "dmgDir")) {
-        config.macos.dmgDir = typeof macos.dmgDir === "string" && macos.dmgDir.trim() ? macos.dmgDir.trim() : "macos";
-      }
-      if (Object.hasOwn(macos, "currentDmgFile")) {
-        config.macos.currentDmgFile = typeof macos.currentDmgFile === "string" ? macos.currentDmgFile.trim() : "";
-      }
-    }
-    const ios = asRecord(raw.ios);
-    if (ios) {
-      config.ios = { ...(config.ios ?? {}) };
-      if (typeof ios.enabled === "boolean") config.ios.enabled = ios.enabled;
-      if (Object.hasOwn(ios, "ipaDir")) {
-        config.ios.ipaDir = typeof ios.ipaDir === "string" && ios.ipaDir.trim() ? ios.ipaDir.trim() : "ios";
-      }
-      if (Object.hasOwn(ios, "currentIpaFile")) {
-        config.ios.currentIpaFile = typeof ios.currentIpaFile === "string" ? ios.currentIpaFile.trim() : "";
-      }
+    for (const [platform, dirKey, fileKey] of [
+      ["android", "apkDir", "currentApkFile"],
+      ["macos", "dmgDir", "currentDmgFile"],
+      ["ios", "ipaDir", "currentIpaFile"],
+    ] as const) {
+      const incoming = asRecord(raw[platform]);
+      if (!incoming) continue;
+      config[platform] = {
+        ...config[platform],
+        ...(typeof incoming.enabled === "boolean" ? { enabled: incoming.enabled } : {}),
+        ...(Object.hasOwn(incoming, dirKey) ? { [dirKey]: typeof incoming[dirKey] === "string" && incoming[dirKey].trim() ? incoming[dirKey].trim() : platform } : {}),
+        ...(Object.hasOwn(incoming, fileKey) ? { [fileKey]: typeof incoming[fileKey] === "string" ? incoming[fileKey].trim() : "" } : {}),
+      };
     }
   }
 

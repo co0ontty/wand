@@ -1,3 +1,4 @@
+import { responseAbortController } from "./express-async.js";
 import type { Express, RequestHandler } from "express";
 import type { WandStorage } from "./storage.js";
 import type { DecisionService } from "./decision-service.js";
@@ -33,9 +34,7 @@ export function registerDecisionRoutes(app: Express, deps: {
     res.json(deps.decisions.status());
   });
   app.post("/api/decisions/evaluate", authorize, async (req, res) => {
-    const abort = new AbortController();
-    const disconnected = (): void => { if (!res.writableEnded) abort.abort(); };
-    res.once("close", disconnected);
+    const { controller: abort, dispose: releaseAbort } = responseAbortController(res);
     try {
       const result = await deps.decisions.evaluate(req.body, res.locals.decisionCaller as string, abort.signal);
       if (!res.destroyed) res.json(result);
@@ -44,7 +43,7 @@ export function registerDecisionRoutes(app: Express, deps: {
       const failure = error instanceof DecisionError ? error : new DecisionError("INTERNAL_ERROR", "决策请求失败。", 500);
       res.status(failure.status).json({ error: failure.message, code: failure.code });
     } finally {
-      res.off("close", disconnected);
+      releaseAbort();
     }
   });
 }

@@ -335,10 +335,10 @@ export class ProcessManager extends EventEmitter {
       const restoredSessionId = resumeCommandSessionId ?? snapshot.claudeSessionId ?? sessionIdFromHistory;
       let attached: ReturnType<TerminalHost["attach"]> = null;
       let ownershipUnknown = false;
-      if (snapshot.status === "running") {
-        try { attached = this.terminalHost.attach(snapshot.id, snapshot.ptyOutputSeq ?? 0); }
-        catch { ownershipUnknown = true; }
-      }
+      // Runtime ownership wins over a stale UI status, including a prior
+      // observer that incorrectly persisted an ended session.
+      try { attached = this.terminalHost.attach(snapshot.id, snapshot.ptyOutputSeq ?? 0); }
+      catch { ownershipUnknown = snapshot.status === "running"; }
       const live = attached?.process && attached.state.status === "running" ? attached : null;
       const daemonEnded = attached && attached.state.status === "exited" ? attached : null;
       const recoveredMessages = recoverMessagesFromSnapshot(snapshot);
@@ -373,7 +373,7 @@ export class ProcessManager extends EventEmitter {
             : snapshot;
 
       if (updated !== snapshot || live) {
-        if (snapshot.status === "running") this.storage.saveSession(updated);
+        if (snapshot.status === "running" || live) this.storage.saveSession(updated);
         else this.storage.saveSessionMetadata(updated);
       }
       if (restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {

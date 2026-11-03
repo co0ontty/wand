@@ -57,7 +57,7 @@ import {
 } from "./composer-select-values";
 import { AGENT_TOOL_OPTIONS, agentToolOption, PROVIDER_IDS, defaultStructuredRunner, inferProviderIdFromCommand, isNativeThinkingEffort, providerCliCommand } from "../provider-identity";
 import { canSwitchSessionTool, sessionToolId } from "./session-tool-switch.js";
-import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
+import { hasPooledTerminal, isPooledTerminalBracketedPasteMode, resubscribePooledTerminals } from "./terminal-pool";
 import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
 
 const sessionReads = createSessionReads();
@@ -1165,6 +1165,9 @@ function sessionProjectionSignature(session: any): string {
           compactTools: true,
           capabilities: { ptyAck: true },
         }));
+        // A replace subscription clears every server-side PTY lease, including
+        // the retained quick terminal and inactive split panes. Restore them here.
+        if (!hasPooledTerminal(sessionId)) resubscribePooledTerminals();
       }
 
       export function mergeServerSession(localSession, serverSession) {

@@ -153,6 +153,8 @@ import { PtyTmuxBackend, type PtyTmuxGcReport } from "./pty-tmux-backend.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { StructuredTmuxHost } from "./structured-tmux-host.js";
 import { logInfo } from "./runtime-log.js";
+import { registerDiagnostics } from "./server-diagnostics.js";
+import { RenderDaemonClient } from "./render-daemon-client.js";
 import { probeTmuxSupport, tmuxEnabled } from "./tmux-policy.js";
 import { structuredHostMaintenance } from "./structured-host-maintenance.js";
 import { createTmuxTerminalHost } from "./tmux-terminal-host.js";
@@ -722,6 +724,30 @@ export async function startServer(
   // Every /api family declares its scope in src/middleware/api-scope.ts; unlisted
   // paths are admin-only for connected apps (default-deny).
   app.use("/api", createApiScopeMiddleware());
+  const recordDiagnosticEvent = registerDiagnostics(app, {
+    sessions: sessionRegistry, storage, version: DISPLAY_VERSION,
+    async inventory() {
+      const sources = [
+        ...(ptyHosts.renderHost instanceof RenderDaemonClient ? [{ name: "render", read: async () =>
+          (await (ptyHosts.renderHost as RenderDaemonClient).maintenanceSnapshot()).sessions ?? [] }] : []),
+        ...(tmuxTerminals.client ? [{ name: "tmux-terminald", read: () => tmuxTerminals.client!.request("list") }] : []),
+        ...(ptyHosts.legacyHost ? [{ name: "terminald", read: () => ptyHosts.legacyHost!.request("list") }] : []),
+        ...(structuredHost ? [{ name: "structured", read: () => structuredHost!.listRuns() }] : []),
+      ];
+      return Promise.all(sources.map(async source => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const rows = await Promise.race([source.read(), new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Inventory unavailable")), 8000);
+          })]) as { sessionId?: string; runId?: string; incarnationId: string; pid: number; status: string; exitCode: number | null }[];
+          return { source: source.name, available: true, truncated: rows.length > 2000,
+            entries: rows.slice(0, 2000).map(row => ({ id: row.sessionId ?? row.runId,
+              incarnationId: row.incarnationId, pid: row.pid, status: row.status, exitCode: row.exitCode })) };
+        } catch { return { source: source.name, available: false }; }
+        finally { clearTimeout(timer); }
+      }));
+    },
+  });
   registerFeedbackClientRoutes(app, feedback);
   registerFeedbackAdminRoutes(app, feedbackReceiver, requireAdmin);
   app.use("/api", uploadReferenceGuard(storage.uploads));
@@ -997,6 +1023,7 @@ export async function startServer(
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
+    recordDiagnosticEvent(event);
     sessionRegistry.invalidateMessageProjection(event.sessionId);
     taskTitles.ingest(event);
     sessionCompletions.ingest(event);
@@ -1008,6 +1035,7 @@ export async function startServer(
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    recordDiagnosticEvent(event);
     sessionRegistry.invalidateMessageProjection(event.sessionId);
     taskTitles.ingest(event);
     storage.recordTaskCommentSessionEvent(event);

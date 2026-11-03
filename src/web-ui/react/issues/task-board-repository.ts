@@ -8,6 +8,7 @@ import type {
   WandTaskComment,
   TaskExecutionSubject,
 } from "../../../task-types";
+import { taskHumanAccepted } from "../../../task-types";
 import type { ConversationTurn } from "../../../types.js";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
@@ -223,7 +224,7 @@ export const taskBoardRepository = {
     return { input: JSON.parse(new TextDecoder().decode(input)) as Record<string, unknown>,
       content: JSON.parse(new TextDecoder().decode(content)), is_error: first.is_error, pending: first.pending };
   },
-  async postComment(id: string, input: { requestId: string; body: string; employeeId?: string | null; agent?: import("../../../task-types").WandTaskAgent | null; sourceCommentId?: string | null; purpose?: "execution" | "review" }): Promise<{ comment: WandTaskComment; replayed: boolean }> {
+  async postComment(id: string, input: { requestId: string; body: string; submissionSource?: "manual"; employeeId?: string | null; agent?: import("../../../task-types").WandTaskAgent | null; sourceCommentId?: string | null; purpose?: "execution" | "review" }): Promise<{ comment: WandTaskComment; replayed: boolean }> {
     if (input.employeeId) {
       const task = await this.get(id);
       if ((task as WandTaskListed & { commentWorkflowVersion?: number }).commentWorkflowVersion !== 2) throw new HttpResponseError("服务端尚未支持评论子任务派发；草稿已保留，请先更新服务。", 409);
@@ -267,7 +268,7 @@ export const taskBoardRepository = {
     const requestId = dispatchRequests.get(id) ?? crypto.randomUUID();
     dispatchRequests.set(id, requestId);
     return mutateTask<IssueDispatchResult>(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
-      requestId,
+      requestId, submissionSource: "user_dispatch",
       ...(agent ? { agent } : {}),
       ...(extra?.subject ? { subject: extra.subject } : {}),
       ...(extra?.useEmployeeDefaults ? { useEmployeeDefaults: true } : {}),
@@ -304,4 +305,12 @@ export type { IssueWorkspace };
 /** Server verdict wins; status fallback keeps older servers safe. */
 export function canArchiveBoardTask(task: WandTaskListed): boolean {
   return task.canArchive ?? task.status !== "doing";
+}
+
+/** A denied verdict is not evidence of a running session: acceptance is required too. */
+export function boardTaskArchiveBlockReason(task: WandTaskListed): string {
+  if (task.status === "archived") return "任务已归档。";
+  if (canArchiveBoardTask(task)) return "";
+  if (!taskHumanAccepted(task)) return "尚未人工确认当前交付的验收，请在任务详情完成验收后归档。";
+  return "任务仍有执行、待答或排队工作，请处理结束后再归档。";
 }

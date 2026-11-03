@@ -183,7 +183,7 @@ export class TaskWorkflowRepository {
       const ownedSession = actor.kind === "employee" ? actor.sessionId : null;
       const family = [task, ...children];
       for (const member of input.action === "progress" ? [] : family) {
-        if (this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE (task_id = ? OR execution_task_id = ?) AND (state IN ('pending', 'unknown') OR (state = 'accepted' AND session_id IS NULL)) AND (session_id IS NULL OR session_id != ?) LIMIT 1").get(member.id, member.id, ownedSession ?? "")) throw new HttpError(409, "busy", "仍有送达未确认的执行，请先核对原会话。");
+        if (this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE (task_id = ? OR execution_task_id = ?) AND employee_id IS NOT NULL AND (state IN ('pending', 'unknown') OR (state = 'accepted' AND session_id IS NULL)) AND (session_id IS NULL OR session_id != ?) LIMIT 1").get(member.id, member.id, ownedSession ?? "")) throw new HttpError(409, "busy", "仍有送达未确认的执行，请先核对原会话。");
         const queued = this.s.countQueuedTaskCommentDispatchesForTask(member.id);
         if (queued > 0) throw new HttpError(409, "busy", "任务仍有排队执行，请先处理队列。");
         for (const id of this.s.listWandTaskSessionIds(member.id)) {

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type Socket } from "node:net";
 import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { directoryBytes, directoryLatestMtime } from "./directory-stats.js";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -417,9 +418,9 @@ export class PiTmuxHost implements StructuredExecHost {
         // 已删除和已归档都不再续接，进程退出后不再额外等保留期。
         if (!acked) continue;
         if (!this.slotIsIdle(slot, job, now, 0)) continue;
-        report.freedBytes += directoryBytes(slot);
+        report.freedBytes += directoryBytes(slot, "include");
         if (removeTree(slot)) report.removedSlots += 1;
-        else report.freedBytes -= directoryBytes(slot);
+        else report.freedBytes -= directoryBytes(slot, "include");
         continue;
       }
       // 有主 slot：只删不被 current.json 引用的旧 turn。
@@ -436,9 +437,9 @@ export class PiTmuxHost implements StructuredExecHost {
         // （异常退出/被强杀）按已退出处理，否则这种回合会永久堆积。
         if (!state || stateAlive(state)) continue;
         let latest: number;
-        try { latest = directoryLatestMtime(directory); } catch { continue; }
+        try { latest = directoryLatestMtime(directory, "include"); } catch { continue; }
         if (now - latest < options.retentionMs) continue;
-        const bytes = directoryBytes(directory);
+        const bytes = directoryBytes(directory, "include");
         if (!removeTree(directory)) continue;
         report.removedTurns += 1;
         report.freedBytes += bytes;
@@ -457,7 +458,7 @@ export class PiTmuxHost implements StructuredExecHost {
     const state = readJson<WorkerState>(job.state);
     if (state && stateAlive(state)) return false;
     let latest: number;
-    try { latest = directoryLatestMtime(slot); } catch { return false; }
+    try { latest = directoryLatestMtime(slot, "include"); } catch { return false; }
     if (now - latest < retentionMs) return false;
     // 非 current 的 turn 里如果还有活进程，整槽不能删。
     let turns: import("node:fs").Dirent[];
@@ -494,30 +495,6 @@ function pidAlive(pid: number | undefined): boolean {  if (!pid || pid <= 0) ret
     // EPERM means the PID exists but belongs to another user; treat as alive.
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
-}
-
-function directoryLatestMtime(directory: string): number {
-  let latest = lstatSync(directory).mtimeMs;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = path.join(directory, entry.name);
-    const stat = lstatSync(child);
-    if (stat.isDirectory()) latest = Math.max(latest, directoryLatestMtime(child));
-    // 只看 mtime：ctime 无法回拨，且文件被任何元数据操作碰一下就会刷新，
-    // 用它做保留期会把「早已结束的回合」永远当成刚活动过。
-    else latest = Math.max(latest, stat.mtimeMs);
-  }
-  return latest;
-}
-
-function directoryBytes(directory: string): number {
-  let total = 0;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = path.join(directory, entry.name);
-    const stat = lstatSync(child);
-    if (stat.isDirectory()) total += directoryBytes(child);
-    else total += stat.size;
-  }
-  return total;
 }
 
 /** 只删目录，不跟随符号链接。 */

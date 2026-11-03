@@ -49,6 +49,15 @@ export function commentMentionHeld(body: string, name: string): boolean {
   return new RegExp(`(?:^|\\s)@${escaped}(?=\\s|$)`).test(body);
 }
 
+/**
+ * 从正文里直接解析被 @ 的员工：只要 `@名字` 作为完整 token 出现即视为派发目标，
+ * 不再要求必须从下拉里重新选过。名字可能含空格，优先匹配最长（最具体）的名字。
+ */
+export function resolveCommentMention<T extends { id: string; name: string }>(body: string, employees: ReadonlyArray<T>): T | null {
+  const ranked = [...employees].filter(employee => employee.name).sort((a, b) => b.name.length - a.name.length);
+  return ranked.find(employee => commentMentionHeld(body, employee.name)) ?? null;
+}
+
 export interface CommentDraft { agent?: WandTaskAgent | null; body: string; employeeId: string; sourceCommentId: string | null; revision: number; }
 const drafts = new Map<string, CommentDraft>();
 export function commentDraft(taskId: string): CommentDraft {

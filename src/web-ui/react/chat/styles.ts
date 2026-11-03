@@ -47,7 +47,15 @@ const CHAT_SURFACE_STYLES = String.raw`
     .chat-activity.is-thinking-running .chat-process-summary-dot { animation:wand-activity-mark-flow var(--motion-spin) var(--ease-in-out-smooth) infinite; }
     /* Android: 呼吸是 1600ms 单程 + Reverse（3.2s 一周）；这里沿用 Web 既有的持续周期 token。 */
     @keyframes wand-activity-mark-flow { 0%, 100% { opacity:.3; } 50% { opacity:1; } }
-    .chat-activity-meta { display:inline-flex; flex-wrap:wrap; align-items:baseline; gap:6px; }
+    .chat-activity-meta { display:inline-flex; flex-wrap:wrap; align-items:center; gap:4px 7px; }
+    .chat-activity-meta-item { display:inline-flex; align-items:center; gap:5px; color:var(--text-secondary); }
+    .chat-activity-meta-item.is-thinking { color:color-mix(in srgb,var(--accent) 45%,var(--text-secondary)); font-weight:var(--font-weight-medium); }
+    .chat-activity-meta-item.is-active { color:var(--accent); font-weight:var(--font-weight-medium); }
+    .chat-activity-meta-item.is-command .chat-activity-command-running { color:var(--accent); }
+    .chat-activity-command-indicator { width:5px; height:5px; border-radius:50%; background:var(--accent); animation:wand-activity-mark-flow var(--motion-spin) var(--ease-in-out-smooth) infinite; }
+    .chat-activity-separator { color:color-mix(in srgb,var(--text-muted) 70%,transparent); font-size:var(--font-size-2xs); }
+    .chat-activity-command-elapsed { color:var(--text-muted); font-variant-numeric:tabular-nums; font-size:var(--font-size-2xs); }
+    @media (prefers-reduced-motion:reduce) { .chat-activity-command-indicator { animation:none; } }
     .chat-activity-command-time { color:var(--text-secondary); font-variant-numeric:tabular-nums; }
     .chat-activity-error { color:color-mix(in srgb,var(--ant-color-error-text-active,var(--danger)) 80%,var(--text-primary)); }
     .chat-activity[data-expanded="false"] .chat-activity-menu { display:none; }
@@ -58,35 +66,55 @@ const CHAT_SURFACE_STYLES = String.raw`
     .wand-chat-entry { display:flex; align-items:flex-start; gap:8px; min-width:0; }
     .wand-chat-entry-body { flex:1; min-width:0; }
     .chat-call-detail { min-width:0; overflow-wrap:anywhere; }
-    .chat-call { position:relative; padding:2px 0; }
-    .chat-call-mark { display:inline-flex; align-items:center; justify-content:center; flex:0 0 20px; width:20px; height:22px; color:var(--text-secondary); }
+    .chat-call { position:relative; padding:1px 0; }
+    /* 状态标记：统一的 26px 圆角槽 + 语义底色，取代裸露的着色字形；右下角状态小点收束状态。 */
+    .chat-call-mark { position:relative; display:inline-flex; align-items:center; justify-content:center; flex:0 0 26px; width:26px; height:26px; margin-block-start:1px; color:var(--text-secondary); }
+    .chat-call-mark-slot { position:relative; z-index:1; display:grid; place-items:center; width:26px; height:26px; border-radius:8px; background:color-mix(in srgb,var(--text-muted) 10%,var(--bg-surface)); box-shadow:0 0 0 1px color-mix(in srgb,var(--border-subtle) 70%,transparent); transition:background-color var(--motion-fast) var(--ease-in-out-smooth), color var(--motion-fast) var(--ease-in-out-smooth), box-shadow var(--motion-fast) var(--ease-in-out-smooth); }
+    .chat-call-mark-pip { position:absolute; z-index:2; right:-1px; bottom:-1px; width:8px; height:8px; border-radius:50%; background:var(--success); box-shadow:0 0 0 2px var(--bg-surface); opacity:0; transform:scale(.4); transition:opacity var(--motion-fast) var(--ease-in-out-smooth), transform var(--motion-normal) var(--ease-out-expo); }
+    .chat-call[data-status="complete"] .chat-call-mark-pip { opacity:1; transform:scale(1); }
+    .chat-call[data-status="error"] .chat-call-mark-pip { opacity:1; transform:scale(1); background:var(--danger); }
+    .chat-call[data-status="pending"] .chat-call-mark-pip { opacity:1; transform:scale(1); background:var(--warning); }
+    .chat-call[data-status="complete"] .chat-call-mark { color:color-mix(in srgb,var(--success) 72%,var(--text-primary)); }
     .chat-call[data-status="error"] .chat-call-mark { color:var(--danger); }
+    .chat-call[data-status="error"] .chat-call-mark-slot { background:color-mix(in srgb,var(--danger) 12%,var(--bg-surface)); box-shadow:0 0 0 1px color-mix(in srgb,var(--danger) 30%,transparent); }
     .chat-call[data-status="running"] .chat-call-mark { color:var(--accent); }
+    .chat-call[data-status="running"] .chat-call-mark-slot { background:color-mix(in srgb,var(--accent) 12%,var(--bg-surface)); box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 32%,transparent); }
+    .chat-call[data-status="running"] .chat-call-mark-slot::after { content:""; position:absolute; inset:-2px; border-radius:10px; border:1.5px solid transparent; border-top-color:var(--accent); animation:wand-tool-icon-spin var(--motion-spin) linear infinite; }
     .chat-call[data-status="pending"] .chat-call-mark { color:var(--warning); }
+    .chat-call[data-thinking-entry] .chat-call-mark { color:color-mix(in srgb,var(--accent) 50%,var(--text-secondary)); }
+    .chat-call[data-thinking-entry] .chat-call-mark-pip { display:none; }
+    @media (prefers-reduced-motion:reduce) { .chat-call[data-status="running"] .chat-call-mark-slot::after { animation:none; } }
     /* 行高按内容档位固定：调用行留出「标签 + 输入 + 结果」三行，思考轮次单行紧凑
        （对齐 Android 的 ACTIVITY_CALL_ROW_MIN_HEIGHT / ACTIVITY_THINKING_ROW_MIN_HEIGHT）。 */
-    .chat-call-button.chat-disclosure-trigger { height:auto; min-height:44px; padding:7px 6px; text-align:left; justify-content:flex-start; align-items:flex-start; white-space:normal; gap:8px; transition:background-color var(--motion-fast) var(--ease-in-out-smooth); }
-    .chat-call[data-thinking-entry] .chat-call-button.chat-disclosure-trigger { min-height:36px; }
+    .chat-call-button.chat-disclosure-trigger { height:auto; min-height:44px; padding:7px 8px; text-align:left; justify-content:flex-start; align-items:flex-start; white-space:normal; gap:10px; transition:background-color var(--motion-fast) var(--ease-in-out-smooth); }
+    .chat-call[data-thinking-entry] .chat-call-button.chat-disclosure-trigger { min-height:38px; }
     .chat-call[data-thinking-entry] .chat-call-label { font-size:var(--font-size-xs); color:var(--text-secondary); }
     /* 行高亮：运行中与已展开用品牌色 5%，失败行用危险色 5%（对齐 Android activityEntryHighlight）。 */
-    .chat-call[data-status="running"] .chat-call-button { background:color-mix(in srgb,var(--accent) 3%,transparent); }
+    .chat-call[data-status="running"] .chat-call-button { background:color-mix(in srgb,var(--accent) 4%,transparent); }
     .chat-call[data-status="error"] .chat-call-label { color:var(--danger); }
-    .chat-call-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-    .chat-call-line { display:flex; align-items:baseline; gap:6px; min-width:0; line-height:18px; }
+    .chat-call-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; padding-block-start:3px; }
+    .chat-call-line { display:flex; align-items:baseline; gap:8px; min-width:0; line-height:18px; }
     .chat-call-time, .chat-call-preview, .chat-call-result { font-family:var(--font-mono); font-size:var(--font-size-2xs); line-height:16px; color:var(--text-muted); }
     .chat-call-label, .chat-call-preview, .chat-call-result { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .chat-call-label { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
     .chat-call-meta { display:flex; align-items:center; gap:10px; font-size:var(--font-size-2xs); color:var(--text-secondary); line-height:16px; }
-    .chat-call-line .chat-call-label { flex:1; min-width:0; }
+    .chat-call-line .chat-call-label { flex:0 1 auto; min-width:4em; }
     .chat-call-label { font-size:var(--font-size-sm); font-weight:var(--font-weight-medium); color:var(--text-primary); }
+    /* 输入摘录紧随标签，占据行内剩余空间，用竖线分隔替代之前零散的「· 」堆叠。 */
+    .chat-call-line .chat-call-preview { flex:1 1 auto; min-width:2em; padding-inline-start:9px; border-inline-start:1px solid var(--border-subtle); }
+    /* 时间 + 状态收在行尾，右对齐，不再抢占标签前缀位置。 */
+    .chat-call-trail { flex:none; display:inline-flex; align-items:baseline; gap:8px; margin-inline-start:auto; }
     .chat-call-state { flex:none; font-size:var(--font-size-2xs); color:var(--text-muted); }
     .chat-call-state[data-status="running"] { color:var(--accent); }
     .chat-call-state[data-status="pending"] { color:var(--warning); }
     .chat-call-state[data-status="error"] { color:var(--danger); }
-    .chat-call-state[data-status="complete"] { color:var(--text-secondary); }
+    .chat-call-state[data-status="complete"] { color:color-mix(in srgb,var(--success) 62%,var(--text-secondary)); }
     .chat-call[data-status="running"] .chat-call-label, .chat-call[data-expanded="true"] .chat-call-label { color:var(--text-primary); }
     .chat-call-result[data-error] { color:var(--danger); }
     .chat-call[data-thinking-entry] .chat-call-preview, .chat-call[data-thinking-entry] .chat-call-result { white-space:normal; -webkit-line-clamp:2; -webkit-box-orient:vertical; display:-webkit-box; }
+    /* 思考轮次：标签保持完整不被摘录挤压，正文落到下一行自然换行。 */
+    .chat-call[data-thinking-entry] .chat-call-line { flex-wrap:wrap; }
+    .chat-call[data-thinking-entry] .chat-call-line .chat-call-label { flex:0 0 auto; }
+    .chat-call[data-thinking-entry] .chat-call-line .chat-call-preview { flex:1 0 100%; min-width:0; padding-inline-start:0; border-inline-start:0; order:3; }
     .chat-disclosure-chevron { display:inline-flex; flex-shrink:0; margin-inline-start:auto; transition:transform var(--motion-normal) var(--ease-out-expo); }
     .chat-disclosure-chevron[data-expanded="true"] { transform:rotate(180deg); }
     .chat-disclosure-body { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows var(--motion-normal) var(--ease-out-expo),opacity var(--motion-fast) var(--ease-in-out-smooth); }

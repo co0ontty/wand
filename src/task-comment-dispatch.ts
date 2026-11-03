@@ -1,6 +1,6 @@
 import { parseTaskAgent } from "./task-agent-parsing.js";
 import crypto from "node:crypto";
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { AgentDispatchPreflightError, dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
 import { asyncRoute } from "./express-async.js";
 import { badRequest, HttpError } from "./http-error.js";
@@ -24,6 +24,7 @@ export function taskCommentPrompt(input: { taskId: string; contextTaskId?: strin
     `先使用 wand-system 技能读取最新任务上下文：wand task:context ${input.taskId} ${input.commentId}`,
     `再读取完整评论及阻塞回填：wand task:comments ${input.taskId}；有 nextCursor 时用 --before 继续读取。`,
     "核对来源回复、父子任务、现有交付及当前验收版本后再执行；已有修复先复核，不因重复指派重新实现。",
+    `本轮执行结束前，必须通过当前任务级 task:workflow 能力，在 Wand 对应任务（${input.taskId}）详情中回填一段简短说明，作为交付证据：写清完成内容、验证结果及可核查的证据位置；不能仅在聊天回复中说明，也不能只说“已完成”。未完成或无法验证时如实回填已完成部分与阻塞，不得冒充交付通过。`,
     "处理阻塞时回填证据、仍未解除的条件和下一步；会话结束不等于交付完成，未解决的阻塞不得冒充已解除。",
     ...(input.contextTaskId && input.contextTaskId !== input.taskId ? [`父需求与原指派上下文：wand task:context ${input.contextTaskId} ${input.commentId}`, `父需求完整记录：wand task:comments ${input.contextTaskId}`] : []),
     ...referenced,
@@ -115,6 +116,7 @@ export async function submitTaskComment(deps: TaskRouteDependencies, taskId: str
     resolveTaskDispatchTarget({ storage, config }, task);
   }
   const intent = { taskId: task.id, requestId, signature, instruction: displayInstruction, sourceCommentId,
+    ...(body.submissionSource === "manual" || body.submissionSource === "user_dispatch" ? { submissionSource: body.submissionSource as "manual" | "user_dispatch" } : {}),
     body: employee ? `@${employee.name} ${displayInstruction}` : instruction, employeeId, employeeName: employee?.name ?? null,
     taskVersion: task.updatedAt, referencedTaskIds: referencedTasks.map(reference => reference.id), purpose,
     reviewRevision: purpose === "review" ? task.deliveryRevision ?? 0 : null, executionTaskId, createChild };
@@ -136,6 +138,7 @@ export async function submitTaskComment(deps: TaskRouteDependencies, taskId: str
       await dispatchAgentForTask({ storage, config, structured: structured ?? null, processes: processes ?? null }, {
         task: executionTask, agent: candidate.agent, employee: executionEmployee ?? employee, employeeCandidateIndex: candidate.index,
         automationId: `wand-task-comment:${comment.id}`,
+        origin: comment.origin ? { ...comment.origin, kind: "task_dispatch" } : undefined,
         prompt: taskCommentPrompt({ taskId: executionTask.id, contextTaskId: task.id, commentId: comment.id, sourceCommentId, taskVersion: executionTask.updatedAt, instruction: displayInstruction, referencedTasks, purpose }),
         sessionCreated: session => { sessionId = session.id; storage.updateTaskCommentDispatch(comment.id, "pending", session.id); },
       });
@@ -213,39 +216,50 @@ function boundedCommentResultMessages(messages: import("./types.js").Conversatio
 
 export function registerTaskCommentRoutes(app: Express, deps: TaskRouteDependencies): void {
   const { storage } = deps;
-  app.get("/api/wand-tasks/:id/comments/:commentId/result", (req, res) => {
+  // All result views must prove the same comment, execution task and frozen turn range.
+  function readCommentResult(req: Request, res: Response, overview = false) {
+    const task = storage.getWandTask(req.params.id);
     const binding = storage.getTaskCommentResultBinding(req.params.id, req.params.commentId);
-    if (!storage.getWandTask(req.params.id)) { res.status(404).json({ error: "未找到该任务。" }); return; }
-    if (!binding || !storage.getTaskCommentForTask(req.params.id, req.params.commentId)) { res.status(404).json({ error: "未找到该评论执行记录。" }); return; }
+    const comment = storage.getTaskCommentForTask(req.params.id, req.params.commentId);
+    if (!task) { res.status(404).json({ error: "未找到该任务。" }); return null; }
+    if (!binding || !comment) { res.status(404).json({ error: "未找到该评论执行记录。" }); return null; }
+    const unavailable = (reason: "unconfirmed_legacy" | "still_running") => {
+      res.set("Cache-Control", "no-store").json({ available: false, reason,
+        ...(overview ? { sessionId: binding.sessionId } : {}) });
+      return null;
+    };
     const session = deps.sessions?.get(binding.sessionId) ?? storage.getSession(binding.sessionId);
+    const executionTask = comment.dispatch?.executionTaskId ? storage.getWandTask(comment.dispatch.executionTaskId) : task;
     if (!session || session.sessionKind !== "structured" || session.automationId !== `wand-task-comment:${req.params.commentId}`
-      || session.workspaceTaskId !== storage.getWandTask(req.params.id)?.workspaceTaskId) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy", sessionId: binding.sessionId }); return;
-    }
-    if (binding.startIndex !== null && binding.endIndex === null && binding.requestId && binding.startFingerprint
+      || session.workspaceTaskId !== executionTask?.workspaceTaskId) return unavailable("unconfirmed_legacy");
+    if (overview && binding.startIndex !== null && binding.endIndex === null && binding.requestId && binding.startFingerprint
       && session.structuredState?.inFlight && session.structuredState.activeRequestId === binding.requestId) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "still_running", sessionId: binding.sessionId }); return;
+      return unavailable("still_running");
     }
-    if (binding.startIndex === null || binding.endIndex === null || !binding.outcome || !binding.requestId || !binding.fingerprint) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy", sessionId: binding.sessionId }); return;
+    const { startIndex: start, endIndex: end } = binding;
+    if (start === null || end === null || !binding.outcome || !binding.requestId || !binding.fingerprint) {
+      return unavailable("unconfirmed_legacy");
     }
     const messages = session.messages ?? [];
-    const start = binding.startIndex, end = binding.endIndex;
-    const range = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end <= messages.length
-      ? messages.slice(start, end) : [];
-    const currentRangeFingerprint = range.length > 0 ? crypto.createHash("sha256").update(JSON.stringify(range)).digest("hex") : "";
-    const hasLaterUserTurn = range.slice(1).some(message => message.role === "user");
     if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > messages.length
-      || messages[start]?.role !== "user" || messages[start]?.requestId !== binding.requestId
-      || currentRangeFingerprint !== binding.fingerprint
-      || hasLaterUserTurn) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy", sessionId: binding.sessionId }); return;
+      || messages[start]?.role !== "user" || messages[start]?.requestId !== binding.requestId) return unavailable("unconfirmed_legacy");
+    const range = messages.slice(start, end);
+    if (range.slice(1).some(message => message.role === "user")
+      || crypto.createHash("sha256").update(JSON.stringify(range)).digest("hex") !== binding.fingerprint) {
+      return unavailable("unconfirmed_legacy");
     }
+    return { binding, session, range };
+  }
+
+  app.get("/api/wand-tasks/:id/comments/:commentId/result", (req, res) => {
+    const result = readCommentResult(req, res, true);
+    if (!result) return;
+    const { binding, session, range } = result;
     const rawLimit = Number.parseInt(String(req.query.limit ?? "40"), 10);
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 40;
     const rawOffset = Number.parseInt(String(req.query.offset ?? "0"), 10);
-    const offset = Number.isFinite(rawOffset) ? Math.min(Math.max(rawOffset, 0), end - start) : 0;
-    const anchored = enrichStructuredMessages(messages.slice(start, end), session.id);
+    const offset = Number.isFinite(rawOffset) ? Math.min(Math.max(rawOffset, 0), range.length) : 0;
+    const anchored = enrichStructuredMessages(range, session.id);
     // Bound the requested turn window before truncating blocks, so paging cannot
     // let a large earlier result evict tool_result data from a later turn.
     const page = anchored.slice(offset, Math.min(offset + limit, anchored.length));
@@ -253,7 +267,7 @@ export function registerTaskCommentRoutes(app: Express, deps: TaskRouteDependenc
     const bounded = boundedCommentResultMessages(truncatedPage, offset);
     let includedTurns = bounded.messages.length;
     let response = { available: true, sessionId: binding.sessionId.slice(0, 128), outcome: binding.outcome,
-      messages: bounded.messages, truncatedBlocks: bounded.truncatedBlocks, offset, total: end - start };
+      messages: bounded.messages, truncatedBlocks: bounded.truncatedBlocks, offset, total: range.length };
     while (Buffer.byteLength(JSON.stringify(response), "utf8") > COMMENT_RESULT_PAGE_BYTES && includedTurns > 0) {
       const turn = bounded.messages[includedTurns - 1]!;
       if (turn.content.length > 0) {
@@ -272,26 +286,9 @@ export function registerTaskCommentRoutes(app: Express, deps: TaskRouteDependenc
   });
 
   app.get("/api/wand-tasks/:id/comments/:commentId/result/blocks/:turnOffset", (req, res) => {
-    const task = storage.getWandTask(req.params.id);
-    const binding = storage.getTaskCommentResultBinding(req.params.id, req.params.commentId);
-    const comment = storage.getTaskCommentForTask(req.params.id, req.params.commentId);
-    if (!task) { res.status(404).json({ error: "未找到该任务。" }); return; }
-    if (!binding || !comment) { res.status(404).json({ error: "未找到该评论执行记录。" }); return; }
-    const session = deps.sessions?.get(binding.sessionId) ?? storage.getSession(binding.sessionId);
-    if (!session || session.sessionKind !== "structured" || session.automationId !== `wand-task-comment:${req.params.commentId}`
-      || session.workspaceTaskId !== (comment.dispatch?.executionTaskId ? storage.getWandTask(comment.dispatch.executionTaskId)?.workspaceTaskId : task.workspaceTaskId) || binding.startIndex === null || binding.endIndex === null
-      || !binding.requestId || !binding.fingerprint || !binding.outcome) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy" }); return;
-    }
-    const messages = session.messages ?? [];
-    const start = binding.startIndex, end = binding.endIndex;
-    const range = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end <= messages.length
-      ? messages.slice(start, end) : [];
-    const fingerprint = range.length ? crypto.createHash("sha256").update(JSON.stringify(range)).digest("hex") : "";
-    if (end <= start || messages[start]?.role !== "user" || messages[start]?.requestId !== binding.requestId
-      || fingerprint !== binding.fingerprint || range.slice(1).some(message => message.role === "user")) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy" }); return;
-    }
+    const result = readCommentResult(req, res);
+    if (!result) return;
+    const { range } = result;
     const turnOffset = Number.parseInt(req.params.turnOffset, 10);
     const turn = Number.isSafeInteger(turnOffset) && turnOffset >= 0 ? range[turnOffset] : undefined;
     if (!turn) { res.status(404).json({ error: "该轮次不属于此评论结果。" }); return; }
@@ -321,26 +318,9 @@ export function registerTaskCommentRoutes(app: Express, deps: TaskRouteDependenc
   });
 
   app.get("/api/wand-tasks/:id/comments/:commentId/result/tool-content/:toolUseId", (req, res) => {
-    const task = storage.getWandTask(req.params.id);
-    const binding = storage.getTaskCommentResultBinding(req.params.id, req.params.commentId);
-    const comment = storage.getTaskCommentForTask(req.params.id, req.params.commentId);
-    if (!task) { res.status(404).json({ error: "未找到该任务。" }); return; }
-    if (!binding || !comment) { res.status(404).json({ error: "未找到该评论执行记录。" }); return; }
-    const session = deps.sessions?.get(binding.sessionId) ?? storage.getSession(binding.sessionId);
-    if (!session || session.sessionKind !== "structured" || session.automationId !== `wand-task-comment:${req.params.commentId}`
-      || session.workspaceTaskId !== (comment.dispatch?.executionTaskId ? storage.getWandTask(comment.dispatch.executionTaskId)?.workspaceTaskId : task.workspaceTaskId) || binding.startIndex === null || binding.endIndex === null
-      || !binding.requestId || !binding.fingerprint || !binding.outcome) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy" }); return;
-    }
-    const messages = session.messages ?? [];
-    const start = binding.startIndex, end = binding.endIndex;
-    const range = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end <= messages.length
-      ? messages.slice(start, end) : [];
-    const fingerprint = range.length ? crypto.createHash("sha256").update(JSON.stringify(range)).digest("hex") : "";
-    if (end <= start || messages[start]?.role !== "user" || messages[start]?.requestId !== binding.requestId
-      || fingerprint !== binding.fingerprint || range.slice(1).some(message => message.role === "user")) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy" }); return;
-    }
+    const result = readCommentResult(req, res);
+    if (!result) return;
+    const { range } = result;
     const toolUseId = req.params.toolUseId;
     let toolUse: ToolUseBlock | undefined;
     let toolResult: ToolResultBlock | undefined;
@@ -373,26 +353,9 @@ export function registerTaskCommentRoutes(app: Express, deps: TaskRouteDependenc
   });
 
   app.get("/api/wand-tasks/:id/comments/:commentId/result/block/:turnOffset/:blockIndex", (req, res) => {
-    const task = storage.getWandTask(req.params.id);
-    const binding = storage.getTaskCommentResultBinding(req.params.id, req.params.commentId);
-    const comment = storage.getTaskCommentForTask(req.params.id, req.params.commentId);
-    if (!task) { res.status(404).json({ error: "未找到该任务。" }); return; }
-    if (!binding || !comment) { res.status(404).json({ error: "未找到该评论执行记录。" }); return; }
-    const session = deps.sessions?.get(binding.sessionId) ?? storage.getSession(binding.sessionId);
-    if (!session || session.sessionKind !== "structured" || session.automationId !== `wand-task-comment:${req.params.commentId}`
-      || session.workspaceTaskId !== (comment.dispatch?.executionTaskId ? storage.getWandTask(comment.dispatch.executionTaskId)?.workspaceTaskId : task.workspaceTaskId) || binding.startIndex === null || binding.endIndex === null
-      || !binding.requestId || !binding.fingerprint || !binding.outcome) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy" }); return;
-    }
-    const messages = session.messages ?? [];
-    const start = binding.startIndex, end = binding.endIndex;
-    const range = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end <= messages.length
-      ? messages.slice(start, end) : [];
-    const fingerprint = range.length ? crypto.createHash("sha256").update(JSON.stringify(range)).digest("hex") : "";
-    if (end <= start || messages[start]?.role !== "user" || messages[start]?.requestId !== binding.requestId
-      || fingerprint !== binding.fingerprint || range.slice(1).some(message => message.role === "user")) {
-      res.set("Cache-Control", "no-store").json({ available: false, reason: "unconfirmed_legacy" }); return;
-    }
+    const result = readCommentResult(req, res);
+    if (!result) return;
+    const { range } = result;
     const turnOffset = Number.parseInt(req.params.turnOffset, 10);
     const blockIndex = Number.parseInt(req.params.blockIndex, 10);
     const turn = Number.isSafeInteger(turnOffset) && turnOffset >= 0 ? range[turnOffset] : undefined;

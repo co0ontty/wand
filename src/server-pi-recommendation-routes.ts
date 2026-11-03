@@ -1,3 +1,4 @@
+import { responseAbortController } from "./express-async.js";
 import type { Express } from "express";
 import { DECISION_EXPERT_NAME } from "./decision-expert-identity.js";
 import type { DecisionService } from "./decision-service.js";
@@ -22,12 +23,10 @@ export function registerPiRecommendationRoute(app: Express, deps: {
   const active = new Set<string>();
   app.post("/api/sessions/:id/pi-settings/recommend", async (req, res) => {
     const id = req.params.id;
-    const abort = new AbortController();
-    const disconnected = (): void => { if (!res.writableEnded) abort.abort(); };
+    const { controller: abort, dispose: releaseAbort } = responseAbortController(res);
     let timer: NodeJS.Timeout | undefined;
     let owns = false;
     res.set("Cache-Control", "no-store");
-    res.once("close", disconnected);
     try {
       const owner = deps.sessions.ownerOf(id);
       if (!owner) throw new DecisionError("NOT_FOUND", "未找到该会话。", 404);
@@ -71,7 +70,7 @@ export function registerPiRecommendationRoute(app: Express, deps: {
       res.status(failure.status).json({ error: failure.message, code: failure.code });
     } finally {
       if (timer) clearTimeout(timer);
-      res.off("close", disconnected);
+      releaseAbort();
       if (owns) active.delete(id);
     }
   });

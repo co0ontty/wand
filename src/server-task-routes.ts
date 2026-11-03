@@ -165,6 +165,13 @@ function milestoneWorkspaceIdFrom(storage: WandStorage, value: unknown): string 
   return workspaceId;
 }
 
+/** Check the final name/scope pair for both creation and partial edits. */
+function assertUniqueMilestone(storage: WandStorage, name: string, workspaceId: string | null, exceptId?: string): void {
+  const duplicate = storage.listWandMilestones(workspaceId)
+    .find((milestone) => milestone.id !== exceptId && milestone.name.toLowerCase() === name.toLowerCase());
+  if (duplicate) throw badRequest(`里程碑「${duplicate.name}」已存在。`);
+}
+
 interface TaskDtoDeps {
   storage: WandStorage;
   sessions?: SessionRegistry;
@@ -256,6 +263,14 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   taskTitleService(storage, { config, generateTitle: deps.generateTitle, free: deps.free });
   const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(deps, task);
 
+  const moveDispatchTask = (task: NonNullable<ReturnType<WandStorage["getWandTask"]>>, value: unknown) => {
+    const workspaceId = value === null ? null : text(value) || null;
+    if (workspaceId && !storage.getWorkspace(workspaceId)) throw badRequest("项目不存在。");
+    parentTaskIdFrom(storage, task.parentTaskId, workspaceId, task.id, task.parentTaskId);
+    if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
+    return storage.updateWandTask(task.id, { workspaceId }) ?? task;
+  };
+
   app.get("/api/reference/:id", (req, res) => {
     const id = String(req.params.id).toLowerCase();
     if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id)) { res.status(400).send("记录 ID 格式无效。"); return; }
@@ -310,9 +325,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const name = milestoneNameFrom(body.name);
       const workspaceId = milestoneWorkspaceIdFrom(storage, body.workspaceId);
       // 重名只在「同一个工作区可见的里程碑」里查：不同工作区可以各有同名迭代。
-      const duplicate = storage.listWandMilestones(workspaceId)
-        .find((milestone) => milestone.name.toLowerCase() === name.toLowerCase());
-      if (duplicate) throw badRequest(`里程碑「${duplicate.name}」已存在。`);
+      assertUniqueMilestone(storage, name, workspaceId);
       const created = storage.createWandMilestone({ name, dueDate: dateValue(body.dueDate) ?? null, workspaceId });
       res.status(201).json({ ...created, taskCount: 0 });
     } catch (error) {
@@ -329,19 +342,15 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       }
       const patch: { name?: string; dueDate?: string | null; workspaceId?: string | null } = {};
       if (body.name !== undefined) {
-        const name = milestoneNameFrom(body.name);
-        const duplicate = storage.listWandMilestones(current.workspaceId)
-          .find((milestone) => milestone.id !== current.id && milestone.name.toLowerCase() === name.toLowerCase());
-        if (duplicate) throw badRequest(`里程碑「${duplicate.name}」已存在。`);
-        patch.name = name;
+        patch.name = milestoneNameFrom(body.name);
       }
       if (body.workspaceId !== undefined) {
         // 允许改挂工作区（例如新建任务时目录对应的项目还没建，提交后再绑上）。
-        const workspaceId = milestoneWorkspaceIdFrom(storage, body.workspaceId);
-        const duplicate = storage.listWandMilestones(workspaceId)
-          .find((milestone) => milestone.id !== current.id && milestone.name.toLowerCase() === current.name.toLowerCase());
-        if (duplicate) throw badRequest(`里程碑「${duplicate.name}」已存在。`);
-        patch.workspaceId = workspaceId;
+        patch.workspaceId = milestoneWorkspaceIdFrom(storage, body.workspaceId);
+      }
+      if (body.name !== undefined || body.workspaceId !== undefined) {
+        assertUniqueMilestone(storage, patch.name ?? current.name,
+          patch.workspaceId === undefined ? current.workspaceId : patch.workspaceId, current.id);
       }
       if (body.dueDate !== undefined) patch.dueDate = dateValue(body.dueDate) ?? null;
       const updated = storage.updateWandMilestone(current.id, patch);
@@ -655,11 +664,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         const team = storage.getAiTeam(subject.id);
         if (!team) throw badRequest("AI 团队不存在。");
         if (body.workspaceId !== undefined) {
-          const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
-          if (workspaceId && !storage.getWorkspace(workspaceId)) throw badRequest("项目不存在。");
-          parentTaskIdFrom(storage, task.parentTaskId, workspaceId, task.id, task.parentTaskId);
-          if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
-          task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
+          task = moveDispatchTask(task, body.workspaceId);
         }
         const target = resolveTaskDispatchTarget({ storage, config }, task);
         const detail = await aiTeams.start({ teamId: team.id, taskId: task.id, note: prompt });
@@ -716,16 +721,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (agent.kind === "structured" && !structured) throw badRequest("当前服务未启用结构化会话，无法派发 Agent。");
       if (agent.kind === "pty" && !processes) throw badRequest("当前服务未启用终端会话，无法派发 Agent。");
       if (body.workspaceId !== undefined) {
-        const workspaceId = body.workspaceId === null ? null : text(body.workspaceId) || null;
-        if (workspaceId && !storage.getWorkspace(workspaceId)) throw badRequest("项目不存在。");
-        parentTaskIdFrom(storage, task.parentTaskId, workspaceId, task.id, task.parentTaskId);
-        if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
-        task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
+        task = moveDispatchTask(task, body.workspaceId);
       }
       // Compatibility creation/drag clients also enter the same durable comment path for employees.
       // No implicit description fallback: a first dispatch needs an explicit round instruction too.
       if (employee) {
-        const result = await submitTaskComment(deps, task.id, { requestId: text(body.requestId) || randomUUID(), body: requestedPrompt, employeeId: employee.id, purpose: reviewing ? "review" : "execution" }, override ?? undefined);
+        const result = await submitTaskComment(deps, task.id, { requestId: text(body.requestId) || randomUUID(), body: requestedPrompt, submissionSource: body.submissionSource === "user_dispatch" ? "user_dispatch" : undefined, employeeId: employee.id, purpose: reviewing ? "review" : "execution" }, override ?? undefined);
         const session = result.comment.dispatch?.sessionId ? sessions?.getSlim(result.comment.dispatch.sessionId)
           ?? storage.getSessionSlim(result.comment.dispatch.sessionId) : null;
         // 排队中的派发同样要把任务挂到员工并保持活动；不能因为没有会话就跳过。
@@ -737,7 +738,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       }
       const { session, cwd, workspaceId } = await dispatchAgentForTask(
         { storage, config, structured: structured ?? null, processes: processes ?? null },
-        { task, agent, prompt, automationId: `wand-task:${task.id}` },
+        { task, agent, prompt, automationId: `wand-task:${task.id}`,
+          origin: { kind: "task_dispatch", taskId: task.id, taskIdentifier: task.identifier, commentId: "",
+            triggerName: body.submissionSource === "user_dispatch" ? "用户" : null, entrySessionId: null } },
       );
       task = storage.getWandTask(task.id)!;
       const usedSubject = subject?.type === "employee" ? { type: "employee" as const, id: subject.id, ...(override ? { agentOverride: override } : {}) } : subject ?? { type: "cli" as const, id: agent.provider };

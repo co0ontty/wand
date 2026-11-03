@@ -600,7 +600,7 @@ export const ISSUE_BOARD_VIEWS: ReadonlyArray<{ value: IssueBoardView; label: st
   { value: "dashboard", label: "概览" },
   { value: "board", label: "看板" },
   { value: "list", label: "列表" },
-  { value: "gantt", label: "甘特图" },
+  { value: "gantt", label: "日历" },
 ];
 
 export type IssueGanttZoom = "day" | "week" | "month";
@@ -826,30 +826,55 @@ export function issueProgressSeries<T extends { status: WandTaskStatus; createdA
   });
 }
 
-export function issueGanttRange<T extends { createdAt: string; dueDate: string | null; updatedAt: string }>(
-  tasks: readonly T[],
-  zoom: IssueGanttZoom,
-): { start: string; days: number; columns: string[] } {
-  const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  const span = zoom === "day" ? 14 : zoom === "week" ? 42 : 90;
-  const startDate = new Date(today);
-  startDate.setDate(startDate.getDate() - Math.floor(span / 4));
-  const start = isoDate(startDate);
-  const columns = Array.from({ length: span }, (_, index) => addIsoDays(start, index));
-  return { start, days: span, columns };
+type IssueGanttTask = Pick<WandTask, "createdAt" | "dueDate" | "archivedAt" | "status">;
+
+function ganttDay(value: string): number {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? NaN : Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
 }
 
-export function issueGanttSpan<T extends { createdAt: string; dueDate: string | null; updatedAt: string; status: WandTaskStatus }>(
-  task: T,
+function ganttBounds(task: IssueGanttTask, now: Date): [number, number] {
+  if (task.dueDate) {
+    const due = ganttDay(`${task.dueDate}T12:00:00`);
+    return [due, due];
+  }
+  return [ganttDay(task.createdAt), ganttDay(task.status === "archived" ? task.archivedAt ?? "" : now.toISOString())];
+}
+
+export function issueGanttRange(
+  zoom: IssueGanttZoom,
+  anchor = new Date(),
+): { start: string; days: number; columns: string[] } {
+  const date = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 12);
+  if (zoom === "week") date.setDate(date.getDate() - (date.getDay() + 6) % 7);
+  if (zoom === "month") date.setDate(1);
+  const start = isoDate(date);
+  const days = zoom === "day" ? 1 : zoom === "week" ? 7 : new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  return { start, days, columns: Array.from({ length: days }, (_, index) => addIsoDays(start, index)) };
+}
+
+export function issueTaskAge(createdAt: string, now = new Date()): string {
+  const elapsed = now.getTime() - new Date(createdAt).getTime();
+  if (!Number.isFinite(elapsed)) return "时间未知";
+  const minutes = Math.max(0, Math.floor(elapsed / 60_000));
+  if (minutes >= 10_080) return `${Math.floor(minutes / 10_080)}周`;
+  if (minutes >= 1_440) return `${Math.floor(minutes / 1_440)}天`;
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}小时`;
+  return `${minutes}分钟`;
+}
+
+export function issueGanttSpan(
+  task: IssueGanttTask,
   start: string,
   days: number,
+  now = new Date(),
 ): { offset: number; length: number } {
-  if (!task.dueDate) return { offset: 0, length: 0 };
-  const startMs = new Date(`${start}T12:00:00`).getTime();
-  const dueMs = new Date(`${task.dueDate}T12:00:00`).getTime();
-  const offset = Math.round((dueMs - startMs) / 86_400_000);
-  return Number.isFinite(offset) && offset >= 0 && offset < days ? { offset, length: 1 } : { offset: 0, length: 0 };
+  const [first, last] = ganttBounds(task, now);
+  const origin = ganttDay(`${start}T12:00:00`);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) return { offset: 0, length: 0 };
+  const offset = Math.max(0, first - origin);
+  const end = Math.min(days - 1, last - origin);
+  return end >= offset ? { offset, length: end - offset + 1 } : { offset: 0, length: 0 };
 }
 
 export function formatIssueStamp(value: string | null | undefined): string {

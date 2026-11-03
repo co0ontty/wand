@@ -26,6 +26,14 @@ export function asyncRoute(handler: AsyncRouteHandler): RequestHandler {
   };
 }
 
+/** Cancel response-bound work only on disconnect, and release the listener in finally. */
+export function responseAbortController(res: Response): { controller: AbortController; dispose(): void } {
+  const controller = new AbortController();
+  const disconnected = (): void => { if (!res.writableEnded) controller.abort(); };
+  res.once("close", disconnected);
+  return { controller, dispose: () => { res.off("close", disconnected); } };
+}
+
 /** 状态码到稳定错误码；未知 4xx/5xx 归到通用码。 */
 export function errorCodeForStatus(status: number): string {
   switch (status) {

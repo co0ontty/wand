@@ -1,106 +1,54 @@
+import { createDialogLifecycle, type DialogControls, type DialogLifecycle } from "../dialog-lifecycle";
 import type { FolderPickerRuntimeAdapter } from "./types";
 
-export interface FolderPickerControllerSnapshot {
-  open: boolean;
-  dismissable: boolean;
+export interface FolderPickerControllerSnapshot extends DialogLifecycle {
   initialPath: string;
-  revision: number;
 }
 
-export interface WandFolderPickerController {
+export interface WandFolderPickerController extends DialogControls {
   open(initialPath?: string): boolean;
-  close(): void;
-  closeIfOpen(): boolean;
-  closeTopmost(): boolean;
-  isOpen(): boolean;
-  setDismissable(dismissable: boolean): void;
   choose(path: string): Promise<boolean>;
 }
 
-type Listener = () => void;
-
 let runtime: FolderPickerRuntimeAdapter | null = null;
-let snapshot: FolderPickerControllerSnapshot = {
-  open: false,
-  dismissable: true,
+const dialog = createDialogLifecycle<Omit<FolderPickerControllerSnapshot, keyof DialogLifecycle>>({
   initialPath: "",
-  revision: 0,
-};
-const listeners = new Set<Listener>();
-
-function publish(open: boolean, initialPath = snapshot.initialPath): void {
-  snapshot = { open, dismissable: true, initialPath, revision: snapshot.revision + 1 };
-  for (const listener of listeners) listener();
-}
-
-function publishDismissable(dismissable: boolean): void {
-  if (!snapshot.open || snapshot.dismissable === dismissable) return;
-  snapshot = { ...snapshot, dismissable };
-  for (const listener of listeners) listener();
-}
+});
 
 export const folderPickerController: WandFolderPickerController = {
+  ...dialog.controls,
   open(initialPath?: string): boolean {
     if (!runtime) return false;
     const resolved = (initialPath ?? runtime.getInitialPath()).trim();
     if (!resolved) return false;
     runtime.onOpen?.();
-    publish(true, resolved);
+    dialog.publish(true, { initialPath: resolved });
     return true;
   },
 
   close(): void {
-    if (!snapshot.open) return;
-    publish(false);
+    if (!dialog.snapshot.open) return;
+    dialog.publish(false, { initialPath: dialog.snapshot.initialPath });
     runtime?.onClose?.();
-  },
-
-  closeIfOpen(): boolean {
-    if (!snapshot.open || !snapshot.dismissable) return false;
-    this.close();
-    return true;
-  },
-
-  closeTopmost(): boolean {
-    if (!snapshot.open) return false;
-    if (snapshot.dismissable) this.close();
-    return true;
-  },
-
-  isOpen(): boolean {
-    return snapshot.open;
-  },
-
-  setDismissable(dismissable): void {
-    publishDismissable(dismissable);
   },
 
   async choose(path: string): Promise<boolean> {
     const selectedPath = path.trim();
     const activeRuntime = runtime;
-    if (!snapshot.open || !activeRuntime || !selectedPath) return false;
+    if (!dialog.snapshot.open || !activeRuntime || !selectedPath) return false;
     await activeRuntime.applySelection(selectedPath);
     this.close();
     return true;
   },
 };
 
-export const folderPickerStore = {
-  subscribe(listener: Listener): () => void {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  },
-
-  getSnapshot(): FolderPickerControllerSnapshot {
-    return snapshot;
-  },
-};
+export const folderPickerStore = dialog.store;
 
 export function configureFolderPickerRuntime(adapter: FolderPickerRuntimeAdapter): () => void {
   runtime = adapter;
   return () => {
     if (runtime !== adapter) return;
-    if (snapshot.open) folderPickerController.close();
+    if (dialog.snapshot.open) folderPickerController.close();
     runtime = null;
   };
 }

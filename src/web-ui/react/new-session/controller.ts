@@ -1,3 +1,4 @@
+import { createDialogLifecycle, type DialogControls, type DialogLifecycle } from "../dialog-lifecycle";
 import type { NewSessionCreated, NewSessionCreateRequest, NewSessionKind, NewSessionRuntimeAdapter } from "./types";
 import type { TaskExecutionSubject, WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types.js";
 
@@ -17,9 +18,7 @@ export interface NewTaskDraftOptions {
   scope?: string;
 }
 
-export interface NewSessionControllerSnapshot {
-  open: boolean;
-  dismissable: boolean;
+export interface NewSessionControllerSnapshot extends DialogLifecycle {
   initialCwd: string;
   initialEmployeeId: string;
   /** 侧栏新建空白终端等入口可指定会话形态；空串表示用默认形态。 */
@@ -29,7 +28,6 @@ export interface NewSessionControllerSnapshot {
   taskName: string;
   newTask: boolean;
   taskDraft?: NewTaskDraftOptions;
-  revision: number;
 }
 
 export interface NewSessionOpenOptions {
@@ -49,25 +47,16 @@ export interface NewSessionUnknownCreation {
 }
 export interface NewSessionAcceptedCreation { request: NewSessionCreateRequest; created: NewSessionCreated; }
 
-export interface WandNewSessionController {
+export interface WandNewSessionController extends DialogControls {
   open(options?: NewSessionOpenOptions): boolean;
-  close(): void;
-  closeIfOpen(): boolean;
-  closeTopmost(): boolean;
-  isOpen(): boolean;
-  setDismissable(dismissable: boolean): void;
   getUnknownCreation(scope: string): NewSessionUnknownCreation | undefined;
   markUnknownCreation(value: NewSessionUnknownCreation): void;
   getAcceptedCreation(draftKey: string): NewSessionAcceptedCreation | undefined;
   setAcceptedCreation(draftKey: string, value: NewSessionAcceptedCreation | null): void;
 }
 
-type Listener = () => void;
-
 let runtime: NewSessionRuntimeAdapter | null = null;
-let snapshot: NewSessionControllerSnapshot = {
-  open: false,
-  dismissable: true,
+const emptyFields: Omit<NewSessionControllerSnapshot, keyof DialogLifecycle> = {
   initialCwd: "",
   initialEmployeeId: "",
   initialKind: "",
@@ -75,89 +64,33 @@ let snapshot: NewSessionControllerSnapshot = {
   workspaceTaskId: "",
   taskName: "",
   newTask: false,
-  revision: 0,
 };
-const listeners = new Set<Listener>();
+const dialog = createDialogLifecycle(emptyFields);
 const unknownCreations = new Map<string, NewSessionUnknownCreation>();
 const acceptedCreations = new Map<string, NewSessionAcceptedCreation>();
 
-function publish(
-  open: boolean,
-  initialCwd = "",
-  initialEmployeeId = "",
-  initialKind: NewSessionKind | "" = "",
-  workspaceId = "",
-  workspaceTaskId = "",
-  taskName = "",
-  newTask = false,
-  taskDraft?: NewTaskDraftOptions,
-): void {
-  snapshot = {
-    open,
-    dismissable: true,
-    initialCwd: open ? initialCwd.trim() : "",
-    initialEmployeeId: open ? initialEmployeeId.trim() : "",
-    initialKind: open ? initialKind : "",
-    workspaceId: open ? workspaceId.trim() : "",
-    workspaceTaskId: open ? workspaceTaskId.trim() : "",
-    taskName: open ? taskName.trim() : "",
-    newTask: open && newTask,
-    taskDraft: open ? taskDraft : undefined,
-    revision: snapshot.revision + 1,
-  };
-  for (const listener of listeners) listener();
-}
-
-function publishDismissable(dismissable: boolean): void {
-  if (!snapshot.open || snapshot.dismissable === dismissable) return;
-  // Dismissability is transient operation state, not a new open lifecycle.
-  // Keep revision stable so Host initialization effects are not replayed.
-  snapshot = { ...snapshot, dismissable };
-  for (const listener of listeners) listener();
-}
-
 export const newSessionController: WandNewSessionController = {
+  ...dialog.controls,
   open(options = {}): boolean {
-    if (!runtime || (snapshot.open && !snapshot.dismissable)) return false;
+    if (!runtime || (dialog.snapshot.open && !dialog.snapshot.dismissable)) return false;
     runtime.onOpen();
-    publish(
-      true,
-      options.initialCwd,
-      options.initialEmployeeId,
-      options.initialKind ?? "",
-      options.workspaceId,
-      options.workspaceTaskId,
-      options.taskName,
-      options.newTask,
-      options.taskDraft,
-    );
+    dialog.publish(true, {
+      initialCwd: (options.initialCwd ?? "").trim(),
+      initialEmployeeId: (options.initialEmployeeId ?? "").trim(),
+      initialKind: options.initialKind ?? "",
+      workspaceId: (options.workspaceId ?? "").trim(),
+      workspaceTaskId: (options.workspaceTaskId ?? "").trim(),
+      taskName: (options.taskName ?? "").trim(),
+      newTask: options.newTask ?? false,
+      taskDraft: options.taskDraft,
+    });
     return true;
   },
 
   close(): void {
-    if (!snapshot.open) return;
-    publish(false);
+    if (!dialog.snapshot.open) return;
+    dialog.publish(false, { ...emptyFields, taskDraft: undefined });
     runtime?.onClose();
-  },
-
-  closeIfOpen(): boolean {
-    if (!snapshot.open || !snapshot.dismissable) return false;
-    this.close();
-    return true;
-  },
-
-  closeTopmost(): boolean {
-    if (!snapshot.open) return false;
-    if (snapshot.dismissable) this.close();
-    return true;
-  },
-
-  isOpen(): boolean {
-    return snapshot.open;
-  },
-
-  setDismissable(dismissable): void {
-    publishDismissable(dismissable);
   },
 
   getUnknownCreation(scope): NewSessionUnknownCreation | undefined {
@@ -175,14 +108,7 @@ export const newSessionController: WandNewSessionController = {
 };
 
 export const newSessionStore = {
-  subscribe(listener: Listener): () => void {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  },
-
-  getSnapshot(): NewSessionControllerSnapshot {
-    return snapshot;
-  },
+  ...dialog.store,
 
   getRuntime(): NewSessionRuntimeAdapter | null {
     return runtime;
@@ -193,7 +119,7 @@ export function configureNewSessionRuntime(adapter: NewSessionRuntimeAdapter): (
   runtime = adapter;
   return () => {
     if (runtime !== adapter) return;
-    if (snapshot.open) newSessionController.close();
+    if (dialog.snapshot.open) newSessionController.close();
     runtime = null;
   };
 }

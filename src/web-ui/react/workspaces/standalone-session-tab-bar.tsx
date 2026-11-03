@@ -99,11 +99,12 @@ export function StandaloneSessionTabBar({ fallback = null }: { fallback?: React.
             }
           })();
         }}
-        onNewSession={() => {
+        onNewSession={kind => {
           const group = currentEntry?.group
             ?? model.groups.find(g => `id:${g.workspaceId}` === model.facets.workspace && !g.synthetic && !g.global)
             ?? (selected?.workspaceId ? model.groups.find(g => g.workspaceId === selected.workspaceId) : undefined);
           newSessionController.open({
+            initialKind: kind,
             initialCwd: selected?.cwd || group?.workspaceCwd,
             workspaceId: group ? (!group.synthetic && !group.global ? group.workspaceId : undefined) : selected?.workspaceId,
           });

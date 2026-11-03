@@ -171,7 +171,15 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
           persist(previous);
           throw new Error("无法保存终端创建状态，请允许本站存储后重新连接；尚未创建新终端。");
         }
-        const resolved = await resolveQuickTerminal(current.sessionId, directory);
+        let resolved;
+        try { resolved = await resolveQuickTerminal(current.sessionId, directory); }
+        catch (cause) {
+          // Only an authoritative missing reference permits replacement. Network,
+          // permission and unknown POST outcomes keep the original creation guard.
+          if (!(cause instanceof QuickTerminalUnavailableError)) throw cause;
+          if (!persist({ dock: preferenceRef.current.dock, sessionId: "", creationPending: true })) throw cause;
+          resolved = await resolveQuickTerminal("", directory);
+        }
         // Commit before releasing the cross-window lock.
         persist({ dock: preferenceRef.current.dock, sessionId: resolved.id });
         if (resolved.navigationChanged) refreshTerminalNavigation();

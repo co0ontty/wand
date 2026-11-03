@@ -55,7 +55,7 @@ export function NewSessionHost(props: NewSessionHostProps): React.ReactElement |
 
 function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostProps): React.ReactElement {
   const controller = newSessionStore.getSnapshot();
-  const key = controller.taskDraft?.draftKey || conversationDraftKey(`new-work:${controller.workspaceTaskId || controller.workspaceId || "standalone"}`, null);
+  const key = controller.taskDraft?.draftKey || conversationDraftKey(`new-work:${controller.workspaceTaskId || controller.workspaceId || "standalone"}${controller.initialKind === "shell" ? ":shell" : ""}`, null);
   const [defaults, setDefaults] = React.useState<NewSessionDefaults | null>(null);
   const [form, setForm] = React.useState<NewSessionForm | null>(null);
   const [error, setError] = React.useState("");
@@ -177,7 +177,7 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
       mode: current.mode === "full-access" ? "default" : current.mode,
       engine: kind === "pty" ? "cli" : current.engine } : current);
   };
-  const markUnconfirmedCreation = (cause: unknown): void => {
+  const markUnconfirmedCreation = (cause: unknown, includesInput = false): void => {
     const status = (cause as { status?: number })?.status;
     if (status && status >= 400 && status < 500 && status !== 408 && status !== 409) return;
     const message = "创建结果未确认，请先核对任务和会话列表，不要重复创建；本页输入保留。";
@@ -185,28 +185,30 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
     newSessionController.markUnknownCreation({ scope: `draft:${key}`, message });
     // Unlike ordinary empty-session creation, a team start includes the note.
     // It may already be executing: preserve it only in the owning page's memory.
-    if (form?.teamId) teamChatComposer.edit(key, { text: draft.text, expectedRevision: draft.revision, persist: false });
+    if (includesInput) teamChatComposer.edit(key, { text: draft.text, expectedRevision: draft.revision, persist: false });
     setUnknown(message);
   };
-  const submit = async (): Promise<void> => {
+  const submit = async (blankTerminal = false): Promise<void> => {
     const scope = controller.workspaceTaskId || controller.workspaceId || "standalone";
     const unresolved = newSessionController.getUnknownCreation(`draft:${key}`) || newSessionController.getUnknownCreation(scope);
     if (unresolved) { setUnknown(unresolved.message); return; }
-    if (!form || !defaults || lock.current || !!unknown || !valid) return;
+    if (!form || !defaults || lock.current || !!unknown) return;
+    if (blankTerminal ? !form.cwd.trim() || (form.taskName !== undefined && !form.taskName.trim()) : !valid) return;
+    const creationForm = blankTerminal ? { ...form, kind: "shell" as const, employeeId: undefined, teamId: undefined } : form;
     const runtime = newSessionStore.getRuntime();
     if (!runtime) { setError("运行环境未就绪，请刷新页面后重试；草稿保留。"); return; }
     lock.current = true; setSubmitting(true); setError(""); setSubjectOpen(false); setDirectoryOpen(false); setSettingsOpen(false); setMoreOpen(false);
     setTitleSubjectOpen(false); setTitleDirectoryOpen(false);
     newSessionController.setDismissable(false);
     try {
-      if (form.teamId) {
+      if (creationForm.teamId) {
         if (draft.attachments.length) throw new Error("团队新工作暂不支持附件，请先移除附件后开工。");
         if (!teamWorkspaceId) throw new Error("团队工作需要已存在的项目，请更换运行目录后重试。");
-        const result = await aiTeamsRepository.startDirect(form.teamId, { workspaceId: teamWorkspaceId, note: draft.text })
+        const result = await aiTeamsRepository.startDirect(creationForm.teamId, { workspaceId: teamWorkspaceId, note: draft.text })
           .then(result => {
             if (!result?.run?.id) throw new Error("服务端未返回团队运行 ID。");
             return result;
-          }).catch(cause => { markUnconfirmedCreation(cause); throw cause; });
+          }).catch(cause => { markUnconfirmedCreation(cause, true); throw cause; });
         await aiTeamsRepository.settle("success");
         teamChatComposer.edit(key, { acknowledgeRevision: draft.revision });
         newSessionController.close();
@@ -214,8 +216,11 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
         else taskBoardController.open("", "", "teams");
         notifyTasksChanged(); return;
       }
-      const bound = await resolveNewSessionTask(form, form.cwd, httpWorkspacesRepository);
-      if (bound !== form) { setForm(bound); notifyTasksChanged(); }
+      const bound = await resolveNewSessionTask(creationForm, creationForm.cwd, httpWorkspacesRepository);
+      if (bound !== creationForm) {
+        setForm(blankTerminal ? { ...form, workspaceId: bound.workspaceId, workspaceTaskId: bound.workspaceTaskId, taskName: bound.taskName } : bound);
+        notifyTasksChanged();
+      }
       if (!accepted.current) {
         const manual = preference && bound.kind !== "shell";
         const selected = manual ? { ...bound, provider: executionForm!.provider, engine: executionForm!.engine,
@@ -234,17 +239,23 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
         newSessionController.setAcceptedCreation(key, accepted.current);
       }
       const { request, created } = accepted.current;
-      await runtime.completeCreate(request, created, draft.text || draft.attachments.length ? { key, revision: draft.revision } : undefined);
+      await runtime.completeCreate(request, created, !blankTerminal && (draft.text || draft.attachments.length) ? { key, revision: draft.revision } : undefined);
       newSessionController.setAcceptedCreation(key, null);
       newSessionController.close();
     } catch (cause) {
-      if (form.teamId) await aiTeamsRepository.settle("error");
+      if (creationForm.teamId) await aiTeamsRepository.settle("error");
       if (mounted.current) setError(describeError(cause, "创建未完成，输入已保留。"));
     } finally {
       lock.current = false; newSessionController.setDismissable(true);
       if (mounted.current) setSubmitting(false);
     }
   };
+  const autoOpened = React.useRef(false);
+  React.useEffect(() => {
+    if (controller.initialKind !== "shell" || !form || !defaults || loading || autoOpened.current) return;
+    autoOpened.current = true;
+    void submit(true);
+  }, [form, defaults, loading]);
   const placeholder = form?.kind === "shell" ? "输入启动后要执行的命令（可选）…" : form?.kind === "pty" ? "输入要交给 CLI 的内容（可选）…" : "随心输入，描述你想完成的事…";
   const projectName = matchedProject?.name || form?.cwd.trim().split("/").filter(Boolean).at(-1) || "Wand";
   const permissionLabel = permission?.kind === "shell" ? "系统 Shell" : ({ managed: "托管执行", "full-access": "完全访问", "auto-edit": "自动编辑", native: "原生模式", default: "标准权限" } as const)[permission?.mode || "default"];
@@ -336,6 +347,12 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   return <section className="new-work-page conversation-root" aria-label="新建工作">
     {loading || employeesLoading ? <Flex align="center" justify="center" flex={1}><Spin/><span>正在读取工作配置…</span></Flex> : form && defaults ? <>
       <div className="new-work-context">
+        <WandTabs ariaLabel="新建会话模式" value={form.kind === "shell" ? "shell" : "structured"}
+          onValueChange={value => { if (value === "shell") void submit(true); else chooseKind("structured"); }}
+          tabs={[
+            { value: "structured", label: "对话模式", content: null, disabled },
+            { value: "shell", label: "空白终端", content: null, disabled: disabled || !form.cwd.trim() || (form.taskName !== undefined && !form.taskName.trim()) },
+          ]}/>
         <h1>{form.kind === "structured" ? <>
           今天你想与
           <WandPopover ariaLabel="选择新工作员工" side="bottom" open={titleSubjectOpen} onOpenChange={setTitleSubjectOpen}

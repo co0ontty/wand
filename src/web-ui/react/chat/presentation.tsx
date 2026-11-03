@@ -101,7 +101,8 @@ function captureSlots(element: Element, kind: Kind): Map<string, HTMLElement> {
 
 /** Wand owns message chrome; detached, non-interactive metadata stays a patchable source. */
 function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<string, HTMLElement> }): React.ReactElement {
-  const user = element.dataset.role === "user";
+  const origin = element.dataset.messageOrigin ? JSON.parse(element.dataset.messageOrigin) as import("../../../task-types.js").TaskCommentOrigin : null;
+  const user = element.dataset.role === "user" && !origin;
   const timing = slots.get("chat-message-time");
   const clock = timing?.querySelector("time");
   const duration = textOf(timing, ".chat-message-duration");
@@ -113,12 +114,12 @@ function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<strin
   </span> : null;
   return <ChatMessage own={user}
     // 助手的回复头部（时间 + 署名 + 收起）由 presentAssistantReply 持有，这里不再重复一份时间行。
-    header={user ? timeRow : undefined}
+    header={origin ? <span>任务自动派发 · {origin.triggerName ? `触发者：${origin.triggerName}` : "触发者未记录"} · {timeRow}</span> : user ? timeRow : undefined}
     footer={user && slots.get("chat-message-read") ? <span className="chat-message-read" aria-label="服务端已接收并开始处理">已读</span> : undefined}
     // 助手回复不设阅读栏宽：横向用满可用宽度（对齐 Android 回复正文），只有自己的发言按气泡收口。
     styles={{ body: { minWidth: 0, width: user ? undefined : "100%", maxWidth: user ? "calc(100% - 44px)" : "100%", marginInlineStart: user ? "auto" : undefined },
       content: { overflowWrap: "anywhere", ...(user ? {} : { padding: 0 }) } }}
-    content={businessBody(slots.get("chat-message-content") || slots.get("chat-message-text"))}/>;
+    content={<>{origin && <div className="task-comment-bubble-origin"><a href={`/?view=taskboard&task=${encodeURIComponent(origin.taskId)}&comment=${encodeURIComponent(origin.commentId)}`}>来源 {origin.taskIdentifier}{origin.commentId ? " · 原始评论" : ""}</a>{origin.entrySessionId ? <a href={`/?session=${encodeURIComponent(origin.entrySessionId)}`}>入口会话</a> : <span> · 入口会话未记录</span>}</div>}{businessBody(slots.get("chat-message-content") || slots.get("chat-message-text"))}</>}/>;
 }
 
 function renderProjection(element: HTMLElement, projection: Projection): void {

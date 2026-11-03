@@ -50,6 +50,7 @@ export function resolveTaskDispatchTarget(
 export async function dispatchAgentForTask(
   deps: AgentDispatchDeps,
   input: { task: WandTask; agent: WandTaskAgent; prompt: string; automationId: string; systemPrompt?: string;
+    origin?: import("./task-types.js").TaskCommentOrigin;
     employee?: SiliconEmployee; employeeCandidateIndex?: number;
     sessionCreated?: (session: SessionSnapshot) => void;
     teamRequestStarted?: (sessionId: string, requestId: string) => void },
@@ -118,9 +119,8 @@ export async function dispatchAgentForTask(
   storage.bindWandTaskSession(input.task.id, session.id);
   input.sessionCreated?.(session);
   if (agent.kind !== "pty") {
-    const completion = input.teamRequestStarted
-      ? structured!.sendMessage(session.id, input.prompt, { teamRequestStarted: input.teamRequestStarted })
-      : structured!.sendMessage(session.id, input.prompt);
+    const origin = input.origin ?? { kind: "task_dispatch" as const, triggerName: null, taskId: input.task.id, taskIdentifier: input.task.identifier, commentId: "", entrySessionId: null };
+    const completion = structured!.sendMessage(session.id, input.prompt, { teamRequestStarted: input.teamRequestStarted, origin });
     completion.catch((error) => console.error(`[AgentDispatch] ${input.automationId} failed:`, error));
   }
   return { session, cwd, workspaceId: group.workspaceId };

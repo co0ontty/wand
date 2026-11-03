@@ -26,6 +26,8 @@ import { updatePageRoute } from "../../page-route";
 import { describeError } from "../errors";
 import { wandOverlay } from "../overlay-controller";
 import { WandButton, WandIcon, WandInput, WandPopover, WandSelect, WandSwitch } from "../ui";
+import { WandSearchField } from "../ui/search-field";
+import { requestAddWorkspace } from "../workspaces/controller";
 import { PopupOwnerProvider } from "../ui/portal-context";
 import { MilestonePicker } from "../milestones/picker";
 import { defaultMilestone, useDefaultMilestone, usePreselectMilestone } from "../milestones/default-iteration";
@@ -96,6 +98,7 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
   const [rememberDefaults, setRememberDefaults] = React.useState(false);
   const [createMore, setCreateMore] = React.useState(false);
   const [propertiesOpen, setPropertiesOpen] = React.useState(false);
+  const [directoryQuery, setDirectoryQuery] = React.useState("");
   const [directoryOpen, setDirectoryOpen] = React.useState(false);
   const [subjectOpen, setSubjectOpen] = React.useState(false);
   const [titleSubjectOpen, setTitleSubjectOpen] = React.useState(false);
@@ -256,17 +259,43 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
   const directoryLabel = project?.name || draft.cwd.split("/").filter(Boolean).at(-1) || "选择目录";
   const subjectLabel = employee?.name || team?.name || issueAgentLabel(draft.agent.provider, draft.agent.engine);
   const label = saveAndDispatch ? "创建并开始执行" : "仅创建任务";
-  const changeDirectory = (cwd: string): void => {
-    const matched = workspaces.find(item => normalizedPath(item.cwd) === normalizedPath(cwd));
-    const workspaceId = matched?.id || "";
+  const changeDirectory = (cwd: string, workspaceId = workspaces.find(item => normalizedPath(item.cwd) === normalizedPath(cwd))?.id || ""): void => {
     edit({ cwd, workspaceId, ...(workspaceId === draft.workspaceId ? {} : { parentTaskId: "", milestoneId: workspaceMilestone(workspaceId) }) });
   };
+  const adoptWorkspace = (workspace: { id: string; name: string; cwd: string }): void => {
+    setWorkspaces(current => [workspace, ...current.filter(item => item.id !== workspace.id)]);
+    edit({ cwd: workspace.cwd, workspaceId: workspace.id, parentTaskId: "", milestoneId: workspaceMilestone(workspace.id) });
+    setDirectoryOpen(false); setTitleDirectoryOpen(false); setDirectoryQuery("");
+  };
+  const directoryMatch = (name: string, path: string): boolean => `${name} ${path}`.toLocaleLowerCase().includes(directoryQuery.trim().toLocaleLowerCase());
+  const registeredProjects = workspaces.filter(project => project.kind !== "global");
+  const recentDirectories = defaults?.recentPaths.filter(item => !registeredProjects.some(project => normalizedPath(project.cwd) === normalizedPath(item.path))) ?? [];
+  const directoryRow = (item: { name: string; path: string; workspaceId?: string }) => <WandButton key={item.workspaceId || item.path}
+    className="new-work-path-option" kind={normalizedPath(draft.cwd) === normalizedPath(item.path) ? "soft" : "ghost"} aria-pressed={normalizedPath(draft.cwd) === normalizedPath(item.path)}
+    title={item.path} onClick={() => { changeDirectory(item.path, item.workspaceId); setDirectoryOpen(false); setTitleDirectoryOpen(false); }}>
+    <WandIcon name="folder" size={18}/><span className="new-work-path-copy"><Typography.Text strong ellipsis>{item.name}</Typography.Text>
+      <Typography.Text type="secondary" ellipsis>{item.path}</Typography.Text></span>
+    {normalizedPath(draft.cwd) === normalizedPath(item.path) ? <WandIcon name="check" size={16}/> : null}
+  </WandButton>;
   const directoryPickerContent = (
-    <Flex vertical gap={12} className="new-work-paths"><Typography.Text strong>运行目录</Typography.Text>
-      <AutoComplete value={draft.cwd} options={suggestions.map(item => ({ value: item.path }))} onChange={changeDirectory}><WandInput autoFocus aria-label="新工作运行目录路径" placeholder="输入目录路径"
+    <Flex vertical gap={12} className="new-work-paths">
+      <Flex justify="space-between" align="center"><Typography.Text strong>选择工作区</Typography.Text>
+        <WandButton kind="ghost" onClick={() => {
+          setDirectoryOpen(false); setTitleDirectoryOpen(false);
+          requestAddWorkspace(draft.cwd, adoptWorkspace, "新建工作目录");
+        }}><WandIcon name="plus" size={16}/>添加工作区</WandButton></Flex>
+      <WandSearchField label="搜索工作区或最近目录" value={directoryQuery} onValueChange={setDirectoryQuery}/>
+      <Flex vertical gap={4} className="new-work-path-options">
+        {registeredProjects.filter(project => directoryMatch(project.name, project.cwd)).map(project => directoryRow({ name: project.name, path: project.cwd, workspaceId: project.id }))}
+        {recentDirectories.some(item => directoryMatch(item.name, item.path)) ? <Typography.Text type="secondary">最近目录</Typography.Text> : null}
+        {recentDirectories.filter(item => directoryMatch(item.name, item.path)).map(item => directoryRow(item))}
+        {!registeredProjects.some(project => directoryMatch(project.name, project.cwd)) && !recentDirectories.some(item => directoryMatch(item.name, item.path))
+          ? <Typography.Text type="secondary" role="status">没有匹配的工作区或最近目录</Typography.Text> : null}
+      </Flex>
+      <Typography.Text type="secondary">也可以直接填写运行目录</Typography.Text>
+      <AutoComplete value={draft.cwd} options={suggestions.map(item => ({ value: item.path }))} onChange={cwd => changeDirectory(cwd)}><WandInput aria-label="新工作运行目录路径" placeholder="输入目录路径"
         onCompositionStart={directoryIme.onCompositionStart} onCompositionEnd={directoryIme.onCompositionEnd}
         onKeyDown={event => { if (directoryIme.shouldIgnore(event)) return; if (event.key === "Enter") { event.preventDefault(); setDirectoryOpen(false); setTitleDirectoryOpen(false); } }}/></AutoComplete>
-      {defaults?.recentPaths.map(item => <WandButton kind="ghost" key={item.path} title={item.path} onClick={() => { changeDirectory(item.path); setDirectoryOpen(false); setTitleDirectoryOpen(false); }}>{item.path}</WandButton>)}
       <WandButton onClick={() => { setDirectoryOpen(false); setTitleDirectoryOpen(false); }}>完成</WandButton>
     </Flex>
   );
@@ -275,7 +304,8 @@ export function TaskCreationPage({ options }: { options: NewSessionControllerSna
       <Typography.Text strong>任务属性</Typography.Text>
       <Form.Item label="任务标题（可选）" style={{ marginBottom: 0 }}><WandInput autoFocus className="task-board-create-title-input" aria-label="任务标题" value={draft.title} maxLength={240} disabled={disabled} placeholder="不填写则按描述自动生成" onChange={event => edit({ title: event.currentTarget.value.replace(/\n/g, "") })}/></Form.Item>
       <div className="task-board-create-properties">
-        <AgentField label="项目目录"><WandSelect ariaLabel="指定项目目录" value={issueWorkspaceSelectValue(draft.workspaceId)} options={issueWorkspaceOptions(workspaces)} searchable searchPlaceholder="搜索项目" disabled={disabled}
+        <AgentField label="项目目录"><WandSelect ariaLabel="指定项目目录" popupOwner="task-create-properties" value={issueWorkspaceSelectValue(draft.workspaceId)} options={issueWorkspaceOptions(workspaces)} searchable searchPlaceholder="搜索项目" disabled={disabled}
+          popupAction={{ label: "＋ 添加工作区", onClick: () => requestAddWorkspace(draft.cwd, adoptWorkspace, "task-create-properties") }}
           onValueChange={value => { const id = issueWorkspaceIdFromSelect(value) || ""; const next = workspaces.find(item => item.id === id); edit({ workspaceId: id, cwd: next?.cwd || "", ...(id === draft.workspaceId ? {} : { parentTaskId: "", milestoneId: workspaceMilestone(id) }) }); }}/></AgentField>
         <AgentField label="父任务"><WandSelect ariaLabel="归属父任务" value={draft.parentTaskId || ISSUE_NO_PARENT} options={issueParentOptions(tasks, draft.workspaceId || undefined, null, draft.parentTaskId)} searchable searchPlaceholder="搜索主任务编号或标题" disabled={disabled}
           onValueChange={value => { const parent = tasks.find(item => item.id === value); const next = workspaces.find(item => item.id === parent?.workspaceId); edit({ parentTaskId: parent?.id || "", ...(parent ? { workspaceId: parent.workspaceId || "", cwd: next?.cwd || draft.cwd, milestoneId: parent.milestoneId || (parent.workspaceId === draft.workspaceId ? draft.milestoneId : workspaceMilestone(parent.workspaceId || "")) } : {}) }); }}/></AgentField>

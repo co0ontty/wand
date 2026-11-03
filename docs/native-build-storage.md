@@ -10,9 +10,11 @@
 - `TMPDIR`、Clang/Swift module cache：编译及打包临时输出。
 - `DEVELOPER_DIR`：当前调用使用的完整 Xcode，不要求更改全局 `xcode-select`。
 - `ANDROID_HOME` / `ANDROID_SDK_ROOT` / `ANDROID_AVD_HOME` / `GRADLE_USER_HOME`：Android 工具、设备与缓存。
-- `wand_assert_external_build_path <path>`（可选函数）：检查显式输出路径，拒绝解析到内盘的路径或符号链接逃逸；必须在清理/创建输出目录前调用。
+- `wand_assert_external_build_path <path>`（可选函数）：检查构建输出路径，拒绝解析到内盘的路径或符号链接逃逸；必须在清理/创建构建输出目录前调用。最终服务分发目录不属于编译输出，不能用此守卫要求它也位于外盘。
 
 macOS/iOS Release 支持 `WAND_BUILD_DIR` / `WAND_DIST_DIR`，显式指定时必须是尚不存在的绝对路径，不能用参数让脚本清空已有目录。Debug 与测试仍支持原有 `DERIVED_DATA_PATH` / `DERIVED_DATA`；配置可以校验它们必须留在外盘。Android 的 project cache 由 wrapper 定位到存储根下的项目路径 SHA-256 子目录；模块 buildDirectory 由本机 Gradle init script 配置到同一项目目录，分发脚本按相同目录读取 APK。
+
+Android `APK_DIST_DIR` 仅接收已完成的 APK 和 `.last-debug-version`，可以指定已存在的内盘服务目录；它不改变编译、缓存和临时输出位置。标准本机交付命令仍为 `cd android && SKIP_INSTALL=1 APK_DIST_DIR="$HOME/.wand/android" ./debug.sh`，未指定分发目录时沿用原默认路径（无存储策略时为 `dist/apk/`，启用策略后为外盘项目目录下的 `dist/`）。无论分发目标在哪，入口加载本机配置时仍须先验证外盘挂载、卷身份和容量；外盘缺失不得改从内盘构建或复制旧 APK。
 
 本机迁移依赖符号链接保留常规路径。原件仅在文件集合、内容校验和、权限和链接检查通过后移除。文件复制期间发现活跃写入或校验不一致，应保留原件并重新协调，而不是继续切换。
 

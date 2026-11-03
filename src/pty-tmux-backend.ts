@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, openSync, closeSync, readSync, statSync, renameSync, rmSync, lstatSync, existsSync } from "node:fs";
+import { directoryBytes, directoryLatestMtime } from "./directory-stats.js";
 import net from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import { ptyTmuxLogWriter } from "./pty-tmux-log.js";
@@ -35,30 +36,6 @@ export interface PtyTmuxGcReport {
   removedRecords: number;
   freedBytes: number;
   removedSockets: number;
-}
-
-function directoryLatestMtime(directory: string): number {
-  let latest = lstatSync(directory).mtimeMs;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = path.join(directory, entry.name);
-    const stat = lstatSync(child);
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) latest = Math.max(latest, directoryLatestMtime(child));
-    else latest = Math.max(latest, stat.mtimeMs);
-  }
-  return latest;
-}
-
-function directoryBytes(directory: string): number {
-  let total = 0;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = path.join(directory, entry.name);
-    const stat = lstatSync(child);
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) total += directoryBytes(child);
-    else total += stat.size;
-  }
-  return total;
 }
 
 function streamSocketPath(recordName: string): string {
@@ -332,43 +309,47 @@ export class PtyTmuxBackend {
     let segment = 0;
     let preservedMarker = "";
     const log = path.join(this.directory, `${record.name}.output`);
-    const drain = (targetSegment?: number, targetSize?: number): boolean => {
+    const drain = (): boolean => {
+      let remaining = 256 * 1024;
       let segments: number[] = [];
       try {
         segments = readdirSync(log).filter(file => /^\d+\.chunk$/.test(file)).map(file => Number(file.split(".")[0])).sort((a, b) => a - b);
-      } catch { return false; }
-      if (!segments.length) return false;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (!segments.length) return true;
       if (segment < segments[0]) {
         segment = segments[0]; offset = 0; decoder = new StringDecoder("utf8");
         for (const listener of data) listener("\u001bc[Wand: terminal replay truncated]\r\n");
         try { preservedMarker = readFileSync(path.join(log, "marker"), "utf8"); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       }
-      const maxSegment = typeof targetSegment === "number" ? Math.min(targetSegment, segments[segments.length - 1]) : segments[segments.length - 1];
+      const maxSegment = segments[segments.length - 1];
       while (segment <= maxSegment) {
         const file = path.join(log, `${segment}.chunk`);
         let size = 0;
         try { size = statSync(file).size; } catch { break; }
-        const limitSize = (typeof targetSegment === "number" && segment === targetSegment && typeof targetSize === "number")
-          ? Math.min(size, targetSize)
-          : size;
-        if (offset >= limitSize) {
+        if (size < offset) throw new Error("tmux terminal replay was truncated");
+        if (offset >= size) {
           if (segment < maxSegment) { segment++; offset = 0; continue; }
           if (preservedMarker) { for (const listener of data) listener(preservedMarker); preservedMarker = ""; }
           return true;
         }
         const fd = openSync(file, "r");
         try {
-          const buffer = Buffer.alloc(Math.min(limitSize - offset, 256 * 1024));
+          const buffer = Buffer.alloc(Math.min(size - offset, remaining));
           const count = readSync(fd, buffer, 0, buffer.length, offset);
+          if (!count) return false;
           offset += count;
+          remaining -= count;
           const chunk = decoder.write(buffer.subarray(0, count));
           if (chunk) for (const listener of data) listener(chunk);
         } finally { closeSync(fd); }
-        if (offset >= limitSize) {
-          if (segment < maxSegment) { segment++; offset = 0; continue; }
-          return true;
+        if (offset >= size) {
+          if (segment < maxSegment) { segment++; offset = 0; }
+          else return true;
         }
+        if (remaining <= 0) return false;
       }
       return false;
     };
@@ -382,7 +363,6 @@ export class PtyTmuxBackend {
       record.exitCode = exitCode;
       this.save(record);
       clearInterval(timer);
-      if (streamSocket) { try { streamSocket.destroy(); } catch {} streamSocket = null; }
       transport?.kill();
       for (const listener of exits) listener(exited);
     };
@@ -396,95 +376,21 @@ export class PtyTmuxBackend {
       transport.onExit(() => { transport = null; });
     };
 
-    const sockPath = streamSocketPath(record.name);
-    let streamSocket: net.Socket | null = null;
-    let handshaked = false;
-    let handshakeBuffer = "";
-    let connectAttempts = 0;
-
-    const checkExitAndFinish = (): void => {
-      if (exited) return;
-      try {
-        const state = inspect();
-        if (state.startsWith("1:")) {
-          finish(Number(state.split(":")[1]) || 0);
-        } else {
-          finish(0);
-        }
-      } catch (error) {
-        if (this.isTmuxMissing(error)) finish(137);
-        else finish(0);
-      }
-    };
-
-    const tryConnectStream = (): void => {
-      if (stopping || exited) return;
-      const client = net.connect(sockPath);
-      streamSocket = client;
-
-      client.on("data", (chunk: Buffer) => {
-        if (stopping || exited) return;
-        if (!handshaked) {
-          handshakeBuffer += chunk.toString("utf8");
-          const newline = handshakeBuffer.indexOf("\n");
-          if (newline < 0) return;
-          const line = handshakeBuffer.slice(0, newline);
-          const rest = handshakeBuffer.slice(newline + 1);
-          handshaked = true;
-          let targetSeg: number | undefined;
-          let targetSz: number | undefined;
-          try {
-            const meta = JSON.parse(line) as { segment?: number; size?: number };
-            if (typeof meta.segment === "number") targetSeg = meta.segment;
-            if (typeof meta.size === "number") targetSz = meta.size;
-          } catch {}
-          drain(targetSeg, targetSz);
-          if (rest.length > 0) {
-            for (const listener of data) listener(rest);
-          }
-          return;
-        }
-        const text = decoder.write(chunk);
-        if (text) {
-          for (const listener of data) listener(text);
-        }
-      });
-
-      client.on("end", () => {
-        if (stopping || exited) return;
-        drain();
-        checkExitAndFinish();
-      });
-
-      client.on("error", () => {
-        if (streamSocket === client) streamSocket = null;
-        if (stopping || exited || handshaked) return;
-        if (connectAttempts++ < 30) {
-          setTimeout(tryConnectStream, 40).unref();
-        } else {
-          drain();
-          if (record.exitCode !== undefined) {
-            finish(record.exitCode);
-          } else {
-            checkExitAndFinish();
-          }
-        }
-      });
-
-      client.on("close", () => {
-        if (streamSocket === client) streamSocket = null;
-      });
-    };
-
-    tryConnectStream();
-
+    // The durable log is the only output cursor. A disposable socket must never
+    // decide process lifetime or switch replay to an unrelated live byte stream.
+    let nextInspection = 0;
     const timer = setInterval(() => {
       if (stopping || exited || observationFailed) {
         clearInterval(timer);
         return;
       }
+      let drained = false;
+      try { drained = drain(); } catch { reportFailure(); return; }
       try {
-        const state = record.exitCode === undefined ? inspect() : null;
+        if (record.exitCode !== undefined) { if (drained) finish(record.exitCode); return; }
+        if (Date.now() < nextInspection) return;
+        nextInspection = Date.now() + 2000;
+        const state = inspect();
         if (state && !state.startsWith("0:") && !state.startsWith("1:")) {
           reportFailure();
           clearInterval(timer);
@@ -495,8 +401,7 @@ export class PtyTmuxBackend {
           clearInterval(timer);
           return;
         }
-        if (state?.startsWith("1:")) {
-          drain();
+        if (state?.startsWith("1:") && drained && drain()) {
           finish(Number(state.split(":")[1]) || 0);
           clearInterval(timer);
           return;
@@ -513,7 +418,7 @@ export class PtyTmuxBackend {
           clearInterval(timer);
         }
       }
-    }, 2000);
+    }, 100);
     timer.unref();
 
     if (record.exitCode === undefined) try { if (!inspect().startsWith("1:")) connect(); } catch { /* Keep unknown published ownership visible and block new launches. */ }
@@ -522,7 +427,6 @@ export class PtyTmuxBackend {
       detach() {
         stopping = true;
         clearInterval(timer);
-        if (streamSocket) { try { streamSocket.destroy(); } catch {} streamSocket = null; }
         transport?.kill(); transport = null;
         data.clear(); exits.clear();
       },
@@ -536,7 +440,6 @@ export class PtyTmuxBackend {
         if (exited) return;
         stopping = true;
         clearInterval(timer);
-        if (streamSocket) { try { streamSocket.destroy(); } catch {} streamSocket = null; }
         // Successful kill-session is the acknowledgement that the pane, not merely its client, was destroyed.
         let panePid: number | null = null;
         try {

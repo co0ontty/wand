@@ -622,7 +622,10 @@ function cleanupDaemonFiles(
   paths: { socketPath: string; tokenPath: string; pidPath: string },
   owner: { token: string; pid: number },
 ): void {
-  if (process.platform !== "win32") {
+  // An old listener can outlive a replacement at the same pathname. Apply
+  // the same ownership check to its socket as to its credentials.
+  if (process.platform !== "win32" && fileHoldsValue(paths.tokenPath, owner.token)
+    && fileHoldsValue(paths.pidPath, String(owner.pid))) {
     try { unlinkSync(paths.socketPath); } catch { /* already absent */ }
   }
   for (const file of [paths.tokenPath, paths.pidPath]) {

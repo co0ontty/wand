@@ -3,6 +3,7 @@ import type { WandTaskPriority } from "./task-types.js";
 
 /** 来源只由可信发送入口填写，不接受请求正文自报优先级。旧队列保守按任务处理。 */
 export interface EmployeeInputScheduling {
+  origin?: import("./task-types.js").TaskCommentOrigin;
   source: "user" | "task";
   enqueuedAt: string;
   /** Stable tie-breaker for inputs accepted in the same millisecond. */

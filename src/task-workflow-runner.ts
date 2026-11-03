@@ -17,6 +17,7 @@ export function startTaskWorkflowRunner(storage: WandStorage, runner: Structured
   const instruction = [
     `当前任务回填范围仅为 ${grant.taskId}，交付版本 ${grant.revision}（ID/版本不是凭据）。`,
     `先用 wand task:context ${grant.taskId} 读取最新 updatedAt、目标、证据和状态。未完成但需要记录进展或阻塞时使用 progress（evidence写已核对事实，blocker写未解除的条件），回填不代表交付；确实完成交付时使用 submit；被明确派发验收时，根据实际证据用 pass 或 fail。未验证项按 fail 写明 blocker，不得因会话结束或自己声称完成而通过。`,
+    "每次任务执行结束前，必须在对应 Wand 任务详情中实际回填一段简短说明，作为交付证据。evidence 写清完成内容、验证结果及可核查的证据位置（如文件路径、产物或检查结果），不能只写“已完成”或仅留在聊天回复中。未完成时回填已完成部分和 blocker，不冒充交付完成；回填后核对成功回执，未确认写入不得声称已交付。",
     `回填命令：${command} task:workflow ${grant.taskId} --stdin。stdin 为 JSON {"action":"progress|submit|pass|fail","requestId":"同一意图固定UUID","expectedUpdatedAt":"读取到的任务.updatedAt","evidence":"实际证据","blocker":"失败或无法验证的原因，通过时为空"}。`,
     "该能力不能人工确认、归档、跨任务写入或派发。版本冲突先保留草稿并重新读取核对；未知回执不得换 requestId 重做。权限失效等待新的执行，不回退到所有者身份。提交后需独立新一轮验收，不在同一执行自提交自验收。验收结论必须实际回填，不能仅留在回复里。",
   ].join("\n\n");

@@ -275,6 +275,20 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
         <h2>关于 Wand</h2><p>查看版本信息、更新状态和客户端连接方式。</p>
       </header>
       <DaemonUpdateNotice />
+      <SettingsSection title="问题诊断" description="复现问题后导出最近 30 分钟的恢复、停止、删除记录及运行状态。不包含聊天正文、终端输出或凭据；文件不会自动上传。">
+        <SettingsActionButton pending={pending === "diagnostics"} kind="secondary" onClick={() => action("diagnostics", async () => {
+          const response = await fetch("/api/diagnostics/export", { credentials: "same-origin" });
+          if (!response.ok) throw new Error(`诊断导出失败（HTTP ${response.status}）`);
+          const url = URL.createObjectURL(await response.blob());
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `wand-diagnostics-${Date.now()}.json`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        }, "诊断文件已生成，请在下载记录中查收。")}>{pending === "diagnostics" ? "正在导出…" : "导出诊断日志"}</SettingsActionButton>
+      </SettingsSection>
       <Flex className="wand-settings-library-about-overview" wrap gap="large" align="stretch">
         <SettingsSection title="版本信息">
           <Descriptions className="wand-settings-library-version-table" size="small" column={1}

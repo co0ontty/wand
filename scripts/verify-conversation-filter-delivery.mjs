@@ -1,15 +1,11 @@
 // Read-only installed-service/package verification. Never prints connection credentials.
+import { loginToInstalledService } from "./installed-service-login.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const root = process.cwd();
-const connection = JSON.parse(readFileSync(join(process.env.HOME, ".wand/acceptance-connection.json"), "utf8"));
-const origin = new URL(connection.serverURL).origin;
-const decoded = Buffer.from(connection.connectionCode.replace(/\s+/g, ""), "base64url").toString();
-const login = await fetch(origin + "/api/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ appToken: decoded.slice(decoded.lastIndexOf("#") + 1) }) });
-assert.equal(login.status, 200, "installed service login");
-const cookie = login.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
+const { origin, cookie } = await loginToInstalledService();
 const get = async path => { const r = await fetch(new URL(path, origin), { headers: { cookie } }); assert.equal(r.status, 200, "installed endpoint response"); return r; };
 const results = [];
 for (const [platform, route] of [["android", "android-apk"], ["macos", "macos-app"], ["ios", "ios-ipa"]]) {

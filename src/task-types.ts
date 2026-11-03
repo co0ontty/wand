@@ -242,7 +242,23 @@ export interface TaskCommentDispatch {
   error: string | null;
 }
 
+export interface TaskCommentOrigin {
+  kind: "manual" | "task_dispatch" | "workflow" | "system" | "unknown";
+  triggerName: string | null;
+  taskId: string;
+  taskIdentifier: string;
+  commentId: string;
+  entrySessionId?: string | null;
+}
+
 export interface WandTaskComment {
+  origin?: TaskCommentOrigin;
+  /** Identity projected from the exact workflow event; never inferred from prose. */
+  authorKind?: "user" | "employee" | "system";
+  authorId?: string | null;
+  authorAvatar?: string;
+  authorAgent?: WandTaskAgent | null;
+  sourceSessionId?: string | null;
   activityTaskId?: string;
   purpose?: "execution" | "review";
   reviewRevision?: number | null;

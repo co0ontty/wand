@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type Socket } from "node:net";
-import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { directoryBytes, directoryLatestMtime } from "./directory-stats.js";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -500,28 +501,4 @@ export class StructuredTmuxHost implements StructuredExecHost {
     }
     return true;
   }
-}
-
-function directoryLatestMtime(directory: string): number {
-  let latest = lstatSync(directory).mtimeMs;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = path.join(directory, entry.name);
-    const stat = lstatSync(child);
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) latest = Math.max(latest, directoryLatestMtime(child));
-    else latest = Math.max(latest, stat.mtimeMs);
-  }
-  return latest;
-}
-
-function directoryBytes(directory: string): number {
-  let total = 0;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = path.join(directory, entry.name);
-    const stat = lstatSync(child);
-    if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) total += directoryBytes(child);
-    else total += stat.size;
-  }
-  return total;
 }

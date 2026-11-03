@@ -1,17 +1,12 @@
+import { loginToInstalledService } from "./installed-service-login.mjs";
 import assert from "node:assert/strict";
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { openPlushBrowser } from "./design-previews/helpers/browser-harness.mjs";
 
 // Installed service, real clicks and unsaved drafts only. Never saves example conventions.
-const connection = JSON.parse(readFileSync(join(process.env.HOME, ".wand/acceptance-connection.json"), "utf8"));
-const origin = new URL(connection.serverURL).origin;
-const decoded = Buffer.from(connection.connectionCode.replace(/\s+/g, ""), "base64url").toString();
-const login = await fetch(origin + "/api/login", { method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ appToken: decoded.slice(decoded.lastIndexOf("#") + 1) }) });
-assert.equal(login.status, 200);
-const cookies = login.headers.getSetCookie();
-const headers = { cookie: cookies.map(value => value.split(";")[0]).join("; ") };
+const { origin, cookies, cookie } = await loginToInstalledService();
+const headers = { cookie };
 const get = async route => { const response = await fetch(origin + route, { headers }); assert.equal(response.status, 200); return response.json(); };
 const before = await get("/api/knowledge?scope=global&ownerId=global");
 assert.equal(before.scope, "global");

@@ -80,7 +80,7 @@ npm run dev -- -c /tmp/wand-dev/config.json              # 隔离开发
 
 ## 多端与构建约定
 
-- 多端一致性：所有功能、界面与交互修改，Mac 与 Web 保持一致、Android 与 iOS 保持一致，涉及任一端时同步检查修改同组另一端；允许平台原生实现差异，构建、验证、交付分端执行，一端通过不等于双端通过。改 `ios/`、`macos/` 前先读对应子模块 `AGENTS.md` 与 apple-design 技能（真源在 iOS），以平台原生方式实现；Web 界面、组件与设计以源码、测试和 `DESIGN.md` 为准。
+- 多端一致性：Web 与 macOS 变更解耦，Web 变更不要求同步修改 macOS；Android 与 iOS 保持一致，涉及任一移动端时同步检查修改另一端；后端改动仍须核对各端功能、协议与行为兼容；允许平台原生实现差异，构建、验证、交付分端执行，一端通过不等于双端通过。改 `ios/`、`macos/` 前先读对应子模块 `AGENTS.md` 与 apple-design 技能（真源在 iOS），以平台原生方式实现；Web 界面、组件与设计以源码、测试和 `DESIGN.md` 为准。
 - 只手改 Web 源码（browser/react、`src/web-ui/content/styles.css`、构建脚本），打包 JS、tailwind/vendor、`embedded-assets.ts`、`dist/` 一律由构建再生成。bundle 预算分硬上限与基线棘轮：功能级增长用 `npm run budget:accept` 刷新基线并在提交说明加载影响，改硬上限才需要产品取舍，不绕过门禁。
 
 ## 原生端与发布

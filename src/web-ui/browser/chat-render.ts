@@ -2422,7 +2422,8 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
 
         var queuedClass = (isQueued ? " queued" : "") + (activityOnly ? " activity-only" : "");
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
-        return '<div class="chat-message ' + role + queuedClass + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
+        var originAttr = msg.origin ? ' data-message-origin="' + escapeHtml(JSON.stringify(msg.origin)) + '"' : "";
+        return '<div class="chat-message ' + (msg.origin ? "system-dispatch" : role) + queuedClass + '"' + groupedAttr + originAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           timeHtml +
           '<div class="chat-message-content">' + resourceHtml + bodyHtml + queuedBadge + '</div>' + (isQueued ? "" : renderChatReadReceipt(msg)) +
         '</div>';

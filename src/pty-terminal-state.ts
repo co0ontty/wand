@@ -163,7 +163,7 @@ export class PtyTerminalState {
     let start = before - count;
     let data = "";
     while (start < before) {
-      data = this.serializer.serialize({ range: { start, end: before - 1 } });
+      data = this.serializeState({ range: { start, end: before - 1 } });
       if (Buffer.byteLength(data, "utf8") <= PTY_HISTORY_PAGE_MAX_BYTES) break;
       if (start === before - 1) return null;
       start = Math.min(before - 1, start + Math.max(1, Math.ceil((before - start) / 2)));
@@ -191,6 +191,21 @@ export class PtyTerminalState {
 
   private addPending(operation: PtyTerminalOperation): void {
     this.pending.push({ id: this.nextId++, operation });
+  }
+
+  private serializeState(options: Parameters<SerializeAddon["serialize"]>[0]): string {
+    const data = this.serializer.serialize(options);
+    // SerializeAddon restores mouse tracking (1000/1002/1003), but omits its
+    // encoding. After reconnect, SGR-aware TUIs then receive legacy ESC[M
+    // reports and can interpret the coordinate bytes as typed text. xterm has
+    // no public encoding getter; read its parsed state rather than maintaining
+    // a second ANSI parser that could drift on split writes, resets or replay.
+    const { activeEncoding } = (this.terminal as unknown as {
+      _core: { coreMouseService: { activeEncoding: string } };
+    })._core.coreMouseService;
+    if (activeEncoding === "SGR") return data + "\x1b[?1006h";
+    if (activeEncoding === "SGR_PIXELS") return data + "\x1b[?1016h";
+    return data;
   }
 
   private scheduleFlush(): void {
@@ -258,10 +273,10 @@ export class PtyTerminalState {
       if (this.disposed) return;
       try {
         let historyRows = PTY_INITIAL_HISTORY_ROWS;
-        this.committedData = this.serializer.serialize({ scrollback: historyRows });
+        this.committedData = this.serializeState({ scrollback: historyRows });
         while (historyRows > 0 && Buffer.byteLength(this.committedData) > PTY_INITIAL_HISTORY_MAX_BYTES) {
           historyRows = Math.floor(historyRows / 2);
-          this.committedData = this.serializer.serialize({ scrollback: historyRows });
+          this.committedData = this.serializeState({ scrollback: historyRows });
         }
         this.committedCols = this.terminal.cols;
         this.committedRows = this.terminal.rows;

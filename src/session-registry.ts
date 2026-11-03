@@ -155,7 +155,7 @@ export class SessionRegistry {
     const revision = `${this.storage.projectionRevision()}:${this.messageEpochs.get(id) ?? 0}:${digest}`;
     const cached = this.messageProjections.get(id);
     if (cached?.revision === revision) return cached.projected;
-    const projected = enrichStructuredMessages(messages, id);
+    const projected = enrichStructuredMessages(this.storage.projectTaskDispatchMessageOrigins(id, messages), id);
     this.messageProjections.delete(id);
     if (raw.length <= 1024 * 1024 && messages.length <= 2000 && messages.reduce((n, turn) => n + turn.content.length, 0) <= 10000) {
       this.messageProjections.set(id, { revision, source: messages, projected });

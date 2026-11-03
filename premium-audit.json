@@ -102,7 +102,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-board-host.tsx",
-      "line": 1341,
+      "line": 1500,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -111,7 +111,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-create.tsx",
-      "line": 273,
+      "line": 302,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -120,7 +120,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-create.tsx",
-      "line": 276,
+      "line": 305,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -129,7 +129,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/issues/task-create.tsx",
-      "line": 291,
+      "line": 321,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -228,7 +228,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/quick-commit/host.tsx",
-      "line": 495,
+      "line": 524,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -237,7 +237,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/quick-commit/host.tsx",
-      "line": 503,
+      "line": 532,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -363,7 +363,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/workspaces/create-workspace.tsx",
-      "line": 73,
+      "line": 81,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -372,7 +372,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/workspaces/create-workspace.tsx",
-      "line": 74,
+      "line": 82,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",
@@ -381,7 +381,7 @@
     {
       "category": "violation",
       "file": "src/web-ui/react/workspaces/create-workspace.tsx",
-      "line": 80,
+      "line": 88,
       "message": "Application-owned form does not declare its validation owner.",
       "remediation": "Add noValidate/novalidate and implement the canonical validation contract.",
       "ruleId": "form.novalidate-missing",

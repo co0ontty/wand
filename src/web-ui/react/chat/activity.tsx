@@ -34,12 +34,17 @@ export function ChatActivityEntry({ expanded, status, label, stateLabel, clock, 
   return <div className="wand-chat-entry" data-chat-entry-renderer="canonical" data-status={status} data-tool={tool ? "true" : undefined}>
     <div className="wand-chat-entry-body">
       <button type="button" className="chat-disclosure-trigger chat-call-button" aria-expanded={expanded} aria-controls={bodyId} aria-label={`${label}，${stateLabel}`} onClick={onToggle}>
-        <span className="chat-call-mark" data-status={status} aria-hidden="true"><WandIcon name={icon} size={16}/></span>
+        <span className="chat-call-mark" data-status={status} aria-hidden="true">
+          <span className="chat-call-mark-slot"><WandIcon name={icon} size={14}/></span>
+          <span className="chat-call-mark-pip"/>
+        </span>
         <span className="chat-call-copy"><span className="chat-call-line">
-          {clock ? <time className="chat-call-time" dateTime={occurredAt}>{clock}</time> : null}
           <span className="chat-call-label" title={label}>{label}</span>
-          <span className="chat-call-state" data-status={status}>{stateLabel}</span></span>
           {preview ? <span className="chat-call-preview" title={preview}>{preview}</span> : null}
+          <span className="chat-call-trail">
+            {clock ? <time className="chat-call-time" dateTime={occurredAt}>{clock}</time> : null}
+            <span className="chat-call-state" data-status={status}>{stateLabel}</span>
+          </span></span>
           {status === "error" && result ? <span className="chat-call-result" data-error="" title={result}>{result}</span> : null}
           {context ? <span className="chat-call-meta"><span>{context}</span></span> : null}
         </span><ChatDisclosureChevron expanded={expanded}/>

@@ -36,7 +36,7 @@ function TodoProgress({ todos, context }: { todos: readonly TodoEntry[]; context
   const preview = summary.allDone ? "清单已完成" : running ? summary.activeTask || "尚无当前项" : recorded?.content || "只读记录";
   return <WandPopover open={expanded} onOpenChange={setTodoProgressExpanded} side="top" align="center" className="composer-work-popover composer-todo-popover"
     contentId="todo-progress-body" contentRole="dialog" popupOwner="composer-todo" ariaLabel="本轮待办进度"
-    trigger={React.cloneElement(ComposerWorkSummary({ label: `待办 ${label}`, count, preview, icon: "task", expanded, id: "todo-progress-toggle", className: "todo-progress-header" }), {
+    trigger={React.cloneElement(ComposerWorkSummary({ label: `待办 ${label}`, count, preview, icon: "task", expanded, id: "todo-progress-toggle", className: "todo-progress-header", progress: summary.ratio, state: context.kind }), {
       "aria-label": `待办，${context.label}，已完成 ${count}，${preview}，查看详情`, "aria-controls": "todo-progress-body",
     })}>
     <ComposerWorkPanel className="composer-todo-panel" title={`待办 · 已完成 ${count}`}

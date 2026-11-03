@@ -15,6 +15,10 @@ export function TaskDeliverySummary({ task, onOpenAcceptance }: { task: WandTask
   const evidence = (task.acceptance?.evidence || task.verification?.evidence || "").trim();
   const inFlow = ["doing", "review", "ready"].includes(stage);
   if (!inFlow && !evidence) return null;
+  // 执行中但还没有任何交付证据时，结论与阶段已由头部概况条表达，这里不再放一条空结论占位。
+  if (stage === "doing" && !evidence) return null;
+  // 有未解除的缺口且还没有证据时，结论与操作已由上方 TaskFocus 警示块承担，这里不再重复一条同义行。
+  if (task.acceptance?.blocker?.trim() || task.verification?.blocker?.trim()) return null;
   const noSessions = task.sessions.length === 0;
   const tone = taskHumanAccepted(task) ? "success" : task.status === "ready" ? "passed" : task.acceptance?.blocker?.trim() ? "warning" : "neutral";
   return <section className="task-delivery-summary" data-tone={tone} aria-label="交付结论">

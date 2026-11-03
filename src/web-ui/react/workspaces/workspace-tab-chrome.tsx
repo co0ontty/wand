@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Badge, ConfigProvider, Flex, Tabs } from "antd";
 import { WandUiBoundary } from "../theme";
+import { WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem } from "../ui/dropdown-menu";
 import { WandButton } from "../ui/button";
 import { WandIcon } from "../ui/icons";
 import type { WandButtonProps } from "../ui/button";
@@ -53,7 +54,7 @@ export interface WorkspaceTabBarChromeProps {
   readonly closingWindowId?: string | null;
   readonly onSelectWindow?: (id: string) => void;
   readonly onCloseWindow?: (id: string) => void;
-  readonly onNewSession?: () => void;
+  readonly onNewSession?: (kind: "structured" | "shell") => void;
   readonly onCancelMove?: () => void;
   readonly leading?: React.ReactNode;
   readonly actions?: React.ReactNode;
@@ -88,9 +89,15 @@ export function WorkspaceTabBarChrome({ mobile, taskName, variant = "task", acti
         onChange={movingDir ? undefined : key => onSelectWindow?.(key)}
         onTabClick={movingDir ? key => onSelectWindow?.(key) : undefined}
         onEdit={(key, action) => { if (action === "remove" && typeof key === "string" && !closingWindowId) onCloseWindow?.(key); }}/></ConfigProvider></WandUiBoundary>
-      <WandButton kind="ghost" type="button" className="workspace-tab-add"
-        title={standalone ? "在当前目录新建 Agent 或空白终端" : "新建 Agent 或空白终端（在同一 worktree）"}
-        aria-label="新建 Agent 或空白终端" onClick={onNewSession}><WandIcon name="plus" size={18}/></WandButton>
+      <WandDropdownMenu>
+        <WandDropdownMenuTrigger render={<WandButton kind="ghost" type="button" className="workspace-tab-add"
+          title={standalone ? "在当前目录新建会话" : "在同一工作目录新建会话"}
+          aria-label="新建会话"/>}><WandIcon name="plus" size={18}/></WandDropdownMenuTrigger>
+        <WandDropdownMenuContent align="end" aria-label="选择新建会话模式">
+          <WandDropdownMenuItem icon="terminal" onSelect={() => onNewSession?.("shell")}>空白终端</WandDropdownMenuItem>
+          <WandDropdownMenuItem icon="spark" onSelect={() => onNewSession?.("structured")}>对话模式</WandDropdownMenuItem>
+        </WandDropdownMenuContent>
+      </WandDropdownMenu>
     </Flex>
     <div className="workbar-spacer"/>
     {movingDir ? <WandButton kind="ghost" className="workspace-tab-move-hint" title="选择目标窗口 · Esc 取消" onClick={onCancelMove}>

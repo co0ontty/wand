@@ -1,98 +1,48 @@
+import { createDialogLifecycle, type DialogControls, type DialogLifecycle } from "../dialog-lifecycle";
 import type { QuickCommitOpenContext, QuickCommitRuntimeAdapter } from "./types";
 
-export interface QuickCommitControllerSnapshot {
-  open: boolean;
-  dismissable: boolean;
+export interface QuickCommitControllerSnapshot extends DialogLifecycle {
   context: QuickCommitOpenContext | null;
-  revision: number;
 }
 
-export interface WandQuickCommitController {
+export interface WandQuickCommitController extends DialogControls {
   open(context: QuickCommitOpenContext): boolean;
-  close(): void;
-  closeIfOpen(): boolean;
-  closeTopmost(): boolean;
-  isOpen(): boolean;
   isCurrentLifecycle(revision: number, sessionId: string): boolean;
-  setDismissable(dismissable: boolean): void;
 }
-
-type Listener = () => void;
 
 let runtime: QuickCommitRuntimeAdapter | null = null;
-let snapshot: QuickCommitControllerSnapshot = {
-  open: false,
-  dismissable: true,
+const dialog = createDialogLifecycle<Omit<QuickCommitControllerSnapshot, keyof DialogLifecycle>>({
   context: null,
-  revision: 0,
-};
-const listeners = new Set<Listener>();
-
-function publish(open: boolean, context: QuickCommitOpenContext | null): void {
-  snapshot = { open, dismissable: true, context, revision: snapshot.revision + 1 };
-  for (const listener of listeners) listener();
-}
-
-function publishDismissable(dismissable: boolean): void {
-  if (!snapshot.open || snapshot.dismissable === dismissable) return;
-  snapshot = { ...snapshot, dismissable };
-  for (const listener of listeners) listener();
-}
+});
 
 export const quickCommitController: WandQuickCommitController = {
+  ...dialog.controls,
   open(context): boolean {
     const sessionId = context.sessionId.trim();
     if (!runtime || !sessionId) return false;
-    if (snapshot.open && snapshot.context?.sessionId === sessionId) return true;
+    if (dialog.snapshot.open && dialog.snapshot.context?.sessionId === sessionId) return true;
     const nextContext = { sessionId };
     runtime.onOpen(nextContext);
-    publish(true, nextContext);
+    dialog.publish(true, { context: nextContext });
     return true;
   },
 
   close(): void {
-    if (!snapshot.open || !snapshot.context) return;
-    const context = snapshot.context;
-    publish(false, null);
+    if (!dialog.snapshot.open || !dialog.snapshot.context) return;
+    const context = dialog.snapshot.context;
+    dialog.publish(false, { context: null });
     runtime?.onClose(context);
   },
 
-  closeIfOpen(): boolean {
-    if (!snapshot.open || !snapshot.dismissable) return false;
-    this.close();
-    return true;
-  },
-
-  closeTopmost(): boolean {
-    if (!snapshot.open) return false;
-    if (snapshot.dismissable) this.close();
-    return true;
-  },
-
-  isOpen(): boolean {
-    return snapshot.open;
-  },
-
   isCurrentLifecycle(revision, sessionId): boolean {
-    return snapshot.open
-      && snapshot.revision === revision
-      && snapshot.context?.sessionId === sessionId;
-  },
-
-  setDismissable(dismissable): void {
-    publishDismissable(dismissable);
+    return dialog.snapshot.open
+      && dialog.snapshot.revision === revision
+      && dialog.snapshot.context?.sessionId === sessionId;
   },
 };
 
 export const quickCommitStore = {
-  subscribe(listener: Listener): () => void {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  },
-
-  getSnapshot(): QuickCommitControllerSnapshot {
-    return snapshot;
-  },
+  ...dialog.store,
 
   getRuntime(): QuickCommitRuntimeAdapter | null {
     return runtime;
@@ -103,7 +53,7 @@ export function configureQuickCommitRuntime(adapter: QuickCommitRuntimeAdapter):
   runtime = adapter;
   return () => {
     if (runtime !== adapter) return;
-    if (snapshot.open) quickCommitController.close();
+    if (dialog.snapshot.open) quickCommitController.close();
     runtime = null;
   };
 }

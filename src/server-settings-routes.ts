@@ -85,11 +85,9 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     requireAdminOrSessionPreferences,
   } = deps;
 
-  app.get("/api/settings/about", asyncRoute(async (_req, res) => {
-    const distribution = publicDistributionInfo(await deps.getDistributionSettings());
+  const versionInfo = () => {
     const cachedUpdate = deps.getCachedUpdateInfo();
-    res.json({
-      settingsAccess: "read-only",
+    return {
       version: deps.packageInfo.version,
       packageName: deps.packageInfo.name,
       nodeVersion: deps.packageInfo.nodeVersion,
@@ -98,6 +96,22 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       latestVersion: cachedUpdate?.latest ?? null,
       updateChannel: deps.getUpdateChannel(),
       build: buildInfoPayload(deps.buildInfo),
+    };
+  };
+  const modelPayload = (catalog: ReturnType<ModelCatalogService["snapshot"]>) => {
+    const defaults = getProviderDefaultModels(config);
+    return {
+      ...withConfiguredDefaultModelLabels(catalog, defaults),
+      ...providerModelFields(defaults),
+      defaultModels: defaults,
+    };
+  };
+
+  app.get("/api/settings/about", asyncRoute(async (_req, res) => {
+    const distribution = publicDistributionInfo(await deps.getDistributionSettings());
+    res.json({
+      settingsAccess: "read-only",
+      ...versionInfo(),
       ...distribution,
     });
   }));
@@ -105,13 +119,9 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
   app.get("/api/settings", requireAdmin, asyncRoute(async (_req, res) => {
     const desiredConfig = runtimeConfig.desiredSnapshot();
     const distribution = await deps.getDistributionSettings();
-    const cachedUpdate = deps.getCachedUpdateInfo();
     res.json({
       settingsAccess: "admin",
-      version: deps.packageInfo.version,
-      packageName: deps.packageInfo.name,
-      nodeVersion: deps.packageInfo.nodeVersion,
-      repoUrl: deps.packageInfo.repoUrl,
+      ...versionInfo(),
       config: publicConfig(desiredConfig),
       desiredConfig: publicConfig(desiredConfig),
       activeConfig: publicConfig(config),
@@ -119,10 +129,6 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       hasCert: existsSync(path.join(configDir, "server.key")) && existsSync(path.join(configDir, "server.crt")),
       githubConnector: deps.getGithubConnector(),
       openRouter: deps.openRouter.status(),
-      updateAvailable: cachedUpdate?.updateAvailable ?? false,
-      latestVersion: cachedUpdate?.latest ?? null,
-      updateChannel: deps.getUpdateChannel(),
-      build: buildInfoPayload(deps.buildInfo),
       autoUpdate: {
         web: storage.getConfigValue("autoUpdateWeb") === "true",
         apk: storage.getConfigValue("autoUpdateApk") === "true",
@@ -317,24 +323,13 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     // Every client reads the server's persisted snapshot. Avoid browser/proxy
     // cache races after an administrator or scheduled server refresh.
     res.set("Cache-Control", "no-store");
-    const cached = deps.modelCatalog.snapshot();
-    const defaults = getProviderDefaultModels(config);
-    res.json({
-      ...withConfiguredDefaultModelLabels(cached, defaults),
-      ...providerModelFields(defaults),
-      defaultModels: defaults,
-    });
+    res.json(modelPayload(deps.modelCatalog.snapshot()));
   });
 
   app.post("/api/models/refresh", requireAdmin, asyncRoute(async (_req, res) => {
     try {
       const refreshed = await deps.modelCatalog.refresh({ verifyClaudeCandidates: true });
-      const defaults = getProviderDefaultModels(config);
-      res.json({
-        ...withConfiguredDefaultModelLabels(refreshed, defaults),
-        ...providerModelFields(defaults),
-        defaultModels: defaults,
-      });
+      res.json(modelPayload(refreshed));
     } catch (error) {
       sendRouteError(res, error, "刷新模型列表失败。", 500);
     }

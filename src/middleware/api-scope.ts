@@ -39,6 +39,7 @@ export const PUBLIC_API_PREFIXES: readonly string[] = [
 
 export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   // ── 管理员 ──
+  { prefix: "/api/diagnostics", scope: "sessions" },
   { prefix: "/api/feedback/client", scope: "sessions" },
   { prefix: "/api/feedback", scope: "admin" },
   { prefix: "/api/set-password", scope: "admin" },

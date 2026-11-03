@@ -63,16 +63,19 @@ export function registerAssetRoutes(app: Express, deps: AssetRouteDependencies):
     setAssetCache(req, res, asset.hash, "public");
     res.type("text/css").send(asset.content);
   });
-  app.get("/assets/theme.js", (req, res) => {
-    const asset = getThemePreloadAsset();
-    setAssetCache(req, res, asset.hash, "public");
-    res.type("application/javascript").send(asset.content);
-  });
-  app.get("/assets/app.js", (req, res) => {
-    const asset = getScriptAsset(configPath, requestedHash(req));
-    setAssetCache(req, res, asset.hash, "private");
-    res.type("application/javascript").send(asset.content);
-  });
+  const javascriptAsset = (
+    url: string,
+    getAsset: (req: Request) => { hash: string; content: string },
+    visibility: "public" | "private" = "public",
+  ): void => {
+    app.get(url, (req, res) => {
+      const asset = getAsset(req);
+      setAssetCache(req, res, asset.hash, visibility);
+      res.type("application/javascript").send(asset.content);
+    });
+  };
+  javascriptAsset("/assets/theme.js", () => getThemePreloadAsset());
+  javascriptAsset("/assets/app.js", req => getScriptAsset(configPath, requestedHash(req)), "private");
   app.get("/assets/modules/:build/:file", (req, res) => {
     const content = getBrowserModule(`modules/${req.params.build}/${req.params.file}`);
     if (content === undefined) {
@@ -86,21 +89,9 @@ export function registerAssetRoutes(app: Express, deps: AssetRouteDependencies):
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.type("application/javascript").send(content);
   });
-  app.get("/assets/ai-teams.js", (req, res) => {
-    const chunk = getAiTeamsChunk(requestedHash(req));
-    setAssetCache(req, res, chunk.hash, "public");
-    res.type("application/javascript").send(chunk.content);
-  });
-  app.get("/assets/login.js", (req, res) => {
-    const chunk = getLoginChunk(requestedHash(req));
-    setAssetCache(req, res, chunk.hash, "public");
-    res.type("application/javascript").send(chunk.content);
-  });
-  app.get("/assets/plush-avatar.js", (req, res) => {
-    const chunk = getPlushAvatarChunk(requestedHash(req));
-    setAssetCache(req, res, chunk.hash, "public");
-    res.type("application/javascript").send(chunk.content);
-  });
+  javascriptAsset("/assets/ai-teams.js", req => getAiTeamsChunk(requestedHash(req)));
+  javascriptAsset("/assets/login.js", req => getLoginChunk(requestedHash(req)));
+  javascriptAsset("/assets/plush-avatar.js", req => getPlushAvatarChunk(requestedHash(req)));
 
   // ── Web UI endpoints ──
 

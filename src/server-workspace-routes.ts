@@ -898,23 +898,7 @@ export function registerWorkspaceRoutes(
       }
       // 过滤模式下不创建合成组：不属于目标目录的会话直接排除。
       if (!group && resolved && !workspaceFilter) {
-        const id = `cwd:${resolved}`;
-        let synthetic = groups.get(id);
-        if (!synthetic) {
-          synthetic = {
-            workspaceId: id,
-            workspaceName: customNameForCwd(resolved)
-              ?? resolved.split("/").filter(Boolean).at(-1)
-              ?? resolved,
-            workspaceCwd: resolved,
-            synthetic: true,
-            tasks: [],
-            standaloneSessions: [],
-          };
-          groups.set(id, synthetic);
-        }
-        rememberCreatedAt(synthetic, session.startedAt);
-        group = synthetic;
+        group = syntheticGroupForCwd(resolved);
       }
       // workspaceId 过滤时，不属于目标目录组的会话直接排除（含合成组）。
       if (directoryWorkspaceFilter && group?.workspaceId !== directoryWorkspaceFilter) continue;

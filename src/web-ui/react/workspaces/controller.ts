@@ -20,6 +20,21 @@ type Listener = () => void;
 let runtime: WorkspacesRuntimeAdapter | null = null;
 let createdCallback: ((workspace: Workspace) => void) | undefined;
 let addWorkspaceRevision = 0;
+interface AddWorkspaceDraft { initialCwd: string; cwd: string; name: string }
+let addWorkspaceDraft: AddWorkspaceDraft | null = null;
+
+/** Cancel/Escape keeps the path and alias until the same entry successfully creates or opens with a different directory. */
+export function rememberAddWorkspaceDraft(draft: AddWorkspaceDraft): void {
+  addWorkspaceDraft = draft;
+}
+export function addWorkspaceDraftFor(initialCwd: string): { cwd: string; name: string } | null {
+  if (!addWorkspaceDraft || addWorkspaceDraft.initialCwd !== initialCwd) return null;
+  return { cwd: addWorkspaceDraft.cwd, name: addWorkspaceDraft.name };
+}
+export function clearAddWorkspaceDraft(): void {
+  addWorkspaceDraft = null;
+}
+
 export function requestAddWorkspace(initialCwd: string, onCreated?: (workspace: Workspace) => void, popupOwner?: string): void {
   createdCallback = onCreated;
   publish({ open: true, dismissable: true, initialCwd, initialKind: "project", popupOwner, addRevision: ++addWorkspaceRevision });

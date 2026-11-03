@@ -3,12 +3,18 @@ import { Button, Typography } from "antd";
 import { WandIcon, type WandIconName } from "./ui/icons.js";
 
 /** Same bounded summary geometry for progress and pending input; never a second state owner. */
-export function ComposerWorkSummary({ label, count, preview, icon, expanded, id, className, onClick, buttonRef }: {
+export function ComposerWorkSummary({ label, count, preview, icon, expanded, id, className, onClick, buttonRef, progress, state }: {
   label: string; count: string; preview: string; icon: WandIconName; expanded: boolean; id?: string; className?: string; onClick?(): void; buttonRef?: React.Ref<HTMLButtonElement>;
+  /** 0..1 completion ratio; drives the quiet fill on the collapsed pill. Omit when the capsule is not a progress. */
+  progress?: number; state?: string;
 }) {
+  const ratio = typeof progress === "number" ? Math.max(0, Math.min(1, progress)) : undefined;
   return <Button ref={buttonRef} id={id} type="default" className={`composer-work-trigger ${className ?? ""}`} onClick={onClick}
-    aria-expanded={expanded} aria-label={`${label}，${count}`} title={preview}>
-    <span className="composer-work-summary"><WandIcon name={icon} size={16}/>
+    aria-expanded={expanded} aria-label={`${label}，${count}`} title={preview}
+    data-kind={state} data-progress={ratio !== undefined ? "" : undefined}
+    style={ratio !== undefined ? ({ "--work-progress": ratio } as React.CSSProperties) : undefined}>
+    {ratio !== undefined && <span className="composer-work-fill" aria-hidden="true"/>}
+    <span className="composer-work-summary"><span className="composer-work-glyph" data-kind={state}><WandIcon name={icon} size={16}/></span>
       <span className="composer-work-label">{label}<span className="composer-work-count">{count}</span></span>
       <span className="composer-work-preview">{preview}</span>
       <span className="composer-work-chevron" data-open={expanded}><WandIcon name="chevronDown" size={12}/></span>

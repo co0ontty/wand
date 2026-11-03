@@ -166,7 +166,8 @@ export function WorkspaceTabBar({ fallback = null }: { fallback?: React.ReactEle
     void dispatch({ type: "nav.home" });
   };
 
-  const openNewSession = () => newSessionController.open({
+  const openNewSession = (kind: "structured" | "shell") => newSessionController.open({
+    initialKind: kind,
     initialCwd: taskCwd,
     workspaceId: context.workspaceId || undefined,
     workspaceTaskId: context.taskId || undefined,

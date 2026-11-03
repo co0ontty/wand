@@ -1,11 +1,9 @@
 import crypto from "node:crypto";
-import { exec } from "node:child_process";
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 import type { Stats } from "node:fs";
 import process from "node:process";
-import { promisify } from "node:util";
 import type { Express } from "express";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
@@ -19,7 +17,6 @@ import { RecentPath, parseStoredPathList, recordRecentPath } from "./recent-path
 import { streamFileWithRange } from "./http-file-stream.js";
 import { HTML_PREVIEW_CSP } from "./html-preview-policy.js";
 
-const execAsync = promisify(exec);
 const DIRECTORY_MAX_ITEMS = 200;
 const MAX_TEXT_PREVIEW_SIZE = 512 * 1024;
 const MAX_TEXT_WRITE_SIZE = 1024 * 1024;
@@ -774,7 +771,7 @@ async function listPathSuggestions(input: string, fallbackCwd: string): Promise<
 
 async function getGitRepoRoot(dirPath: string): Promise<string | null> {
   try {
-    const { stdout } = await execAsync("git rev-parse --show-toplevel", { cwd: dirPath });
+    const stdout = await runGitRawAsync(["rev-parse", "--show-toplevel"], dirPath);
     return stdout.trim();
   } catch {
     return null;
@@ -784,8 +781,8 @@ async function getGitRepoRoot(dirPath: string): Promise<string | null> {
 async function getGitStatusMap(gitRoot: string): Promise<Map<string, GitFileStatus>> {
   const statusMap = new Map<string, GitFileStatus>();
   try {
-    const { stdout: stagedStdout } = await execAsync("git status --porcelain -uno", { cwd: gitRoot });
-    const { stdout: untrackedStdout } = await execAsync("git ls-files --others --exclude-standard", { cwd: gitRoot });
+    const stagedStdout = await runGitRawAsync(["status", "--porcelain", "-uno"], gitRoot);
+    const untrackedStdout = await runGitRawAsync(["ls-files", "--others", "--exclude-standard"], gitRoot);
     for (const line of stagedStdout.split("\n").filter((item) => item.trim())) {
       if (line.length < 4) continue;
       const stagedChar = line[0];

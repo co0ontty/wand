@@ -11,7 +11,7 @@ import { taskGroupsStore } from "./task-groups-store";
 import { notifyTasksChanged } from "../task-changes";
 import { useParentPopupOwner } from "../ui/portal-context";
 import { registerPopupOwner } from "../ui/popup-lifecycle";
-import { requestAddWorkspace, workspacesController } from "./controller";
+import { addWorkspaceDraftFor, clearAddWorkspaceDraft, rememberAddWorkspaceDraft, requestAddWorkspace, workspacesController } from "./controller";
 import type { Workspace } from "./types";
 
 export function AddWorkspaceButton({ onCreated, initialCwd = "" }: { initialCwd?: string; onCreated?(workspace: Workspace): void }) {
@@ -22,8 +22,14 @@ export function AddWorkspaceButton({ onCreated, initialCwd = "" }: { initialCwd?
 export function CreateWorkspaceDialog({ initialCwd = "", popupOwner, onClose, onCreated }: {
   initialCwd?: string; popupOwner?: string; onClose(): void; onCreated(workspace: Workspace): void;
 }) {
-  const [cwd, setCwd] = React.useState(initialCwd);
-  const [name, setName] = React.useState("");
+  const restored = addWorkspaceDraftFor(initialCwd);
+  const [cwd, setCwd] = React.useState(restored?.cwd || initialCwd);
+  const [name, setName] = React.useState(restored?.name || "");
+  const succeeded = React.useRef(false);
+  const close = () => {
+    if (!succeeded.current) rememberAddWorkspaceDraft({ initialCwd, cwd, name });
+    onClose();
+  };
   const [recent, setRecent] = React.useState<readonly { path: string; name: string }[]>([]);
   const [listing, setListing] = React.useState<FolderPickerListing | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -61,6 +67,8 @@ export function CreateWorkspaceDialog({ initialCwd = "", popupOwner, onClose, on
     lock.current = true; setBusy(true); setError(""); workspacesController.setDismissable(false);
     try {
       const workspace = await httpWorkspacesRepository.create({ name: name.trim(), cwd: listing.currentPath, userAdded: true });
+      succeeded.current = true;
+      clearAddWorkspaceDraft();
       void taskGroupsStore.reload();
       notifyTasksChanged();
       window.dispatchEvent(new Event("wand-workspaces-changed"));
@@ -68,7 +76,7 @@ export function CreateWorkspaceDialog({ initialCwd = "", popupOwner, onClose, on
     } catch (cause) { setError(cause instanceof Error ? cause.message : "添加失败，请重试。"); }
     finally { lock.current = false; setBusy(false); workspacesController.setDismissable(true); }
   };
-  return <WandDialogSurface open popupOwner={id} title="添加工作区" dismissable={!busy} onOpenChange={next => { if (!next) onClose(); }}>
+  return <WandDialogSurface open popupOwner={id} title="添加工作区" dismissable={!busy} onOpenChange={next => { if (!next) close(); }}>
     <Flex vertical gap={12}>
       <Form layout="vertical" onFinish={() => void save()}>
         <Form.Item label="目录路径" required><WandInput autoFocus aria-label="工作区目录路径" value={cwd} disabled={busy} onChange={event => setCwd(event.currentTarget.value)}/></Form.Item>
@@ -79,7 +87,7 @@ export function CreateWorkspaceDialog({ initialCwd = "", popupOwner, onClose, on
           itemRefs={itemRefs} onActiveIndex={setActiveIndex} onActivate={item => { if (!busy) setCwd(item.path); }}/>
         <Form.Item label="路径别名" required><WandInput aria-label="工作区别名" maxLength={80} value={name} disabled={busy} placeholder="例如：Wand 项目" onChange={event => setName(event.currentTarget.value)}/></Form.Item>
         {error ? <Alert type="error" showIcon title={error}/> : null}
-        <Flex gap={8} justify="end"><WandButton disabled={busy} onClick={onClose}>取消</WandButton>
+        <Flex gap={8} justify="end"><WandButton disabled={busy} onClick={close}>取消</WandButton>
           <WandButton kind="primary" type="submit" style={{ minWidth: 112 }} disabled={busy || loading || !listing || !name.trim()}>{busy ? "正在添加…" : "添加工作区"}</WandButton></Flex>
       </Form>
     </Flex>

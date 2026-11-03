@@ -1,3 +1,4 @@
+import { TaskPersonAvatar } from "./task-person-avatar";
 import { TaskSummaryRow } from "./task-inline-summary.js";
 import { taskExecutors } from "./task-executors";
 import { TaskBoardAgentChips } from "./task-executor-chips";
@@ -7,7 +8,7 @@ import { taskHasOpenDescendant } from "../../../task-hierarchy";
 import { TaskGoalChildren } from "./task-goal-children";
 import { canArchiveBoardTask } from "./task-board-repository";
 import { WandButton } from "../ui";
-import { Alert, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
+import { Alert, Avatar, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
 import { taskAcceptanceLabel, taskSessionIsRunning, taskSessionSummary } from "./task-delivery-state";
 import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
@@ -17,6 +18,7 @@ import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } fr
 import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
 import { classNames } from "../ui/class-names";
 import {
+  addIsoDays,
   collectIssueLabels,
   EMPTY_ISSUE_FILTERS,
   formatIssueStamp,
@@ -37,6 +39,7 @@ import {
   issueFilterCount,
   issueGanttRange,
   issueGanttSpan,
+  issueTaskAge,
   isoDate,
   issueHideStatusFilterLabel,
   issueIsOverdue,
@@ -57,7 +60,6 @@ import {
   TaskBoardDueIcon,
   TaskBoardFilterIcon,
   TaskBoardFolderIcon,
-  TaskBoardPanelIcon,
   TaskBoardPriorityIcon,
   TaskBoardProcessingGlyph,
   TaskBoardStatusIcon,
@@ -213,22 +215,14 @@ export function TaskBoardFilterMenu({
   </WandPopover>;
 }
 
-export function TaskBoardDisplayMenu({
+export function TaskBoardDisplayOptions({
   display,
   onChange,
 }: {
   display: IssueBoardDisplay;
   onChange(next: IssueBoardDisplay): void;
 }): React.ReactElement {
-  return <WandPopover
-    align="end"
-    side="bottom"
-    ariaLabel="显示设置"
-    className="task-board-display-menu"
-    trigger={<WandIconButton className="task-board-icon-button" aria-label="显示设置" title="显示设置">
-      <TaskBoardPanelIcon/>
-    </WandIconButton>}
-  >
+  return <Flex vertical gap="small" className="task-board-display-menu" aria-label="显示设置">
     <strong>显示设置</strong>
     <WandSwitch
       checked={display.body}
@@ -252,7 +246,7 @@ export function TaskBoardDisplayMenu({
         {column.label}
       </Checkbox>;
     })}
-  </WandPopover>;
+  </Flex>;
 }
 
 export function TaskBoardArchiveFolder({
@@ -515,28 +509,67 @@ export function TaskBoardDashboard({ tasks, projectName, onOpen, onOpenAcceptanc
 
 export function TaskBoardGantt({
   allTasks = [],
-  grouped,
+  tasks: orderedTasks,
   zoom,
   hideCompleted,
   onZoom,
   onHideCompleted,
   onOpen,
+  statuses,
+  onStatuses,
 }: {
-  grouped: Record<WandTaskStatus, WandTaskListed[]>;
+  tasks: WandTaskListed[];
   allTasks?: WandTaskListed[];
   zoom: IssueGanttZoom;
   hideCompleted: boolean;
   onZoom(zoom: IssueGanttZoom): void;
   onHideCompleted(hide: boolean): void;
   onOpen(id: string): void;
+  statuses: WandTaskStatus[];
+  onStatuses(statuses: WandTaskStatus[]): void;
 }): React.ReactElement {
+  const { employees } = useSiliconEmployees();
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [expandedWeeks, setExpandedWeeks] = React.useState<Set<string>>(() => new Set());
+  const [anchor, setAnchor] = React.useState(() => new Date());
+  const [now, setNow] = React.useState(() => new Date());
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const closed = (status: WandTaskStatus): boolean => status === "archived";
   const hidden = (task: WandTaskListed): boolean => hideCompleted && closed(task.status) && !taskHasOpenDescendant(allTasks, task.id);
-  const tasks = [...ISSUE_COLUMNS.flatMap((column) => grouped[column.status]), ...grouped.archived]
-    .filter((task) => !hidden(task));
-  const range = issueGanttRange(tasks, zoom);
-  const today = isoDate(new Date());
+  const range = issueGanttRange(zoom, anchor);
+  const tasks = orderedTasks.filter(task => !hidden(task) && issueGanttSpan(task, range.start, range.days, now).length > 0);
+  const dayWidth = zoom === "day" ? 580 : zoom === "week" ? 220 : 180;
+  const navigate = (direction: number) => setAnchor(() => {
+    const next = new Date(`${range.start}T12:00:00`);
+    if (zoom === "month") next.setMonth(next.getMonth() + direction);
+    else next.setDate(next.getDate() + direction * range.days);
+    return next;
+  });
+  const weekday = (day: string) => new Date(`${day}T12:00:00`).getDay();
+  const weekends = range.columns.map((day, index) => [0, 6].includes(weekday(day)) ?
+    <span key={day} className="task-calendar-weekend" aria-hidden="true" style={{ left: `${index / range.days * 100}%`, width: `${100 / range.days}%` }}/> : null);
+  const today = isoDate(now);
   const todayIndex = range.columns.indexOf(today);
+  React.useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    let width = -1;
+    const revealToday = () => {
+      if (width === scroll.clientWidth) return;
+      width = scroll.clientWidth;
+      scroll.style.setProperty("--gantt-viewport", `${width}px`);
+      scroll.scrollLeft = Math.max(0, 100 + (todayIndex + 1) * dayWidth - width + 32);
+    };
+    revealToday();
+    const observer = new ResizeObserver(revealToday);
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, [zoom, range.start, tasks.length === 0]);
+  const quickStatuses = [{ status: "backlog", label: "待排期" }, { status: "todo", label: "待认领" }, { status: "review", label: "待验收" }, { status: "ready", label: "待归档" }] as const;
+  const ganttLabel = (status: WandTaskStatus): string => quickStatuses.find(item => item.status === status)?.label ?? issueStatusLabel(status);
   const months: Array<{ key: string; start: number; days: number }> = [];
   range.columns.forEach((day, index) => {
     const key = day.slice(0, 7);
@@ -544,29 +577,81 @@ export function TaskBoardGantt({
     if (last?.key === key) last.days += 1;
     else months.push({ key, start: index, days: 1 });
   });
+  const monthStart = addIsoDays(range.start, -weekday(range.start));
+  const weeks = Array.from({ length: Math.ceil((weekday(range.start) + range.days) / 7) }, (_, index) => addIsoDays(monthStart, index * 7));
+  const barContent = (task: WandTaskListed, length: number) => {
+    const people = taskExecutors(task.sessions, null, null, employees).filter(person => person.employeeId || person.key.startsWith("legacy-employee:"));
+    const names = people.map(person => person.name).join("、");
+    return <>
+      <span className="task-board-gantt-label">
+        <Tag className="task-detail-stage" data-stage={taskWorkflowStage(task.status)}>{ganttLabel(task.status)}</Tag>
+        <span className="task-board-gantt-title">{task.title}</span>
+      </span>
+      <span className="task-calendar-age" title={`创建于 ${new Date(task.createdAt).toLocaleString()}，距今 ${issueTaskAge(task.createdAt, now)}`} aria-label={`已创建 ${issueTaskAge(task.createdAt, now)}`}>{issueTaskAge(task.createdAt, now)}</span>
+      {people.length > 0 && <span className="task-board-gantt-people" title={`历史参与者：${names}`} aria-label={`历史参与者：${names}`}>
+        <Avatar.Group size={24} max={{ count: length === 1 ? 1 : 3 }}>
+          {people.map(person => <Avatar key={person.key} size={24} aria-label={person.name} icon={<TaskPersonAvatar id={person.employeeId} name={person.name} avatar={person.avatar} kind="employee"/>}/>)}
+        </Avatar.Group>
+      </span>}
+    </>;
+  };
   const timelineColumns = `repeat(${range.days}, minmax(0, 1fr))`;
   const todayLine = todayIndex >= 0 ? <span className="task-board-gantt-today-line" aria-hidden="true"
     style={{ position: "absolute", top: 0, bottom: 0, left: `${(todayIndex + 0.5) / range.days * 100}%`, borderLeft: "1px dashed var(--accent)", pointerEvents: "none" }}/> : null;
   return <Card size="small" className="task-board-gantt" styles={{ body: { minWidth: 0 } }}>
     <Flex wrap align="center" justify="space-between" gap="small" className="task-board-gantt-toolbar">
+      <Flex wrap gap={8} role="group" aria-label="日历状态快捷筛选">
+        {quickStatuses.map(item => <WandButton key={item.status} size="small" kind="secondary"
+          aria-pressed={statuses.length === 1 && statuses[0] === item.status}
+          onClick={() => onStatuses(statuses.length === 1 && statuses[0] === item.status ? [] : [item.status])}>{item.label}</WandButton>)}
+      </Flex>
       <Checkbox className="task-board-gantt-hide" checked={hideCompleted} onChange={(event) => onHideCompleted(event.target.checked)}>
         隐藏已归档
       </Checkbox>
       <WandStretchTabs
         className="task-board-gantt-zooms"
-        ariaLabel="甘特图缩放"
+        ariaLabel="日历范围"
         value={zoom}
         tabs={ISSUE_GANTT_ZOOMS.map((entry) => ({ value: entry.value, label: entry.label }))}
         onValueChange={(next) => onZoom(next as IssueGanttZoom)}
       />
     </Flex>
-    <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-      今天 {today} · 只标记真实截止日期；未设置日期的任务保留为待排期，不虚构持续时长。
-    </Typography.Paragraph>
-    {tasks.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有可显示的任务"/> :
-    <div className="task-board-gantt-scroll" tabIndex={0} role="region" aria-label="任务时间线，可横向滚动" style={{ overflowX: "auto", marginTop: 12 }}>
-      <div className="task-board-gantt-grid" style={{ minWidth: Math.max(680, 180 + range.days * (zoom === "day" ? 32 : 24)) }}>
-        <div className="task-board-gantt-head" style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", borderBottom: "1px solid var(--border-subtle)" }}>
+    <Flex wrap align="center" justify="space-between" gap={8} className="task-calendar-navigation">
+      <Flex align="center" gap={8}>
+        <WandButton kind="secondary" size="small" aria-label="上一时段" onClick={() => navigate(-1)}>‹</WandButton>
+        <Typography.Text strong aria-live="polite">{range.start}{range.days > 1 ? ` — ${range.columns.at(-1)}` : ""}</Typography.Text>
+        <WandButton kind="secondary" size="small" aria-label="下一时段" onClick={() => navigate(1)}>›</WandButton>
+        <WandButton kind="secondary" size="small" onClick={() => { const current = new Date(); setAnchor(current); setNow(current); }}>回到今天</WandButton>
+      </Flex>
+      <Typography.Text type="secondary">{tasks.length} 个任务 · 时长为创建至今</Typography.Text>
+    </Flex>
+    {zoom === "month" ? <div className="task-month-scroll" role="region" aria-label="月历，周日到周六" tabIndex={0}>
+      <div className="task-month-grid">
+        <div className="task-month-weekdays">{["周日", "周一", "周二", "周三", "周四", "周五", "周六"].map(day => <span key={day}>{day}</span>)}</div>
+        {weeks.map(start => {
+          const days = Array.from({ length: 7 }, (_, index) => addIsoDays(start, index));
+          const items = tasks.filter(task => issueGanttSpan(task, start, 7, now).length > 0);
+          const expanded = expandedWeeks.has(start);
+          const visibleItems = expanded ? items : items.slice(0, 4);
+          return <section key={start} className="task-month-week" aria-label={`${start} 至 ${days[6]}`}>
+            <div className="task-month-day-backgrounds" aria-hidden="true">{days.map(day => <span key={day} className={`${[0, 6].includes(weekday(day)) ? "is-weekend" : ""} ${day.slice(0, 7) !== range.start.slice(0, 7) ? "is-outside" : ""}`}/>)}</div>
+            <div className="task-month-dates">{days.map(day => <time key={day} dateTime={day} aria-current={day === today ? "date" : undefined} className={day.slice(0, 7) !== range.start.slice(0, 7) ? "is-outside" : undefined}>{day.endsWith("-01") ? `${Number(day.slice(5, 7))}月1日` : Number(day.slice(8))}</time>)}</div>
+            <div className="task-month-events">
+              {visibleItems.map((task, index) => {
+                const span = issueGanttSpan(task, start, 7, now);
+                return <WandButton key={task.id} kind="ghost" className={`task-board-gantt-bar task-month-event is-${task.status}`} style={{ gridColumn: `${span.offset + 1} / span ${span.length}`, gridRow: index + 1 }}
+                  aria-label={`${task.identifier} ${task.title}`} title={`${task.identifier} · ${ganttLabel(task.status)} · ${task.title} · 已创建 ${issueTaskAge(task.createdAt, now)}`}
+                  onClick={() => onOpen(task.id)}><span className="task-month-content">{barContent(task, span.length)}</span></WandButton>;
+              })}
+            </div>
+            {items.length > 4 && <WandButton kind="ghost" size="small" className="task-month-more" aria-expanded={expanded} onClick={() => setExpandedWeeks(current => { const next = new Set(current); if (expanded) next.delete(start); else next.add(start); return next; })}>{expanded ? "收起本周任务" : `展开其余 ${items.length - 4} 个任务`}</WandButton>}
+          </section>;
+        })}
+      </div>
+    </div> : tasks.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这个时段没有匹配的任务，可切换日期或筛选"/> :
+    <div ref={scrollRef} className="task-board-gantt-scroll" tabIndex={0} role="region" aria-label="任务时间线，可横向滚动" style={{ overflowX: "auto", marginTop: 12 }}>
+      <div className="task-board-gantt-grid" style={{ minWidth: Math.max(680, 100 + range.days * dayWidth) }}>
+        <div className="task-board-gantt-head" style={{ display: "grid", gridTemplateColumns: "100px minmax(0, 1fr)", borderBottom: "1px solid var(--border-subtle)" }}>
           <Typography.Text strong style={{ alignSelf: "center", paddingInline: 8 }}>任务</Typography.Text>
           <div>
             <div className="task-board-gantt-months" style={{ display: "grid", gridTemplateColumns: timelineColumns }}>
@@ -578,44 +663,40 @@ export function TaskBoardGantt({
               </Typography.Text>)}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: timelineColumns, textAlign: "center" }}>
-              {range.columns.map((day) => <time key={day} dateTime={day} title={day} aria-current={day === today ? "date" : undefined}
+              {range.columns.map((day) => <time key={day} dateTime={day} title={day} className={[0, 6].includes(weekday(day)) ? "is-weekend" : undefined} aria-current={day === today ? "date" : undefined}
                 style={{ paddingBlock: 6, color: day === today ? "var(--accent)" : "var(--text-secondary)", fontWeight: day === today ? 700 : 400, borderLeft: day.endsWith("-01") ? "1px solid var(--border-subtle)" : undefined }}>
-                {day === today ? "今" : Number(day.slice(8, 10))}
+                {day.slice(5)} · {day === today ? "今天" : `周${"日一二三四五六"[weekday(day)]}`}
               </time>)}
             </div>
           </div>
         </div>
-        {[...ISSUE_COLUMNS, ISSUE_ARCHIVE_COLUMN].map((column) => {
-          const items = (grouped[column.status] ?? []).filter((task) => !hidden(task));
-          if (items.length === 0) return null;
-          return <section key={column.status} className={`task-board-gantt-group is-${column.status}`}>
-            <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", height: 36 }}>
-              <Flex component="header" align="center" gap="small" style={{ paddingInline: 8 }}><TaskBoardStatusGlyph status={column.status}/><Typography.Text strong>{column.label}</Typography.Text><Tag>{items.length}</Tag></Flex>
-              <div style={{ position: "relative" }}>{todayLine}</div>
-            </div>
-            {items.map((task) => {
-              const span = issueGanttSpan(task, range.start, range.days);
+        <section className="task-board-gantt-group">
+            {tasks.map((task) => {
+              const span = issueGanttSpan(task, range.start, range.days, now);
               const inRange = span.length > 0;
+              const period = task.dueDate ? `截止 ${task.dueDate}` : `添加 ${formatIssueStamp(task.createdAt)} → ${task.status === "archived" ? task.archivedAt ? `归档 ${formatIssueStamp(task.archivedAt)}` : "归档时间缺失" : "现在"}`;
               return <div key={task.id}><WandButton kind="ghost"
                 type="button"
                 className="task-board-gantt-row"
-                title={`${task.title} · ${task.dueDate ? `截止 ${task.dueDate}` : "待排期，未设置截止日期"}`}
-                style={{ width: "100%", height: 48, padding: 0, display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", gap: 0, textAlign: "left" }}
-                aria-label={`${task.identifier} ${task.title}，${task.dueDate ? `截止 ${task.dueDate}` : "待排期，未设置截止日期"}`}
+                title={`${task.title} · ${period}`}
+                style={{ width: "100%", height: 56, padding: 0, display: "grid", gridTemplateColumns: "100px minmax(0, 1fr)", gap: 0, textAlign: "left" }}
+                aria-label={`${task.identifier} ${task.title}，${period}`}
                 onClick={() => onOpen(task.id)}
               >
-                <Flex vertical style={{ minWidth: 0, paddingInline: 8 }}><Typography.Text type="secondary">{task.identifier}{task.parentTaskId ? ` · 归属 ${allTasks.find(parent => parent.id === task.parentTaskId)?.identifier ?? "历史主目标"}` : ""}</Typography.Text><Typography.Text ellipsis>{task.title}</Typography.Text></Flex>
+                <Typography.Text type="secondary" className="task-board-gantt-id">{task.identifier}</Typography.Text>
                 <div className="task-board-gantt-track" style={{ position: "relative", display: "grid", gridTemplateColumns: timelineColumns, alignItems: "center", height: "100%", minWidth: 0,
                   backgroundImage: "linear-gradient(to right, var(--border-subtle) 1px, transparent 1px)", backgroundSize: `${100 / range.days}% 100%` }}>
-                  {inRange ? <i className={`is-${task.status}`} aria-hidden="true"
-                    style={{ gridColumn: `${span.offset + 1} / span 1`, height: 12, width: 12, justifySelf: "center", borderRadius: "50%", background: taskHumanAccepted(task) ? "var(--success)" : task.status === "archived" ? "var(--text-tertiary)" : "var(--accent)" }}/>
-                    : <Typography.Text type="secondary" style={{ gridColumn: `1 / ${range.days + 1}`, paddingInline: 8 }}>{task.dueDate ? "截止日期不在当前范围" : "待排期 · 未设置截止日期"}</Typography.Text>}
+                  {weekends}
+                  {inRange ? <span className={`task-board-gantt-bar is-${task.status}${task.dueDate ? " is-milestone" : ""}`}
+                    style={{ gridColumn: `${span.offset + 1} / span ${span.length}` }}>
+                    {barContent(task, span.length)}
+                  </span> : <Typography.Text type="secondary" style={{ gridColumn: `1 / ${range.days + 1}`, paddingInline: 8 }}>{task.title} · {task.dueDate ? "截止日期不在当前范围" : "添加或归档时间缺失，无法显示时间段"}</Typography.Text>}
+
                   {todayLine}
                 </div>
-              </WandButton><TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/></div>;
+              </WandButton></div>;
             })}
-          </section>;
-        })}
+          </section>
       </div>
     </div>}
   </Card>;

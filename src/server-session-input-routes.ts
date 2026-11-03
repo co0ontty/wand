@@ -1,6 +1,6 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import type { StructuredInputReceipt } from "./storage/session-input-repository.js";
-import { InputRequest, ResizeRequest } from "./types.js";
+import { InputRequest, ResizeRequest, type SessionSnapshot } from "./types.js";
 
 import { compactToolMessagesForTransport, truncateMessagesForTransport } from "./message-truncator.js";
 
@@ -22,13 +22,26 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     wantsCompactTools, sessionResponseDTO,
   } = ctx;
 
-  function sendStructuredInput(
-    id: string,
-    input: string,
-    options: { interrupt?: boolean; preserveQueue?: boolean; idempotencyKey?: string },
-    onAccepted: (receipt?: StructuredInputReceipt) => void,
-  ) {
-    return structured.sendMessage(id, input, { ...options, onAccepted, source: "user" });
+  async function respondToStructuredInput(
+    req: Request,
+    res: Response,
+    send: (onAccepted: (receipt?: StructuredInputReceipt) => void) => Promise<SessionSnapshot | null>,
+    fallback: string,
+    conflictCodes: readonly string[],
+  ): Promise<void> {
+    let inputReceipt: StructuredInputReceipt | undefined;
+    let inputAccepted = false;
+    try {
+      const snapshot = await send(receipt => { inputAccepted = true; inputReceipt = receipt; });
+      if (!snapshot) return;
+      res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
+    } catch (error) {
+      const errorCode = (error as { code?: string } | null | undefined)?.code;
+      const status = inputAccepted ? 503 : errorCode && conflictCodes.includes(errorCode) ? 409 : 400;
+      res.status(status).json({ error: getErrorMessage(error, fallback),
+        errorCode: inputAccepted ? "INPUT_DELIVERY_UNCONFIRMED" : errorCode,
+        ...(inputReceipt ? { inputReceipt } : {}) });
+    }
   }
 
   app.get("/api/structured-sessions/:id/messages", (req, res) => {
@@ -58,30 +71,15 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     // 让退出 handler 不要把剩余 queuedMessages 清空（默认行为是清空）。
     const preserveQueue = !!req.body?.preserveQueue;
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
-    let inputReceipt: StructuredInputReceipt | undefined;
-    let inputAccepted = false;
-    try {
-      const session = structured.get(req.params.id);
-      if (!session) {
+    await respondToStructuredInput(req, res, async onAccepted => {
+      if (!structured.get(req.params.id)) {
         res.status(404).json({ error: "未找到该结构化会话。" });
-        return;
+        return null;
       }
-      const snapshot = await sendStructuredInput(req.params.id, input, {
-        interrupt,
-        preserveQueue,
-        idempotencyKey,
-      }, receipt => { inputAccepted = true; inputReceipt = receipt; });
-      res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
-    } catch (error) {
-      const errorCode = (error as { code?: string } | null | undefined)?.code;
-      const status = inputAccepted ? 503
-        : errorCode === "idempotency_key_conflict" || errorCode === "duplicate_idempotency_key" || errorCode === "duplicate_queued_message" ? 409 : 400;
-      res.status(status).json({
-        error: getErrorMessage(error, "无法发送结构化消息。"),
-        errorCode: inputAccepted ? "INPUT_DELIVERY_UNCONFIRMED" : errorCode,
-        ...(inputReceipt ? { inputReceipt } : {}),
+      return structured.sendMessage(req.params.id, input, {
+        interrupt, preserveQueue, idempotencyKey, onAccepted, source: "user",
       });
-    }
+    }, "无法发送结构化消息。", ["idempotency_key_conflict", "duplicate_idempotency_key", "duplicate_queued_message"]);
   }));
 
   // ── Structured queued-messages management ──
@@ -140,22 +138,9 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     }
     const expectedText = typeof req.body?.expectedText === "string" ? req.body.expectedText : undefined;
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
-    let inputAccepted = false;
-    let inputReceipt: StructuredInputReceipt | undefined;
-    try {
-      const snapshot = await structured.promoteQueuedMessage(req.params.id, index, expectedText, idempotencyKey, receipt => {
-        inputAccepted = true; inputReceipt = receipt;
-      });
-      res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
-    } catch (error) {
-      const errorCode = (error as { code?: string } | null | undefined)?.code;
-      const status = inputAccepted ? 503 : errorCode === "idempotency_key_conflict" || errorCode === "duplicate_idempotency_key" ? 409 : 400;
-      res.status(status).json({
-        error: getErrorMessage(error, "无法立即发送排队消息。"),
-        errorCode: inputAccepted ? "INPUT_DELIVERY_UNCONFIRMED" : errorCode,
-        ...(inputReceipt ? { inputReceipt } : {}),
-      });
-    }
+    await respondToStructuredInput(req, res, onAccepted => structured.promoteQueuedMessage(
+      req.params.id, index, expectedText, idempotencyKey, onAccepted,
+    ), "无法立即发送排队消息。", ["idempotency_key_conflict", "duplicate_idempotency_key"]);
   }));
 
   app.delete("/api/structured-sessions/:id/queued", (req, res) => {
@@ -181,11 +166,13 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
       if (structured.get(sessionId)) {
         let confirmAcceptance!: () => void;
         const acceptance = new Promise<void>(resolve => { confirmAcceptance = resolve; });
-        const completion = sendStructuredInput(sessionId, input, {
+        const completion = structured.sendMessage(sessionId, input, {
           interrupt: body.interrupt === true,
           preserveQueue: body.preserveQueue === true,
           idempotencyKey: body.idempotencyKey,
-        }, receipt => { inputAccepted = true; inputReceipt = receipt; confirmAcceptance(); });
+          source: "user",
+          onAccepted: receipt => { inputAccepted = true; inputReceipt = receipt; confirmAcceptance(); },
+        });
         if (body.respondImmediately === true || (body.respondImmediately !== false && structured.get(sessionId)?.provider === "pi"
           && structured.get(sessionId)?.piSettings?.autoResources === true)) {
           // Reject before returning 202 if validation/storage did not accept the
@@ -269,56 +256,26 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     }
   });
 
-  app.post("/api/sessions/:id/approve-permission", (req, res) => {
-    try {
-      if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.approvePermission(req.params.id), req));
-        return;
+  for (const { path, method, unsupported, fallback, domainErrors } of [
+    { path: "approve-permission", method: "approvePermission", unsupported: "Codex provider 不支持权限批准操作。", fallback: "无法批准该授权请求。", domainErrors: true },
+    { path: "deny-permission", method: "denyPermission", unsupported: "Codex provider 不支持权限拒绝操作。", fallback: "无法拒绝该授权请求。", domainErrors: true },
+    { path: "toggle-auto-approve", method: "toggleAutoApprove", unsupported: "Codex provider 不支持自动批准切换。", fallback: "无法切换自动批准状态。", domainErrors: false },
+  ] as const) {
+    app.post(`/api/sessions/:id/${path}`, (req, res) => {
+      try {
+        const owner = sessions.ownerOf(req.params.id);
+        if (owner !== "structured" && sessions.get(req.params.id)?.provider === "codex") {
+          res.status(400).json({ error: unsupported });
+          return;
+        }
+        const manager = owner === "structured" ? structured : processes;
+        res.json(sessionResponseDTO(manager[method](req.params.id), req));
+      } catch (error) {
+        const exposed = domainErrors ? surfaceDomainError(error, /^当前会话没有待处理的授权请求。$/) ?? error : error;
+        sendRouteError(res, exposed, fallback);
       }
-      const snapshot = sessions.get(req.params.id);
-      if (snapshot?.provider === "codex") {
-        res.status(400).json({ error: "Codex provider 不支持权限批准操作。" });
-        return;
-      }
-      res.json(sessionResponseDTO(processes.approvePermission(req.params.id), req));
-    } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /^当前会话没有待处理的授权请求。$/) ?? error, "无法批准该授权请求。");
-    }
-  });
-
-  app.post("/api/sessions/:id/deny-permission", (req, res) => {
-    try {
-      if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.denyPermission(req.params.id), req));
-        return;
-      }
-      const snapshot = sessions.get(req.params.id);
-      if (snapshot?.provider === "codex") {
-        res.status(400).json({ error: "Codex provider 不支持权限拒绝操作。" });
-        return;
-      }
-      res.json(sessionResponseDTO(processes.denyPermission(req.params.id), req));
-    } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /^当前会话没有待处理的授权请求。$/) ?? error, "无法拒绝该授权请求。");
-    }
-  });
-
-  app.post("/api/sessions/:id/toggle-auto-approve", (req, res) => {
-    try {
-      if (sessions.ownerOf(req.params.id) === "structured") {
-        res.json(sessionResponseDTO(structured.toggleAutoApprove(req.params.id), req));
-        return;
-      }
-      const snapshot = sessions.get(req.params.id);
-      if (snapshot?.provider === "codex") {
-        res.status(400).json({ error: "Codex provider 不支持自动批准切换。" });
-        return;
-      }
-      res.json(sessionResponseDTO(processes.toggleAutoApprove(req.params.id), req));
-    } catch (error) {
-      sendRouteError(res, error, "无法切换自动批准状态。");
-    }
-  });
+    });
+  }
 
   app.post("/api/sessions/:id/escalations/:requestId/resolve", (req, res) => {
     try {

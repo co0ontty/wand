@@ -152,6 +152,21 @@ function requireCurrentVersion(req: Request, res: Response): string | null {
   return currentVersion;
 }
 
+/** Shared update fields; platform-specific version order and optional fields stay at the route. */
+function updatePayload(currentVersion: string, latest: ResolvedUpdateAsset | null, compare: (a: string, b: string) => number) {
+  if (!latest) return { updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null };
+  const updateAvailable = compare(latest.version, currentVersion) > 0;
+  return {
+    updateAvailable,
+    currentVersion,
+    latestVersion: latest.version,
+    downloadUrl: updateAvailable ? latest.downloadUrl : null,
+    fileName: updateAvailable ? latest.fileName : null,
+    size: updateAvailable ? latest.size : null,
+    source: latest.source,
+  };
+}
+
 export function registerPublicUpdateRoutes(
   app: Express,
   deps: PublicUpdateRoutesDependencies,
@@ -162,26 +177,15 @@ export function registerPublicUpdateRoutes(
     if (currentVersion === null) return;
     const channel = req.query.channel === "beta" ? "beta" : "stable";
     const latest = await deps.resolveLatestApk(channel);
-    if (!latest) {
-      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null, channel });
-      return;
-    }
-    // APK 的 versionCode 约定是：X.Y.Z < X.Y.Z-debug.* < X.Y.(Z+1)。
-    // 不能使用标准 SemVer（它会把 prerelease 判为低于同号正式版），否则刚从
-    // tag 构建的 Beta 包对已安装 X.Y.Z 的设备永远不可见。
-    const updateAvailable = compareApkInstallOrder(latest.version, currentVersion) > 0;
+    // Android versionCode places a same-tag debug build after its stable release.
+    const payload = updatePayload(currentVersion, latest, compareApkInstallOrder);
     res.json({
-      updateAvailable,
-      currentVersion,
-      latestVersion: latest.version,
-      downloadUrl: updateAvailable ? latest.downloadUrl : null,
-      fileName: updateAvailable ? latest.fileName : null,
-      size: updateAvailable ? latest.size : null,
-      source: latest.source,
+      ...payload,
       channel,
-      releaseNotes: updateAvailable ? (latest.releaseNotes ?? null) : null,
-      // 本地文件哈希或 GitHub Release digest；客户端下载后校验。
-      sha256: updateAvailable ? (latest.sha256 ?? null) : null,
+      ...(latest ? {
+        releaseNotes: payload.updateAvailable ? (latest.releaseNotes ?? null) : null,
+        sha256: payload.updateAvailable ? (latest.sha256 ?? null) : null,
+      } : {}),
     });
   }));
 
@@ -225,21 +229,11 @@ export function registerPublicUpdateRoutes(
     const currentVersion = requireCurrentVersion(req, res);
     if (currentVersion === null) return;
     const latest = await deps.resolveLatestMacosBeta();
-    if (!latest) {
-      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null, channel: "beta" });
-      return;
-    }
-    const updateAvailable = compareWandInstallOrder(latest.version, currentVersion) > 0;
+    const payload = updatePayload(currentVersion, latest, compareWandInstallOrder);
     res.json({
-      updateAvailable,
-      currentVersion,
-      latestVersion: latest.version,
-      downloadUrl: updateAvailable ? latest.downloadUrl : null,
-      fileName: updateAvailable ? latest.fileName : null,
-      size: updateAvailable ? latest.size : null,
-      source: "local",
+      ...payload,
       channel: "beta",
-      sha256: updateAvailable ? latest.sha256 : null,
+      ...(latest ? { source: "local", sha256: payload.updateAvailable ? latest.sha256 : null } : {}),
     });
   }));
 
@@ -272,20 +266,7 @@ export function registerPublicUpdateRoutes(
     const currentVersion = requireCurrentVersion(req, res);
     if (currentVersion === null) return;
     const latest = await deps.resolveLatestDmg();
-    if (!latest) {
-      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
-      return;
-    }
-    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
-    res.json({
-      updateAvailable,
-      currentVersion,
-      latestVersion: latest.version,
-      downloadUrl: updateAvailable ? latest.downloadUrl : null,
-      fileName: updateAvailable ? latest.fileName : null,
-      size: updateAvailable ? latest.size : null,
-      source: latest.source,
-    });
+    res.json(updatePayload(currentVersion, latest, compareSemver));
   }));
 
   app.get("/macos/download", asyncRoute(async (req, res) => {

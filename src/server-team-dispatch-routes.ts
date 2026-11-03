@@ -2,7 +2,7 @@ import type { Express, Response } from "express";
 
 import type { DecisionService } from "./decision-service.js";
 import { DecisionError } from "./decision-types.js";
-import { asyncRoute } from "./express-async.js";
+import { asyncRoute, responseAbortController } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
 import type { WandStorage } from "./storage.js";
@@ -36,9 +36,7 @@ export function registerTeamDispatchRoutes(app: Express, deps: {
   decisions: Pick<DecisionService, "evaluate" | "status">;
 }): void {
   app.post("/api/team-dispatch/plan", asyncRoute(async (req, res) => {
-    const abort = new AbortController();
-    const disconnected = (): void => { if (!res.writableEnded) abort.abort(); };
-    res.once("close", disconnected);
+    const { controller: abort, dispose: releaseAbort } = responseAbortController(res);
     try {
       const body = bodyObject(req.body ?? {});
       const note = text(body.note);
@@ -56,7 +54,7 @@ export function registerTeamDispatchRoutes(app: Express, deps: {
       if (!res.destroyed) res.json(plan);
     } catch (error) {
       if (!res.destroyed) sendDispatchError(res, error);
-    } finally { res.off("close", disconnected); }
+    } finally { releaseAbort(); }
   }));
 
   app.post("/api/team-dispatch/start", asyncRoute(async (req, res) => {

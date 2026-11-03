@@ -548,4 +548,5 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
     END;
   `) },
   { version: 31, name: "task-comment-execution-owner", up: db => db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN execution_task_id TEXT") },
+  { version: 32, name: "task-comment-submission-source", up: db => db.exec("ALTER TABLE wand_task_comments ADD COLUMN submission_source TEXT") },
 ];

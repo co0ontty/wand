@@ -10,7 +10,7 @@ import { isSystemAiCall } from "../system-ai-call.js";
 import { isThinkingEffort } from "../structured-provider-common.js";
 import type { WandTask, WandTaskAgent, WandTaskComment, WandTaskStatus } from "../task-types.js";
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_PRIORITY, isTaskExecutionSubject, isWandTaskStatus, normalizeWandTaskAgentMode, taskAiVerified, taskHumanAccepted } from "../task-types.js";
-import { GLOBAL_WORKSPACE_ID, SessionSnapshot } from "../types.js";
+import { GLOBAL_WORKSPACE_ID, SessionSnapshot, type ConversationTurn } from "../types.js";
 import { safeJsonParse, mapWandMilestoneRow, mapIterationPromptRow } from "./mappers.js";
 import { parseWandTaskAgent } from "./mappers.js";
 import type { WandStorage } from "../storage.js";
@@ -198,7 +198,24 @@ export class TaskRepository {
 
   private mapWandTaskCommentRow(row: Record<string, string | null>): WandTaskComment {
     const referencedTaskIds = parseReferencedTaskIds(row.referenced_task_ids);
-    return { id: row.id!, taskId: row.task_id!, authorName: row.author_name!, body: row.body!, createdAt: row.created_at!,
+    const event = this.db.prepare("SELECT actor_kind, actor_id, source_session_id FROM task_workflow_events WHERE id = ? AND task_id = ?").get(row.id!, row.task_id!) as { actor_kind: string; actor_id: string | null; source_session_id: string | null } | undefined;
+    const employee = event?.actor_kind === "employee" && event.actor_id ? this.s.getSiliconEmployeeDefinition(event.actor_id) : null;
+    // Read the dispatch snapshot for this exact source session, not the employee's current defaults.
+    const sourceDispatch = event?.source_session_id ? this.db.prepare("SELECT agent_json FROM wand_task_comment_dispatches WHERE session_id = ? ORDER BY rowid DESC LIMIT 1").get(event.source_session_id) as { agent_json: string | null } | undefined : undefined;
+    const manual = row.submission_source === "manual";
+    const authorKind = event?.actor_kind === "employee" ? "employee" : manual ? "user" : "system";
+    const legacyUser = row.author_name === "用户" || row.author_name === "我";
+    const authorName = employee?.name ?? (event?.actor_kind === "employee" ? "历史员工" : manual ? "用户" : row.employee_id ? "任务派发" : legacyUser ? "来源未记录" : row.author_name!);
+    const origin: NonNullable<WandTaskComment["origin"]> = {
+      kind: event ? "workflow" : manual ? "manual" : row.employee_id ? "task_dispatch" : legacyUser ? "unknown" : "system",
+      triggerName: employee?.name ?? (manual || row.submission_source === "user_dispatch" ? "用户" : null), taskId: row.task_id!,
+      taskIdentifier: this.getWandTask(row.task_id!)?.identifier ?? row.task_id!, commentId: row.id!,
+      entrySessionId: event?.source_session_id ?? null,
+    };
+    return { id: row.id!, taskId: row.task_id!, authorName, authorKind, origin, authorId: event?.actor_id ?? null,
+      ...(employee?.avatar ? { authorAvatar: employee.avatar } : {}),
+      ...(event ? { sourceSessionId: event.source_session_id, authorAgent: parseWandTaskAgent(sourceDispatch?.agent_json ?? null) } : {}),
+      body: row.body!, createdAt: row.created_at!,
       purpose: row.purpose === "review" ? "review" : "execution", reviewRevision: row.review_revision == null ? null : Number(row.review_revision),
       ...(row.request_id ? { requestId: row.request_id, sourceCommentId: row.source_comment_id, instruction: row.instruction!, taskVersion: row.task_version!,
         ...(referencedTaskIds.length ? { referencedTaskIds } : {}),
@@ -212,6 +229,26 @@ export class TaskRepository {
           } } : {}), ...(row.execution_status ? { status: row.execution_status } : {}) } : null } : {}) };
   }
 
+  /** Model role is not authorship. Match only the recorded dispatch request or first-turn identity. */
+  projectTaskDispatchMessageOrigins(sessionId: string, messages: ConversationTurn[]): ConversationTurn[] {
+    const bindings = this.db.prepare(`SELECT d.comment_id, d.result_request_id, s.automation_id
+      FROM wand_task_comment_dispatches d JOIN command_sessions s ON s.id = d.session_id
+      WHERE d.session_id = ?`).all(sessionId) as Array<{ comment_id: string; result_request_id: string | null; automation_id: string | null }>;
+    if (!bindings.length) return messages;
+    const first = bindings.some(binding => !binding.result_request_id && binding.automation_id === `wand-task-comment:${binding.comment_id}`)
+      ? this.s.readSessionRawMessageRange(sessionId, 0, 1)[0] : undefined;
+    return messages.map(turn => {
+      if (turn.role !== "user" || turn.origin) return turn;
+      const binding = bindings.find(item => item.result_request_id ? item.result_request_id === turn.requestId
+        : item.automation_id === `wand-task-comment:${item.comment_id}` && first?.role === "user"
+          && Boolean(first.requestId && first.requestId === turn.requestId || first.messageId && first.messageId === turn.messageId));
+      if (!binding) return turn;
+      const comment = this.getWandTaskComment(binding.comment_id);
+      if (!comment?.origin) return turn;
+      return { ...turn, origin: { ...comment.origin, kind: "task_dispatch" as const }, author: { id: "system:task-dispatch", name: "任务自动派发" } };
+    });
+  }
+
   findTaskCommentRequest(taskId: string, requestId: string): { comment: WandTaskComment; signature: string } | null {
     const row = this.db.prepare(`SELECT comment_id, signature FROM wand_task_comment_dispatches WHERE task_id = ? AND request_id = ?`)
       .get(taskId, requestId) as { comment_id: string; signature: string } | undefined;
@@ -220,7 +257,7 @@ export class TaskRepository {
 
   /** Atomically persist both the visible comment and the one-shot dispatch intent before any side effect. */
   createTaskCommentIntent(input: { taskId: string; requestId: string; signature: string; body: string; instruction: string;
-    sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string;
+    sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string; submissionSource?: "manual" | "user_dispatch";
     referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean; purpose?: "execution" | "review"; reviewRevision?: number | null; executionTaskId?: string | null; createChild?: boolean }): WandTaskComment {
     return this.s.transaction(() => {
       const previous = this.findTaskCommentRequest(input.taskId, input.requestId);
@@ -245,8 +282,8 @@ export class TaskRepository {
         if (owner.id !== parent.id) this.writeWandTask(owner, { status: "doing" });
       }
       const id = crypto.randomUUID();
-      this.db.prepare(`INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)`)
-        .run(id, input.taskId, "用户", input.body, nowIso());
+      this.db.prepare(`INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at, submission_source) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(id, input.taskId, "用户", input.body, nowIso(), input.submissionSource ?? null);
       this.db.prepare(`INSERT INTO wand_task_comment_dispatches(comment_id, task_id, request_id, signature, source_comment_id,
         employee_id, employee_name, instruction, task_version, state, referenced_task_ids, agent_json, purpose, review_revision, execution_task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, input.taskId, input.requestId, input.signature, input.sourceCommentId, input.employeeId, input.employeeName,

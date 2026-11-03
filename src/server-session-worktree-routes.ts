@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Response } from "express";
 
 import { SessionSnapshot } from "./types.js";
 
@@ -30,6 +30,19 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
     storage, config, sessions, free, structured, onSessionCreated,
     wantsCompactTools, sessionResponseDTO,
   } = ctx;
+
+  function gitSession(id: string, res: Response, errorCode?: "NO_CWD") {
+    const snapshot = sessions.getLatest(id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return null;
+    }
+    if (!snapshot.cwd) {
+      res.status(400).json({ error: "会话没有工作目录。", ...(errorCode ? { errorCode } : {}) });
+      return null;
+    }
+    return snapshot;
+  }
 
   app.post("/api/sessions/:id/worktree/merge/check", asyncRoute(async (req, res) => {
     try {
@@ -123,9 +136,8 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
   }));
 
   app.post("/api/sessions/:id/git/merge-worktrees", asyncRoute(async (req, res) => {
-    const snapshot = sessions.getLatest(req.params.id);
-    if (!snapshot) { res.status(404).json({ error: "未找到该会话。" }); return; }
-    if (!snapshot.cwd) { res.status(400).json({ error: "会话没有工作目录。" }); return; }
+    const snapshot = gitSession(req.params.id, res);
+    if (!snapshot) return;
     const { expectedBranch, expectedHead } = req.body ?? {};
     if (typeof expectedBranch !== "string" || !expectedBranch.trim()
       || typeof expectedHead !== "string" || !/^[a-f0-9]{40,64}$/.test(expectedHead)) {
@@ -140,15 +152,8 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
   }));
 
   app.post("/api/sessions/:id/quick-commit", asyncRoute(async (req, res) => {
-    const snapshot = sessions.getLatest(req.params.id);
-    if (!snapshot) {
-      res.status(404).json({ error: "未找到该会话。" });
-      return;
-    }
-    if (!snapshot.cwd) {
-      res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
-      return;
-    }
+    const snapshot = gitSession(req.params.id, res, "NO_CWD");
+    if (!snapshot) return;
     const body = (req.body ?? {}) as {
       autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean;
       submodule?: boolean; mode?: unknown; entryIds?: unknown; includeDiff?: boolean;
@@ -232,15 +237,8 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
   });
 
   app.post("/api/sessions/:id/generate-commit-message", asyncRoute(async (req, res) => {
-    const snapshot = sessions.getLatest(req.params.id);
-    if (!snapshot) {
-      res.status(404).json({ error: "未找到该会话。" });
-      return;
-    }
-    if (!snapshot.cwd) {
-      res.status(400).json({ error: "会话没有工作目录。" });
-      return;
-    }
+    const snapshot = gitSession(req.params.id, res);
+    if (!snapshot) return;
     const body = (req.body ?? {}) as { mode?: unknown; entryIds?: unknown; includeDiff?: boolean };
     try {
       const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage });
@@ -269,15 +267,8 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
   }));
 
   app.post("/api/sessions/:id/git/tag-head", asyncRoute(async (req, res) => {
-    const snapshot = sessions.getLatest(req.params.id);
-    if (!snapshot) {
-      res.status(404).json({ error: "未找到该会话。" });
-      return;
-    }
-    if (!snapshot.cwd) {
-      res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
-      return;
-    }
+    const snapshot = gitSession(req.params.id, res, "NO_CWD");
+    if (!snapshot) return;
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
       const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage });
@@ -301,15 +292,8 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
   }));
 
   app.post("/api/sessions/:id/git/push", asyncRoute(async (req, res) => {
-    const snapshot = sessions.getLatest(req.params.id);
-    if (!snapshot) {
-      res.status(404).json({ error: "未找到该会话。" });
-      return;
-    }
-    if (!snapshot.cwd) {
-      res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
-      return;
-    }
+    const snapshot = gitSession(req.params.id, res, "NO_CWD");
+    if (!snapshot) return;
     const body = (req.body ?? {}) as { pushCommits?: boolean; pushTags?: boolean; submodule?: boolean; tag?: string };
     try {
       const result = await withGitRepositoryOperation(snapshot.cwd, () => runPush({

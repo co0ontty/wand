@@ -155,7 +155,7 @@ export function SidebarFilterCapsules({ model, enabled }: { model: UnifiedSideba
     <span className="sidebar-capsule-label">工作区</span>
     {capsule("workspaces", <>
       {expanded === "workspaces" || search === "workspaces" ? <WandHintButton iconOnly aria-label="添加工作区" hint="添加工作区：填写目录和别名"
-        onClick={() => { setSearch(null); requestAddWorkspace("", undefined, "sidebar-filter-capsules"); }}>
+        onClick={() => { setSearch(null); requestAddWorkspace("", workspace => update({ workspace: `id:${workspace.id}` }), "sidebar-filter-capsules"); }}>
         <WandIcon name="plus" size={18}/>
       </WandHintButton> : null}
       {workspaceButton({ value: "all", label: "全部工作区" })}
