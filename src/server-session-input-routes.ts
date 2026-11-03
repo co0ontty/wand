@@ -22,6 +22,15 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     wantsCompactTools, sessionResponseDTO,
   } = ctx;
 
+  function sendStructuredInput(
+    id: string,
+    input: string,
+    options: { interrupt?: boolean; preserveQueue?: boolean; idempotencyKey?: string },
+    onAccepted: (receipt?: StructuredInputReceipt) => void,
+  ) {
+    return structured.sendMessage(id, input, { ...options, onAccepted, source: "user" });
+  }
+
   app.get("/api/structured-sessions/:id/messages", (req, res) => {
     const snapshot = structured.get(req.params.id);
     if (!snapshot) {
@@ -57,13 +66,11 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
         res.status(404).json({ error: "未找到该结构化会话。" });
         return;
       }
-      const snapshot = await structured.sendMessage(req.params.id, input, {
-        onAccepted: receipt => { inputAccepted = true; inputReceipt = receipt; },
+      const snapshot = await sendStructuredInput(req.params.id, input, {
         interrupt,
         preserveQueue,
         idempotencyKey,
-        source: "user",
-      });
+      }, receipt => { inputAccepted = true; inputReceipt = receipt; });
       res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
@@ -174,11 +181,12 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
       if (structured.get(sessionId)) {
         let confirmAcceptance!: () => void;
         const acceptance = new Promise<void>(resolve => { confirmAcceptance = resolve; });
-        const completion = structured.sendMessage(sessionId, input, { source: "user",
+        const completion = sendStructuredInput(sessionId, input, {
+          interrupt: body.interrupt === true,
+          preserveQueue: body.preserveQueue === true,
           idempotencyKey: body.idempotencyKey,
-          onAccepted: receipt => { inputAccepted = true; inputReceipt = receipt; confirmAcceptance(); },
-        });
-        if (body.respondImmediately === true || (structured.get(sessionId)?.provider === "pi"
+        }, receipt => { inputAccepted = true; inputReceipt = receipt; confirmAcceptance(); });
+        if (body.respondImmediately === true || (body.respondImmediately !== false && structured.get(sessionId)?.provider === "pi"
           && structured.get(sessionId)?.piSettings?.autoResources === true)) {
           // Reject before returning 202 if validation/storage did not accept the
           // input. After acceptance, execution failures arrive on the event stream.
@@ -198,6 +206,10 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
         }
         const snapshot = await completion;
         res.json({ ...sessionResponseDTO(snapshot, req), ...(inputReceipt ? { inputReceipt } : {}) });
+        return;
+      }
+      if (body.expectedKind === "structured") {
+        res.status(404).json({ error: "未找到该结构化会话。", errorCode: "SESSION_NOT_FOUND" });
         return;
       }
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);

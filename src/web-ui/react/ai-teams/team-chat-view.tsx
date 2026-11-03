@@ -71,14 +71,14 @@ export interface LocalChatTurn {
   ackFingerprint?: string;
 }
 
-/** 发送端点：relay 会话就是普通结构化会话，走既有的 messages 路由（S7）。 */
+/** relay 会话使用统一的会话输入接口。 */
 export function chatMessageUrl(sessionId: string): string {
-  return `/api/structured-sessions/${encodeURIComponent(sessionId)}/messages`;
+  return `/api/sessions/${encodeURIComponent(sessionId)}/input`;
 }
 
 /** 请求体字段是 `input`（不是 `text`）；插话不带 `interrupt`，走排队进 chatInput。 */
-export function chatMessageBody(text: string): { input: string } {
-  return { input: text };
+export function chatMessageBody(text: string): { input: string; expectedKind: "structured"; respondImmediately: false } {
+  return { input: text, expectedKind: "structured", respondImmediately: false };
 }
 
 interface UploadedChatFile {

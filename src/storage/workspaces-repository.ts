@@ -20,7 +20,7 @@ export class WorkspaceRepository {
   listWorkspaces(): Workspace[] {
     const rows = this.db
       .prepare(
-        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY created_at DESC, id DESC"
+        "SELECT id, name, cwd, kind, user_added, default_provider, layout_json, created_at, last_opened_at FROM workspaces ORDER BY created_at DESC, id DESC"
       )
       .all() as unknown as WorkspaceRow[];
     return rows.map(mapWorkspaceRow);
@@ -29,7 +29,7 @@ export class WorkspaceRepository {
   getWorkspace(id: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at FROM workspaces WHERE id = ?"
+        "SELECT id, name, cwd, kind, user_added, default_provider, layout_json, created_at, last_opened_at FROM workspaces WHERE id = ?"
       )
       .get(id) as unknown as WorkspaceRow | undefined;
     return row ? mapWorkspaceRow(row) : null;
@@ -40,6 +40,7 @@ export class WorkspaceRepository {
     name: string;
     cwd: string;
     kind?: WorkspaceKind;
+    userAdded?: boolean;
     defaultProvider?: WorkspaceDefaultProvider;
   }): Workspace {
     const id = input.id?.trim() || crypto.randomUUID();
@@ -47,15 +48,16 @@ export class WorkspaceRepository {
     const createdAt = nowIso();
     this.db
       .prepare(
-        `INSERT INTO workspaces (id, name, cwd, kind, default_provider, layout_json, created_at, last_opened_at)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, NULL)`
+        `INSERT INTO workspaces (id, name, cwd, kind, user_added, default_provider, layout_json, created_at, last_opened_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)`
       )
-      .run(id, input.name, input.cwd, kind, input.defaultProvider ?? null, createdAt);
+      .run(id, input.name, input.cwd, kind, kind !== "global" && input.userAdded === true ? 1 : 0, input.defaultProvider ?? null, createdAt);
     return {
       id,
       name: input.name,
       cwd: input.cwd,
       kind,
+      userAdded: kind !== "global" && input.userAdded === true,
       defaultProvider: input.defaultProvider,
       layout: null,
       createdAt,
@@ -80,10 +82,15 @@ export class WorkspaceRepository {
   updateWorkspace(id: string, patch: {
     name?: string;
     cwd?: string;
+    userAdded?: boolean;
     defaultProvider?: WorkspaceDefaultProvider | null;
   }): void {
     const assignments: string[] = [];
-    const values: Array<string | null> = [];
+    const values: Array<string | number | null> = [];
+    if (patch.userAdded !== undefined) {
+      assignments.push("user_added = ?");
+      values.push(patch.userAdded ? 1 : 0);
+    }
     if (patch.name !== undefined) {
       assignments.push("name = ?");
       values.push(patch.name);

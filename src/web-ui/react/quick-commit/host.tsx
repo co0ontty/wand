@@ -309,13 +309,20 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     }
   }
 
-  async function submit(event?: FormEvent<HTMLFormElement>, chosenAction = action, includeSubmodule = false): Promise<void> {
+  async function submit(event?: FormEvent<HTMLFormElement>, chosenAction = action, includeSubmodule = false, includeWorktrees = false): Promise<void> {
     event?.preventDefault();
     if (!context || !status || !canCommit || submitting || submitPhase === "pending" || submitPhase === "success") return;
+    if (includeWorktrees && (!status.branch || !repository.mergeWorktrees)) {
+      setError("当前分支或 Worktree 合并能力不可用，请刷新或更新后重试。");
+      return;
+    }
     const operationSessionId = context.sessionId;
     const operationRevision = quickCommitStore.getSnapshot().revision;
     const ownsCurrentSurface = () =>
       quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
+    const effectiveAction: QuickCommitAction = includeWorktrees
+      ? (quickCommitActionMeta(chosenAction).withTag ? "commit-tag-push" : "commit-push") : chosenAction;
+    let completedOutcome: QuickCommitOutcome | null = null;
     setSubmitting(true);
     setSubmitPhase("pending");
     setSubmitResult("");
@@ -325,11 +332,11 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     try {
       const response = await repository.commit(
         operationSessionId,
-        buildQuickCommitInput(form, chosenAction, includeSubmodule, contextSelection(), includeDiff),
+        buildQuickCommitInput(form, effectiveAction, includeSubmodule, contextSelection(), includeDiff),
       );
       if (!response.ok) throw new Error("快捷提交失败。");
       const nextOutcome = buildQuickCommitOutcome(
-        chosenAction,
+        effectiveAction,
         includeSubmodule,
         form,
         status,
@@ -337,13 +344,28 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       );
       const summary = commitSummary(nextOutcome);
       const hash = nextOutcome.commitHash ? nextOutcome.commitHash.slice(0, 7) : "";
+      let worktreeSummary = "";
+      if (includeWorktrees) {
+        completedOutcome = nextOutcome;
+        // 不丢弃 Tag/Sub；先确认推送，再以新 HEAD 合并，失败不重做已完成的提交。
+        if (response.pushError || !response.pushed) throw new Error(response.pushError || "提交或推送未完成，已停止合并 Worktree。");
+        const current = await loadStatusWithBadgeSync(operationSessionId);
+        const commitHash = response.commit?.hash;
+        if (current.branch !== status.branch || !commitHash || !current.head.startsWith(commitHash)) {
+          throw new Error("当前分支或提交已经变化，请刷新 Git 状态后单独合并 Worktree。");
+        }
+        if (ownsCurrentSurface()) setSubmitResult("合并并推送中…");
+        const merged = await repository.mergeWorktrees!(operationSessionId, { expectedBranch: current.branch, expectedHead: current.head });
+        if (!merged.ok || !merged.pushed) throw new Error(merged.error || "合并或推送未完成。");
+        worktreeSummary = `；已合并 ${merged.mergedBranches.length} 个 Worktree 到 ${merged.targetBranch} 并推送`;
+      }
       if (!response.pushError) {
         void reloadStatus(operationSessionId);
         void reloadContext(operationSessionId);
         if (ownsCurrentSurface()) {
           setSubmitResult(hash ? `已提交 ${hash}` : "已提交");
           // 原来只有 toast 承载的细节（submodule 数、tag、是否推送）改在页脚原位显示。
-          setResultNote(`${summary}${quickCommitActionMeta(chosenAction).push ? "，已推送" : ""}。`);
+          setResultNote(`${summary}${quickCommitActionMeta(effectiveAction).push ? "，已推送" : ""}${worktreeSummary}。`);
           setSubmitPhase("success");
           setSubmitting(false);
         }
@@ -367,10 +389,17 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       await new Promise((resolve) => { window.setTimeout(resolve, MOTION_DWELL_FAILED_MS); });
       if (ownsCurrentSurface()) setSubmitPhase("idle");
     } catch (commitError) {
-      const message = describeError(commitError, "快捷提交失败。");
+      const progress = completedOutcome ? `${commitSummary(completedOutcome)}${completedOutcome.pushed ? "，已推送" : ""}；Worktree 未完成：` : "";
+      const message = progress + describeError(commitError, "快捷提交失败。");
       if (ownsCurrentSurface()) {
+        if (completedOutcome) {
+          setOutcome(completedOutcome);
+          setPushError(completedOutcome.pushError || "");
+          void reloadStatus(operationSessionId);
+          void reloadContext(operationSessionId);
+        }
         setError(message);
-        setSubmitResult("提交失败");
+        setSubmitResult(completedOutcome ? "已提交，Worktree 未完成" : "提交失败");
         setSubmitPhase("error");
       }
       await new Promise((resolve) => { window.setTimeout(resolve, MOTION_DWELL_FAILED_MS); });
@@ -510,7 +539,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
               worktreeCount={status.worktreeCount ?? 0} ahead={status.ahead}
               busy={busy || generating || submitPhase === "success"}
               feedback={submitPhase === "idle" ? "" : submitResult || "执行中…"}
-              onAction={(nextAction, submodule) => { setAction(nextAction); void submit(undefined, nextAction, submodule); }}
+              onAction={(nextAction, submodule, worktrees) => { setAction(nextAction); void submit(undefined, nextAction, submodule, worktrees); }}
               onWorktree={() => void runWorktreeOrPush(true)} onPush={() => void runWorktreeOrPush(false)}/>
             {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
             <Flex component="footer" justify="space-between" gap={12} align="center" wrap className="wand-dialog-sticky-actions">

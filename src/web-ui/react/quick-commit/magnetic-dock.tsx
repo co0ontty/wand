@@ -27,33 +27,57 @@ export function composeGitBubbles(members: readonly string[]): QuickCommitAction
 export function MagneticGitDock(props: {
   hasChanges: boolean; hasSubmodule: boolean; worktreeCount: number; ahead: number;
   busy: boolean; feedback: string;
-  onAction(action: QuickCommitAction, submodule: boolean): void;
+  onAction(action: QuickCommitAction, submodule: boolean, worktrees: boolean): void;
   onWorktree(): void;
   onPush(): void;
 }) {
   const launch = React.useRef<HTMLButtonElement>(null);
   const buttons = React.useRef(new Map<Bubble, HTMLElement>());
-  const drag = React.useRef<{ id: Bubble; x: number; y: number; members: Bubble[]; moved: boolean } | null>(null);
+  const drag = React.useRef<{ id: Bubble; pointerId: number; x: number; y: number; members: Bubble[]; moved: boolean } | null>(null);
   const suppressClick = React.useRef(false);
   const [visual, setVisual] = React.useState<{ members: Bubble[]; x: number; y: number; hot: boolean } | null>(null);
   const ids: Bubble[] = ["commit", "tag", "push", ...(props.hasSubmodule ? ["sub" as const] : []), "worktree"];
-  const enabled = (id: Bubble) => !props.busy && (id === "worktree" ? props.worktreeCount > 0
+  const enabled = (id: Bubble) => ids.includes(id) && !props.busy && (id === "worktree" ? props.worktreeCount > 0
     : id === "push" ? props.hasChanges || props.ahead > 0 : props.hasChanges);
   function execute(members: Bubble[]) {
-    if (members.includes("worktree")) props.onWorktree();
+    if (!members.length || !members.every(enabled)) return;
+    const worktrees = members.includes("worktree");
+    if (worktrees && (members.length === 1 || !props.hasChanges)) props.onWorktree();
     else if (!props.hasChanges && members.includes("push")) props.onPush();
-    else props.onAction(composeGitBubbles(members), members.includes("sub"));
+    else props.onAction(composeGitBubbles(members), members.includes("sub"), worktrees);
   }
+  function cancelDrag() {
+    const current = drag.current;
+    drag.current = null;
+    setVisual(null);
+    if (!current) return;
+    suppressClick.current = true;
+    const button = buttons.current.get(current.id);
+    if (button?.hasPointerCapture(current.pointerId)) button.releasePointerCapture(current.pointerId);
+  }
+  React.useEffect(() => { cancelDrag(); }, [props.busy, props.hasChanges, props.hasSubmodule, props.worktreeCount, props.ahead]);
+  React.useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !drag.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelDrag();
+    };
+    window.addEventListener("keydown", onEscape, true);
+    window.addEventListener("blur", cancelDrag);
+    return () => {
+      window.removeEventListener("keydown", onEscape, true);
+      window.removeEventListener("blur", cancelDrag);
+    };
+  }, []);
   function finish(event: React.PointerEvent<HTMLElement>, cancelled = false) {
     const current = drag.current;
     if (!current) return;
-    suppressClick.current = current.moved;
     const box = launch.current?.getBoundingClientRect();
     const hot = !!box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+    cancelDrag();
+    suppressClick.current = current.moved || cancelled;
     if (current.moved && hot && !cancelled) execute(current.members);
-    drag.current = null;
-    setVisual(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
   return <>
     <style>{styles}</style>
@@ -67,25 +91,23 @@ export function MagneticGitDock(props: {
           aria-label={id === "worktree" ? "合并全部 Worktree 并推送" : `${labels[id]} 气泡`}
           style={visual?.members.includes(id) ? { transform: `translate(${visual.x}px, ${visual.y}px)` } : undefined}
           onPointerDown={(event) => {
-            if (event.button !== 0 || !enabled(id)) return;
+            if (event.button !== 0 || drag.current || !enabled(id)) return;
             suppressClick.current = false;
-            drag.current = { id, x: event.clientX, y: event.clientY, members: [id], moved: false };
+            drag.current = { id, pointerId: event.pointerId, x: event.clientX, y: event.clientY, members: [id], moved: false };
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
           onPointerMove={(event) => {
             const current = drag.current;
-            if (!current || current.id !== id) return;
+            if (!current || current.id !== id || current.pointerId !== event.pointerId) return;
             const x = event.clientX - current.x;
             const y = event.clientY - current.y;
             if (Math.hypot(x, y) > 6) current.moved = true;
             if (!current.moved) return;
-            if (id !== "worktree" && props.hasChanges) {
-              for (const candidate of ["commit", "tag", "push"] as Bubble[]) {
-                if (current.members.includes(candidate)) continue;
-                const box = buttons.current.get(candidate)?.getBoundingClientRect();
-                if (box && Math.hypot(event.clientX - (box.x + box.width / 2), event.clientY - (box.y + box.height / 2)) < 40) {
-                  current.members.push(candidate);
-                }
+            for (const candidate of ids) {
+              if (!enabled(candidate) || current.members.includes(candidate)) continue;
+              const box = buttons.current.get(candidate)?.getBoundingClientRect();
+              if (box && Math.hypot(event.clientX - (box.x + box.width / 2), event.clientY - (box.y + box.height / 2)) < 40) {
+                current.members.push(candidate);
               }
             }
             const box = launch.current?.getBoundingClientRect();
@@ -93,16 +115,16 @@ export function MagneticGitDock(props: {
             setVisual({ members: [...current.members], x, y, hot });
           }}
           onPointerUp={(event) => finish(event)} onPointerCancel={(event) => finish(event, true)}
-          onLostPointerCapture={() => { drag.current = null; setVisual(null); }}
+          onLostPointerCapture={cancelDrag}
           onClick={(event) => { if (suppressClick.current && event.detail > 0) { suppressClick.current = false; return; } suppressClick.current = false; execute([id]); }}>
           <span className="wand-git-bubble-dot"/>{labels[id]}{id === "worktree" && props.worktreeCount > 0 ? ` ${props.worktreeCount}` : ""}
         </Button>)}
       </div>
       <Button ref={launch} className="wand-git-launch" data-hot={visual?.hot || false}
-        disabled={props.busy || !props.hasChanges} onClick={() => props.onAction("commit", false)} aria-live="polite">
+        disabled={props.busy || (!props.hasChanges && !visual)} onClick={() => { if (props.hasChanges) execute(["commit"]); }} aria-live="polite">
         {props.feedback || (visual?.hot ? "松手执行" : "提交 →")}
       </Button>
     </div>
-    <Typography.Text type="secondary">点按直接执行，拖动气泡组合后放入提交区。Worktree：合并全部工作树到当前分支后推送。</Typography.Text>
+    <Typography.Text type="secondary">点按直接执行，拖动任意可用气泡组合后放入提交区。Worktree 组合：先提交并推送所选 Tag/Sub，再合并全部工作树并推送。</Typography.Text>
   </>;
 }

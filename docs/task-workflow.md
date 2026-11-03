@@ -39,6 +39,12 @@ Every client must keep the clicked snapshot, retain the same requestId when chec
 
 Direct PATCH remains for draft evidence/metadata and backlog/todo/doing planning changes. Direct ready, new done, acceptance.acceptedAt and archive shortcuts must not bypass the workflow. Existing archive/restore/history APIs remain conservative and preserve data. Creating a task only permits planning stages, not pretending it already passed. An explicitly deleted project may collect unaccepted task history through the separately named storage removal operation; it records a project-removal comment and never writes human acceptance or counts that collection as completion.
 
+## Idle execution-stage convergence
+
+The startup/hourly retention sweep rechecks `doing` tasks after the ten-minute card-update grace window. In a storage transaction it reads live session facts (falling back to stored snapshots), comment dispatches for both source and execution tasks, active teams and non-archived descendants. Running work, approvals, queued/paused work, unknown delivery and accepted dispatches with no session ID (or a missing session without a terminal receipt) all prevent reclamation; elapsed time is never proof of delivery or completion.
+
+Idle historical sessions and existing evidence/failed verification do not pin a card to `doing`. Eligible cards return only to `todo`, with an explanatory comment. Session membership/history, blockers, delivery revision and verification remain unchanged. `review`, `ready` and archived cards are not rewritten. Reads never trigger this maintenance, and no runtime is stopped or input replayed. Clients continue consuming the existing shared `status`/`executionStatus` DTO; no protocol or client mutation is added.
+
 ## Cancel unnecessary work without accepting delivery
 
 `POST /api/wand-tasks/:id/maintenance` and owner CLI `wand task:maintain <task-id> --stdin`

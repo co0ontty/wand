@@ -23,12 +23,13 @@ import { collectSessionTopicBlocklist } from "./session-topic.js";
 import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
-import { attachUnboundSessionsToWorkspace, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
+import { attachUnboundSessionsToWorkspace, findWorkspaceByCwd, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
 import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
 import { isUnnamedWorkspaceTaskName, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId, wrapLegacyTaskLayout } from "./layout-tree.js";
 import { parentTaskIdFrom } from "./task-agent-parsing.js";
+import { formalTasksFromReadModel } from "./server-task-routes.js";
 import { taskTitleService, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./task-title-service.js";
 import { organizeSelectedByTitle, titleJudgeForStorage } from "./task-title-organize-service.js";
 import { systemAiSessions } from "./system-ai-session-recorder.js";
@@ -409,7 +410,7 @@ export function registerWorkspaceRoutes(
     const includeArchived = req.query.includeArchived === "1";
     const sessionCounts = storage.countSessionsByWorkspace({ includeArchived, excludeSystemAiCalls: true, excludeQuickTerminals: true });
     res.json(storage.listWorkspaces()
-      .filter((workspace) => !isGlobalWorkspace(workspace))
+      .filter((workspace) => !isGlobalWorkspace(workspace) && workspace.userAdded === true)
       .map((workspace) => workspaceWithCounts(storage, workspace, sessionCounts, includeArchived)));
   });
 
@@ -429,7 +430,16 @@ export function registerWorkspaceRoutes(
       return;
     }
     const defaultProvider = parseDefaultProvider(body.defaultProvider);
-    const workspace = storage.createWorkspace({ name, cwd, defaultProvider });
+    // Explicit creation promotes an automatically discovered cwd instead of
+    // duplicating the project and leaving its historic sessions hidden.
+    const workspace = storage.transaction(() => {
+      const existing = findWorkspaceByCwd(storage, cwd);
+      if (existing && !isGlobalWorkspace(existing)) {
+        storage.updateWorkspace(existing.id, { name, userAdded: true, ...(defaultProvider ? { defaultProvider } : {}) });
+        return storage.getWorkspace(existing.id)!;
+      }
+      return storage.createWorkspace({ name, cwd, defaultProvider, userAdded: true });
+    });
     // 项目名就是工作区显示名：目录自定义名一起写，保证各端显示一致。
     storage.setSessionDirectoryName(cwd, name);
     attachUnboundSessionsToWorkspace(storage, workspace);
@@ -695,12 +705,12 @@ export function registerWorkspaceRoutes(
     const snapshots = sessions?.listSlim();
     const revision = crypto.createHash("sha256").update(JSON.stringify({
       storage: storage.projectionRevision(),
-      projection: "workspace-work-sessions-v4-queued-dispatches",
+      projection: "workspace-work-sessions-v6-task-list-snapshot",
       query: { includeArchived, workspaceFilter, taskLimit, sessionLimit },
       runtime: snapshots,
     })).digest("base64url");
     if (hasRevisionQuery && requestedRevision === revision) {
-      res.json({ unchanged: true, revision, groups: [] });
+      res.json({ unchanged: true, revision, groups: [], tasks: [] });
       return;
     }
     const model = new TaskReadModel(storage, sessions, snapshots);
@@ -721,6 +731,8 @@ export function registerWorkspaceRoutes(
       latestActivityAt?: string;
       synthetic?: boolean;
       global?: boolean;
+      userAdded?: boolean;
+      directoryVisible?: boolean;
       tasks: unknown[];
       standaloneSessions: unknown[];
     }
@@ -736,17 +748,30 @@ export function registerWorkspaceRoutes(
       const name = directoryNames.get(normalizeProjectCwd(cwd))?.trim();
       return name || undefined;
     };
-    const visibleWorkspaces = workspaceFilter
-      ? workspaces.filter((workspace) => workspace.id === workspaceFilter)
+    // Historic automatic bindings may share the cwd of an explicitly added
+    // project. Project them into that directory without rewriting task/session
+    // ownership or exposing a second, falsely "unassigned" copy of the project.
+    const registeredByCwd = new Map(workspaces.filter(workspace => workspace.userAdded && !isGlobalWorkspace(workspace))
+      .map(workspace => [normalizeProjectCwd(workspace.cwd), workspace]));
+    const canonicalWorkspace = (workspace: Workspace): Workspace => workspace.userAdded || isGlobalWorkspace(workspace)
+      ? workspace : registeredByCwd.get(normalizeProjectCwd(workspace.cwd)) ?? workspace;
+    const selectedWorkspace = workspaceFilter ? model.workspaces.get(workspaceFilter) : undefined;
+    const directoryWorkspaceFilter = selectedWorkspace ? canonicalWorkspace(selectedWorkspace).id : workspaceFilter;
+    const visibleWorkspaces = directoryWorkspaceFilter
+      ? workspaces.filter((workspace) => canonicalWorkspace(workspace).id === directoryWorkspaceFilter)
       : workspaces;
     const groups = new Map<string, TaskDirectoryGroup>();
-    for (const workspace of visibleWorkspaces) {
+    for (const sourceWorkspace of visibleWorkspaces) {
+      const workspace = canonicalWorkspace(sourceWorkspace);
+      if (groups.has(workspace.id)) continue;
       const global = isGlobalWorkspace(workspace);
       groups.set(workspace.id, {
         workspaceId: workspace.id,
         workspaceName: global ? "全局" : workspace.name,
         workspaceCwd: workspace.cwd,
         createdAt: workspace.createdAt,
+        userAdded: !global && workspace.userAdded === true,
+        directoryVisible: !global && workspace.userAdded === true,
         ...(global ? { global: true } : {}),
         tasks: [],
         standaloneSessions: [],
@@ -811,7 +836,7 @@ export function registerWorkspaceRoutes(
       for (const session of visibleSessions) rememberCreatedAt(target, session.startedAt);
     };
     for (const workspace of visibleWorkspaces) {
-      const base = groups.get(workspace.id);
+      const base = groups.get(canonicalWorkspace(workspace).id);
       if (!base) continue;
       const global = isGlobalWorkspace(workspace);
       // Filter before pagination. Keep the full membership map below so hidden
@@ -830,7 +855,7 @@ export function registerWorkspaceRoutes(
         }
       }
       const visibleTasks = workspaceTasks.filter(task => keep.has(task.id));
-      for (const task of visibleTasks.slice(0, taskLimit ?? undefined)) {
+      for (const task of visibleTasks) {
         let root = model.cardsByContainer.get(task.id);
         const seen = new Set<string>();
         while (root?.parentTaskId && !seen.has(root.id)) {
@@ -857,7 +882,8 @@ export function registerWorkspaceRoutes(
     }
     for (const session of allSessions) {
       if (taskBoundSessionIds.has(session.id) || !sessionVisible(session)) continue;
-      const direct = session.workspaceId ? groups.get(session.workspaceId) : undefined;
+      const sessionWorkspace = session.workspaceId ? model.workspaces.get(session.workspaceId) : undefined;
+      const direct = sessionWorkspace ? groups.get(canonicalWorkspace(sessionWorkspace).id) : undefined;
       const resolved = projectCwdForSession(session);
       // 持久化的 workspaceId 可能来自旧目录或目录迁移；path 与项目目录不一致时，
       // 必须按当前实际目录归类，避免不同项目的会话混入同一组。
@@ -891,7 +917,7 @@ export function registerWorkspaceRoutes(
         group = synthetic;
       }
       // workspaceId 过滤时，不属于目标目录组的会话直接排除（含合成组）。
-      if (workspaceFilter && group?.workspaceId !== workspaceFilter) continue;
+      if (directoryWorkspaceFilter && group?.workspaceId !== directoryWorkspaceFilter) continue;
       if (!group) continue;
       group.standaloneSessions.push(summarize(session, {
         workspaceName: group.workspaceName,
@@ -903,6 +929,7 @@ export function registerWorkspaceRoutes(
       (group.tasks as Array<{ createdAt?: string; sessions?: Array<{ startedAt?: string }> }>).sort((left, right) =>
         compareCreatedDesc(left.createdAt, right.createdAt)
       );
+      if (taskLimit !== null) group.tasks = group.tasks.slice(0, taskLimit);
       for (const task of group.tasks as Array<{ sessions?: Array<{ startedAt?: string }> }>) {
         if (Array.isArray(task.sessions)) {
           task.sessions.sort((left, right) => compareCreatedDesc(left.startedAt, right.startedAt));
@@ -916,9 +943,12 @@ export function registerWorkspaceRoutes(
       .filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0);
     const payload = sortTaskDirectoryGroups(orderedGroups, storage.getWorkspaceGroupOrder());
     if (hasRevisionQuery) {
-      res.json({ unchanged: false, revision, groups: payload });
+      // 正式任务与目录组、未分组会话共用上面的同一次 TaskReadModel。limit 只截目录组。
+      const tasks = formalTasksFromReadModel({ storage, sessions }, model, workspaceFilter || undefined);
+      res.json({ unchanged: false, revision, groups: payload, tasks });
       return;
     }
+    // 不带 revision 的旧调用者只认目录组数组。正式任务在版本化信封里。
     res.json(payload);
   });
 

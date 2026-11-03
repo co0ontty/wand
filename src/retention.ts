@@ -148,11 +148,13 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
   }
 
   sweepTeamRuns(deps, protection, taskWindows, snapshots, purgedSessionIds, archivedSessionIds, now, result);
-  // 会话刚被归档/清理后，名下没人执行的「执行中」任务在这里回收，并在任务里留评论。
+  // 即使历史会话仍保留，也按实时执行事实回收无人处理的「执行中」任务，并留下评论。
   try {
-    const reclaimed = deps.storage.reclaimIdleDoingTasks();
+    const reclaimed = deps.storage.reclaimIdleDoingTasks(10 * 60_000, now, deps.sessions);
     if (reclaimed.length > 0) console.log(`[retention] reclaimed idle doing tasks=${reclaimed.length}`);
-  } catch { /* 回收失败不影响本轮其它清理 */ }
+  } catch (error) {
+    console.error(`[retention] task reclaim failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   // 本轮刚归档的会话已经由 setArchived 清过 CLI 历史。这里只补更早的存量，
   // 避免和本轮写入抢同一批文件。
   const staleArchived = snapshots

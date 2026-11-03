@@ -475,6 +475,7 @@ export interface WorkspaceRow {
   name: string;
   cwd: string;
   kind: string | null;
+  user_added: number;
   default_provider: string | null;
   layout_json: string | null;
   created_at: string;
@@ -491,6 +492,7 @@ export function mapWorkspaceRow(row: WorkspaceRow): Workspace {
     name: row.name,
     cwd: row.cwd,
     kind: mapWorkspaceKind(row.kind),
+    userAdded: row.user_added === 1,
     defaultProvider: (row.default_provider ?? undefined) as Workspace["defaultProvider"],
     layout: row.layout_json ? safeJsonParse<LayoutNode>(row.layout_json) ?? null : null,
     createdAt: row.created_at,

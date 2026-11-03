@@ -109,10 +109,9 @@ export async function restorePageNavigation(): Promise<boolean> {
     } else {
       withoutPageSelection(() => runtime.closeWorkspace());
       if (workspaceId) {
-        const workspaces = await httpWorkspacesRepository.list();
+        // The project picker omits implicit workspaces; a direct link resolves by ID.
+        const workspace = await httpWorkspacesRepository.get(workspaceId);
         if (!current()) return true;
-        const workspace = workspaces.find(item => item.id === workspaceId);
-        if (!workspace) throw new Error("链接中的工作区不存在、已删除或无权访问。");
         if (session && session.workspaceId !== workspaceId) throw new Error("链接中的会话不属于指定工作区。");
         withoutPageSelection(() => runtime.openWorkspace(workspace));
       }

@@ -2,8 +2,8 @@
 :root { --app-inset-top: 0px; --app-inset-bottom: 0px; --app-inset-left: 0px; --app-inset-right: 0px; }
 :root { --wand-safe-top: max(var(--app-inset-top), env(safe-area-inset-top, 0px)); --wand-safe-bottom: max(var(--app-inset-bottom), env(safe-area-inset-bottom, 0px)); }
 :root { --wand-safe-left: max(var(--app-inset-left), env(safe-area-inset-left, 0px)); --wand-safe-right: max(var(--app-inset-right), env(safe-area-inset-right, 0px)); --safe-bottom: var(--wand-safe-bottom); --input-safe-bottom: var(--safe-bottom); }
-:root { --motion-press: 110ms; --motion-fast: 150ms; --motion-normal: 240ms; --motion-morph: 200ms; --motion-indicator: 260ms; --motion-quick-exit: 90ms; --motion-dwell-sent: 720ms; --motion-dwell-failed: 1500ms; --motion-spin: 2.4s; }
-:root { --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1); --transition-fast: 0.14s ease-out; --transition-normal: 0.22s ease-out; --chat-column-width: 940px; --chat-content-inset: var(--wand-page-inset,20px); --chat-content-max-width: none; }
+:root { --motion-press: 110ms; --motion-fast: 150ms; --motion-normal: 240ms; --motion-morph: 200ms; --motion-indicator: 260ms; --motion-quick-exit: 90ms; --motion-dwell-sent: 720ms; --motion-dwell-failed: 1500ms; --motion-spin: 2.4s; --motion-reply-cycle: 1.4s; --motion-reply-stagger: 200ms; }
+:root { --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1); --ease-in-out-standard: ease-in-out; --transition-fast: 0.14s ease-out; --transition-normal: 0.22s ease-out; --chat-column-width: 940px; --chat-content-inset: var(--wand-page-inset,20px); --chat-content-max-width: none; }
 html { height: 100%; font-size: 16px; -webkit-font-smoothing: antialiased; background: var(--bg-primary, #faf8f5); }
 body { margin: 0; height: 100dvh; overflow: hidden; font-family: var(--font-sans, sans-serif); color: var(--text-primary, #29241f); background: var(--bg-primary, #faf8f5); }
 #app { height: 100%; }

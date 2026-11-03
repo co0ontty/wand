@@ -170,6 +170,20 @@ interface TaskDtoDeps {
   sessions?: SessionRegistry;
 }
 
+/** 正式任务列表。与目录组快照必须同一个 TaskReadModel，不能再各自读一次。 */
+export function formalTasksFromReadModel(
+  deps: TaskDtoDeps,
+  model: TaskReadModel,
+  workspaceId?: string,
+): NonNullable<ReturnType<typeof taskDto>>[] {
+  return model.tasks
+    .filter((task) => workspaceId === undefined || task.workspaceId === workspaceId)
+    .flatMap((task) => {
+      const dto = taskDto(deps, task, model);
+      return dto ? [dto] : [];
+    });
+}
+
 function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorage["getWandTask"]>, model?: TaskReadModel) {
   if (!task) return null;
   const workspace = task.workspaceId ? (model ? model.workspaces.get(task.workspaceId) : storage.getWorkspace(task.workspaceId)) : null;
@@ -255,12 +269,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     res.redirect(302, `/?${query}`);
   });
 
+  // 旧客户端把这里解成数组。新客户端的列表入口是 GET /api/tasks 的版本化快照。
   app.get("/api/wand-tasks", (req, res) => {
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
     // 数组顺序即展示顺序：created_at 倒序，新创建的在上面。
     const model = new TaskReadModel(storage, sessions);
-    res.json(model.tasks.filter(task => workspaceId === undefined || task.workspaceId === workspaceId)
-      .map(task => taskDto(deps, task, model)));
+    res.json(formalTasksFromReadModel(deps, model, workspaceId));
   });
   app.get("/api/wand-task-actions", (req, res) => {
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;

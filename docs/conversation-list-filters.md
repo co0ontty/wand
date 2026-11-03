@@ -1,5 +1,15 @@
 # 对话列表：任务状态与工作区筛选
 
+## 当前验证入口（TASK-370）
+
+`scripts/verify-conversation-filters.mjs` 已迁到当前生产 `SidebarFilterCapsules`、`UnifiedSidebarList` 和 `useUnifiedSidebar`，不再依赖旧三下拉面板或不完整的 `listFacets` 参数。helper 已纳入 Git；消费者使用相对导入。运行 `node scripts/verify-conversation-filters.mjs`，或用 `WAND_CONVERSATION_FILTER_OUTPUT` 指定独立输出目录，避免并发覆盖报告。
+
+覆盖普通/减动效、运行状态/工作区/员工交集、工作区多选、实际会话计数、归档显式选择、清除保留搜索与草稿、触发区稳定、浮层搜索/选择/外点/Escape、320/390px 视口边界、请求失败保留快照；只使用隔离 fixture，不调用模型、不修改真实服务数据。当前报告见 `output/task-370/conversation-filters/verification.json`，不等于已安装服务或原生端验收。320px 浮层边界修复复用 Ant Design 的 `align.overflow` 平移能力，与现有 Select/菜单一致。
+
+以下保留旧三下拉设计及当时交付记录，不能作为当前界面或服务状态的断言。
+
+## 历史设计与交付
+
 用户先确认四端设计，随后要求三个选项打开即同屏可见。本轮采用方案 1：不挤占搜索输入，搜索同行保留固定筛选入口；打开后「任务状态 / 工作区 / 归档范围」横向三列下拉，活动筛选为紧凑开关。取代历史预览中的纵向长单选面板。
 
 ## 行为契约

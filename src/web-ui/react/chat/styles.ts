@@ -152,9 +152,9 @@ const CHAT_SURFACE_STYLES = String.raw`
     .assistant-reply-disclosure.ant-btn { padding-block:8px; }
     .assistant-reply-status { display:inline-flex; align-items:center; gap:7px; flex:none; color:var(--accent); font-size:var(--font-size-xs); font-weight:var(--font-weight-semibold); }
     .assistant-reply-dots { display:inline-flex; align-items:center; gap:3px; height:16px; padding-inline:2px; }
-    .assistant-reply-dots > span { width:3px; height:3px; border-radius:50%; background:currentColor; animation:assistant-reply-wave 1.4s ease-in-out infinite; }
-    .assistant-reply-dots > span:nth-child(2) { animation-delay:.2s; }
-    .assistant-reply-dots > span:nth-child(3) { animation-delay:.4s; }
+    .assistant-reply-dots > span { width:3px; height:3px; border-radius:50%; background:currentColor; animation:assistant-reply-wave var(--motion-reply-cycle) var(--ease-in-out-standard) infinite; }
+    .assistant-reply-dots > span:nth-child(2) { animation-delay:var(--motion-reply-stagger); }
+    .assistant-reply-dots > span:nth-child(3) { animation-delay:calc(var(--motion-reply-stagger) * 2); }
     @keyframes assistant-reply-wave { 0%,100% { transform:scale(.8); opacity:.35; } 50% { transform:scale(1.3); opacity:1; } }
     @media (prefers-reduced-motion:reduce) { .assistant-reply-dots > span { animation:none; } }
     @media (max-width:600px) {

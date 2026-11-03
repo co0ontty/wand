@@ -186,12 +186,14 @@ import { compactSessionFetch } from "./session-fetch.js";
         if (session.id === state.selectedId) updateQueueBar();
         var label = session.title || shortCommand(session.command) || "当前会话";
         showToast("已加入「" + label + "」的待发送队列（保留上下文）。", "info");
-        return compactSessionFetch("/api/structured-sessions/" + session.id + "/messages", {
+        return compactSessionFetch("/api/sessions/" + encodeURIComponent(session.id) + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify({
             input: text,
+            expectedKind: "structured",
+            respondImmediately: false,
             idempotencyKey: idempotencyKey,
           })
         })
@@ -840,7 +842,7 @@ import { compactSessionFetch } from "./session-fetch.js";
       }
 
       // 防止同一会话「快速双击 / 重复触发」。原来这是个布尔 flag，绑在 fetch 的
-      // promise 上 —— 但 structured-sessions/:id/messages 的 POST 对首条消息会 await
+      // promise 上 —— 但会话输入的 POST 对首条消息会 await
       // 整段流式 streaming，flag 会被卡到回复完才释放。结果：用户点发送 → 服务端
       // 流式 30s 不响应 → 这 30s 里再点发送全被这里静默 drop，看起来"排队 / 立即发送
       // 都没效果"。改成时间戳 + 短窗口（350ms）只挡真正的连击。idempotencyKey 已经
@@ -971,13 +973,15 @@ import { compactSessionFetch } from "./session-fetch.js";
         // 用 session.id（参数绑定，in-flight 期间不变）而不是 state.selectedId
         // 拼 URL，避免用户切到别的会话后 fetch 落到错误 sessionId。
         var requestAccepted = false;
-        return compactSessionFetch("/api/structured-sessions/" + session.id + "/messages", {
+        return compactSessionFetch("/api/sessions/" + encodeURIComponent(session.id) + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify({
             input: input,
             interrupt: isInterrupting || undefined,
+            expectedKind: "structured",
+            respondImmediately: false,
             idempotencyKey: idempotencyKey,
           })
         })

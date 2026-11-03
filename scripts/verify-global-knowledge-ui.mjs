@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { openPlushBrowser } from "design-previews/helpers/browser-harness.mjs";
+import { openPlushBrowser } from "./design-previews/helpers/browser-harness.mjs";
 
 // Installed service, real clicks and unsaved drafts only. Never saves example conventions.
 const connection = JSON.parse(readFileSync(join(process.env.HOME, ".wand/acceptance-connection.json"), "utf8"));

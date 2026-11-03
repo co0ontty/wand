@@ -53,8 +53,8 @@ export class TaskRepository {
     // 名称也进指纹：改名（含工作区/项目名与目录自定义名）后客户端才肯重拉任务列表。
     const names = this.db.prepare(
       `SELECT
-         COALESCE((SELECT GROUP_CONCAT(id || ':' || name || ':' || cwd, '|')
-                   FROM (SELECT id, name, cwd FROM workspaces ORDER BY id)), '') AS workspaceNames,
+         COALESCE((SELECT GROUP_CONCAT(id || ':' || name || ':' || cwd || ':' || user_added, '|')
+                   FROM (SELECT id, name, cwd, user_added FROM workspaces ORDER BY id)), '') AS workspaceNames,
          COALESCE((SELECT GROUP_CONCAT(path || ':' || name || ':' || updated_at, '|')
                    FROM (SELECT path, name, updated_at FROM session_directory_names ORDER BY path)), '') AS directoryNames`
     ).get() as { workspaceNames: string; directoryNames: string };

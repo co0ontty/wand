@@ -24,6 +24,7 @@ import type {
   WorkspaceWorktreeReview,
   WorkspaceWorktreeState,
   TaskDirectoryGroup,
+  TaskListPage,
   WorkspacesRepository,
 } from "./types";
 import { record, stringValue } from "../json-utils";
@@ -108,6 +109,9 @@ function normalizePaths(value: unknown): RecentPath[] {
 
 export class HttpWorkspacesRepository implements WorkspacesRepository {
   private readonly startupGroups = createStartupPreload(() => this.readTaskGroups());
+  private taskListFlight: { key: string; promise: Promise<TaskListPage> } | null = null;
+  private retainedFormalTasks: unknown[] = [];
+  private formalTasksKnown = false;
   preloadTaskGroups(): void { this.startupGroups.preload(); }
   clearPreload(): void { this.startupGroups.clear(); }
 
@@ -127,22 +131,44 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     });
   }
 
-  listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
+  listTaskGroups(revision?: string): Promise<TaskListPage> {
     return revision === undefined ? this.startupGroups.load() : this.readTaskGroups(revision);
   }
 
-  private async readTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
+  private readTaskGroups(revision?: string): Promise<TaskListPage> {
+    const key = revision ?? "";
+    if (this.taskListFlight?.key === key) return this.taskListFlight.promise;
+    const promise = this.fetchTaskGroups(key).finally(() => {
+      if (this.taskListFlight?.promise === promise) this.taskListFlight = null;
+    });
+    this.taskListFlight = { key, promise };
+    return promise;
+  }
+
+  private async fetchTaskGroups(revision: string): Promise<TaskListPage> {
     // An empty revision opts into the envelope on the first read; an omitted query returns legacy arrays.
     // Fetch both tiers once; groupSessionsByArchive keeps archived sessions out of active views.
     // The person submenu and the archive folds otherwise cannot represent the server\'s archived tier.
-    const query = `?revision=${encodeURIComponent(revision ?? "")}&includeArchived=1`;
+    const query = `?revision=${encodeURIComponent(revision)}&includeArchived=1`;
     const body = await parseJsonResponse<unknown>(await this.fetchImpl(`/api/tasks${query}`, { credentials: "same-origin" }));
-    if (Array.isArray(body)) return { groups: body as TaskDirectoryGroup[], unchanged: false };
-    const record = body && typeof body === "object" ? body as { groups?: TaskDirectoryGroup[]; revision?: string; unchanged?: boolean } : {};
+    if (Array.isArray(body)) {
+      return { groups: body as TaskDirectoryGroup[], tasks: [], unchanged: false, formalTasksIncluded: false };
+    }
+    const record = body && typeof body === "object" ? body as {
+      groups?: TaskDirectoryGroup[]; tasks?: unknown; revision?: string; unchanged?: boolean;
+    } : {};
+    const unchanged = record.unchanged === true;
+    const formalTasks = Array.isArray(record.tasks) ? record.tasks : null;
+    if (!unchanged && formalTasks) {
+      this.retainedFormalTasks = formalTasks;
+      this.formalTasksKnown = true;
+    }
     return {
       groups: Array.isArray(record.groups) ? record.groups : [],
+      tasks: unchanged && this.formalTasksKnown ? this.retainedFormalTasks : (formalTasks ?? []),
       revision: typeof record.revision === "string" ? record.revision : undefined,
-      unchanged: record.unchanged === true,
+      unchanged,
+      formalTasksIncluded: formalTasks !== null || (unchanged && this.formalTasksKnown),
     };
   }
 

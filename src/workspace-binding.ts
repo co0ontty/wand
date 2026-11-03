@@ -38,7 +38,8 @@ export function findWorkspaceByCwd(storage: WandStorage, cwd: string): Workspace
   const normalized = normalizeProjectCwd(cwd);
   if (!normalized) return null;
   const matches = storage.listWorkspaces().filter((workspace) => normalizeProjectCwd(workspace.cwd) === normalized);
-  return matches.find((workspace) => workspace.kind !== "global") ?? matches[0] ?? null;
+  return matches.find((workspace) => workspace.kind !== "global" && workspace.userAdded)
+    ?? matches.find((workspace) => workspace.kind !== "global") ?? matches[0] ?? null;
 }
 
 function defaultWorkspaceNameForCwd(storage: WandStorage, cwd: string): string {

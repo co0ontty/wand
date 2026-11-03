@@ -470,10 +470,14 @@ export interface InputRequest {
   input?: string;
   /** Structured input acceptance identity; same key must preserve the same intent. */
   idempotencyKey?: string;
+  /** Interrupt the current structured turn; optionally keep its remaining queue. */
+  interrupt?: boolean;
+  preserveQueue?: boolean;
+  /** Refuse delivery if the session no longer belongs to the expected runtime. */
+  expectedKind?: "structured";
   /**
-   * Structured sessions normally keep the HTTP request open until the whole
-   * turn finishes. Native clients can opt into an accepted snapshot instead
-   * and continue receiving progress through the existing event stream.
+   * Explicit false waits for completion, including for Pi auto-resources;
+   * true returns an accepted snapshot and leaves progress to the event stream.
    */
   respondImmediately?: boolean;
   /** PTY input can request a small acknowledgement instead of a full session detail payload. */
@@ -985,6 +989,8 @@ export interface Workspace {
   name: string;
   cwd: string;
   kind?: WorkspaceKind;
+  /** Explicitly added by the user; automatic cwd bindings are not picker entries. */
+  userAdded?: boolean;
   defaultProvider?: WorkspaceDefaultProvider;
   /**
    * 工作空间级的布局占位（保留字段）。标签 / 分屏布局实际挂在 Task 上

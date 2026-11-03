@@ -34,7 +34,7 @@ export function WandPopover({ trigger, triggerActions = "click", children, ariaL
   usePopupDismiss(shown, () => { change(false); (returnFocusRef?.current ?? triggerRef.current?.nativeElement)?.focus({ preventScroll: true }); });
   return <WandUiBoundary><Popover ref={triggerRef} open={shown} onOpenChange={change} afterOpenChange={onAfterOpenChange} trigger={triggerActions} arrow={false}
     placement={popupPlacement(side, align)} destroyOnHidden getPopupContainer={() => portal ?? document.body}
-    align={{ offset: popupOffset(side, sideOffset) }}
+    align={{ offset: popupOffset(side, sideOffset), overflow: { adjustX: true, adjustY: true, shiftX: 12, shiftY: 12 } }}
     classNames={{ root: classNames("wand-ui-popover-content", className) }}
     content={<div id={contentId} role={contentRole} aria-label={ariaLabel} data-wand-popup-owner={popupOwner}>{children}</div>}>
     {trigger}

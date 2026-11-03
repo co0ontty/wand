@@ -238,6 +238,17 @@ export interface TaskDirectoryGroup {
   archivedSessions?: WorkspaceSessionSummary[];
 }
 
+/** GET /api/tasks 版本化信封：正式任务、目录组和未分组会话属于同一次 revision。 */
+export interface TaskListPage {
+  groups: TaskDirectoryGroup[];
+  /** unchanged 时是上一份完整正式任务，不是服务端用来占位的空数组。 */
+  tasks: unknown[];
+  revision?: string;
+  unchanged: boolean;
+  /** false 表示旧服务端没有正式任务数组，列表需要回退 GET /api/wand-tasks。 */
+  formalTasksIncluded: boolean;
+}
+
 export type WorkspaceWorktreeState = "ready" | "dirty" | "conflict" | "empty" | "unavailable";
 
 interface WorkspaceWorktreeCommit {
@@ -333,8 +344,8 @@ export interface NewProjectDefaults {
 
 export interface WorkspacesRepository {
   list(): Promise<Workspace[]>;
-  /** 目录分组的任务聚合列表（GET /api/tasks），供侧栏「任务」视图一次拉全。 */
-  listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }>;
+  /** 目录分组与正式任务的同一次快照（GET /api/tasks?revision=）。 */
+  listTaskGroups(revision?: string): Promise<TaskListPage>;
   get(id: string): Promise<WorkspaceDetail>;
   create(request: CreateWorkspaceRequest): Promise<Workspace>;
   update(id: string, patch: UpdateWorkspaceRequest): Promise<Workspace>;

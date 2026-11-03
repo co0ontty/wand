@@ -82,11 +82,11 @@ export class TaskWorkflowRepository {
   }
 
   /**
-   * 回收「执行中却已无人执行」的任务：没有关联会话、没有排队/进行中的派发、没有活动团队、
-   * 没有未归档子任务、也没有交付/验收记录。会话被归档或清理后，任务卡会一直停在「执行中」，
-   * 这里把它退回「等待认领」，并在任务里补一条评论说明原因。只改状态，不删任何历史。
+   * 回收「执行中却已无人执行」的任务；历史会话、证据和失败验收不代表仍在执行。
+   * 在事务内复核自身及子任务的运行、审批、排队、未知送达和团队事实，只退回等待认领，
+   * 不停止会话、不删除历史、不清除阻塞或推进交付/验收。运行时事实优先于存储快照。
    */
-  reclaimIdleDoingTasks(graceMs = 10 * 60_000, now = Date.now()): WandTask[] {
+  reclaimIdleDoingTasks(graceMs = 10 * 60_000, now = Date.now(), registry?: Pick<SessionRegistry, "getSlim">): WandTask[] {
     const reclaimed: WandTask[] = [];
     for (const candidate of this.s.listWandTasks()) {
       if (candidate.status !== "doing") continue;
@@ -95,25 +95,35 @@ export class TaskWorkflowRepository {
         if (!task || task.status !== "doing") return null;
         const updated = Date.parse(task.updatedAt);
         if (!Number.isFinite(updated) || now - updated < graceMs) return null;
-        if (this.s.listWandTaskSessionIds(task.id).length > 0) return null;
-        if (task.acceptance?.evidence?.trim() || task.acceptance?.blocker?.trim() || task.verification) return null;
-        if (this.s.listWandTaskChildren(task.id).some(child => child.status !== "archived")) return null;
-        // 已领取但没绑会话的派发给 1 小时窗口（可能正在启动）；更久还没会话说明会话已被清理，不再算在途。
-        const startingAfter = new Date(now - 60 * 60_000).toISOString();
-        if (this.db.prepare(`SELECT 1 FROM wand_task_comment_dispatches d JOIN wand_task_comments c ON c.id = d.comment_id
-          WHERE d.task_id = ? AND (d.state IN ('pending', 'queued', 'paused', 'unknown') OR (d.state = 'accepted' AND d.session_id IS NULL AND c.created_at > ?)) LIMIT 1`).get(task.id, startingAfter)) return null;
-        if ([task.id, task.workspaceTaskId].some(id => id && this.s.listAiTeamRuns({ taskId: id, statuses: AI_TEAM_ACTIVE_RUN_STATUSES, limit: 1 }).length)) return null;
+        if (this.taskHasPendingWork(task, registry)) return null;
         const result = this.s.tasks.writeWandTask(task, { status: "todo" }, true);
         this.addSystemComment(task.id, "任务回收", [
           "任务回收：已从「执行中」退回「等待认领」",
-          "原因：这个任务处于「执行中」，但已经没有关联会话、没有排队或进行中的派发，也没有活动团队（会话可能已被归档或清理）。",
-          "此操作不代表交付或验收通过；原描述、评论与历史记录均保留。需要继续时重新派发即可。",
+          "原因：这个任务处于「执行中」，但自身及子任务已无运行、审批、排队、未知送达的执行或活动团队；关联的空闲历史会话不代表仍在执行。",
+          "此操作不代表交付、阻塞解除或验收通过；原描述、评论、会话、阻塞及交付/验收记录均保留。需要继续时重新派发即可。",
         ].join("\n\n"), result.updatedAt);
         return result;
       });
       if (done) reclaimed.push(done);
     }
     return reclaimed;
+  }
+
+  private taskHasPendingWork(task: WandTask, registry?: Pick<SessionRegistry, "getSlim">, seen = new Set<string>()): boolean {
+    // 不完整/循环层级按未知处理，不能凭状态标签回收。
+    if (seen.has(task.id)) return true;
+    seen.add(task.id);
+    for (const id of this.s.listWandTaskSessionIds(task.id)) {
+      const session = registry?.getSlim(id) ?? this.s.getSessionSlim(id);
+      if (!session || !session.archived && isArchiveBlocked(session)) return true;
+    }
+    // 父卡评论可以派发到子卡；两种归属都必须核对。未知送达不能用超时猜成已结束。
+    if (this.db.prepare(`SELECT 1 FROM wand_task_comment_dispatches d
+      WHERE (d.task_id = ? OR d.execution_task_id = ?) AND d.employee_id IS NOT NULL AND (d.state IN ('pending', 'queued', 'paused', 'unknown')
+        OR (d.state = 'accepted' AND (d.session_id IS NULL OR (d.result_end_index IS NULL
+          AND NOT EXISTS (SELECT 1 FROM command_sessions s WHERE s.id = d.session_id))))) LIMIT 1`).get(task.id, task.id)) return true;
+    if ([task.id, task.workspaceTaskId].some(id => id && this.s.listAiTeamRuns({ taskId: id, statuses: AI_TEAM_ACTIVE_RUN_STATUSES, limit: 1 }).length)) return true;
+    return this.s.listWandTaskChildren(task.id).some(child => child.status !== "archived" && this.taskHasPendingWork(child, registry, seen));
   }
 
   /** Called only by an active runner; never grants the project or arbitrary task IDs. */

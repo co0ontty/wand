@@ -84,6 +84,7 @@ export function createTaskGroupsStore(
   return {
     getSnapshot: (): TaskGroupsSnapshot => snapshot,
     getServerSnapshot: (): TaskGroupsSnapshot => EMPTY,
+    revision: (): string | undefined => revision,
     reload: (): Promise<void> => load(true),
     subscribe(listener: Listener): () => void {
       listeners.add(listener);
@@ -111,6 +112,11 @@ export function createTaskGroupsStore(
 }
 
 export const taskGroupsStore = createTaskGroupsStore(httpWorkspacesRepository);
+
+/** 看板读取与侧栏同一份 revision，避免两边各打一次列表。 */
+export function currentTaskGroupsRevision(): string | undefined {
+  return taskGroupsStore.revision();
+}
 
 /** 空闲前返回的占位快照：必须是稳定引用，`useSyncExternalStore` 不能每次读到新对象。 */
 const IDLE_TASK_GROUPS: TaskGroupsSnapshot = Object.freeze({ groups: [], loading: true, error: "" });
