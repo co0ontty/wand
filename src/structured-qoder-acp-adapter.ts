@@ -150,6 +150,7 @@ export class QoderAcpRunner implements StructuredRunnerAdapter {
       thinkingEffort: thinkingEffortToQoderEffort(session.thinkingEffort),
       mode: qoderAcpMode(session),
       autoApprovePermissions: session.autoApprovePermissions === true,
+      inputMessageId: session.messages?.slice().reverse().find(turn => turn.role === "user")?.messageId,
     };
 
     return startStructuredCli({
@@ -209,10 +210,19 @@ export class QoderAcpRunner implements StructuredRunnerAdapter {
             return;
           }
 
+          if (record.type === "wand_qoder_permission_resolved") {
+            context.onQoderInputEvent?.(record, reducer.state);
+            return;
+          }
           if (record.type === "wand_qoder_question" || record.type === "wand_qoder_question_resolved"
-            || record.type === "wand_input_boundary" || record.type === "wand_input_committed") {
+            || record.type === "wand_input_ready" || record.type === "wand_input_boundary" || record.type === "wand_input_committed") {
             protocolEventObserved = true;
             context.onQoderInputEvent?.(record, reducer.state);
+            if (record.type === "wand_input_ready" && typeof record.id === "string") reducer.state.inputMessageId = record.id;
+            if (record.type === "wand_input_committed") {
+              const message = asRecord(record.message);
+              if (typeof message?.id === "string") reducer.startInput(message.id);
+            }
             if (record.type === "wand_qoder_question" && record.id && Array.isArray(record.questions)) {
               reducer.applyQuestion(getString(record.id), record.questions);
               observer.onUpdate(reducer.state);

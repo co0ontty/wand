@@ -85,7 +85,7 @@ const STRUCTURED_RESUME_SPECS: Array<{ path: string; param: string; spec: Struct
     spec: {
       label: "Qoder",
       provider: "qoder",
-      runner: "qoder-cli-print",
+      runner: "qoder-cli-acp",
       nativeIdKey: "claudeSessionId",
       idFormat: "safe",
       findHistory: (processes, nativeId) =>

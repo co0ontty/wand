@@ -23,7 +23,7 @@ export function qoderControlDirectory(sessionId: string, requestId: string): str
 
 export type QoderControlCommand =
   | { type: "permission_resolution"; escalationId: string; resolution: StructuredPermissionDecision }
-  | { type: "question_answer"; toolUseId: string; text: string }
+  | { type: "question_answer"; id: string; toolUseId: string; text: string }
   | { type: "steer"; id: string; text: string; images?: string[] }
   | { type: "interrupt" };
 
@@ -33,18 +33,22 @@ export function sendQoderControl(sessionId: string, requestId: string, command: 
     const socket = createConnection(socketPath);
     let buffer = "";
     let settled = false;
+    let connected = false;
 
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
       socket.destroy();
-      if (error) reject(error);
+      // Before connect no command bytes can have been written. After connect,
+      // a transport failure is unknown delivery unless the worker explicitly rejects.
+      if (error) reject(Object.assign(error, { definiteRejection: !connected || (error as Error & { definiteRejection?: boolean }).definiteRejection === true }));
       else resolve();
     };
 
     socket.setEncoding("utf8");
     socket.setTimeout(20_000, () => finish(new Error("Qoder 控制通信超时。")));
     socket.once("connect", () => {
+      connected = true;
       socket.write(`${JSON.stringify(command)}\n`);
     });
     socket.on("data", (chunk) => {

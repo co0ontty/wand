@@ -762,7 +762,7 @@ export async function startServer(
         { label: "Codex Structured", runner: "codex-cli-exec" },
         { label: "OpenCode Structured", runner: "opencode-cli-run" },
         { label: "Grok Structured", runner: "grok-cli-headless" },
-        { label: "Qoder Structured", runner: "qoder-cli-print" },
+        { label: "Qoder Structured", runner: "qoder-cli-acp" },
       ],
       structuredChatPersona,
       cardDefaults: config.cardDefaults,

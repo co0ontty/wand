@@ -88,15 +88,19 @@ export function prefixedThinkingEffort(
 export function isStructuredRunnerForProvider(provider: SessionProvider, runner: unknown): runner is SessionRunner {
   // "claude-sdk" 是历史值：SDK 执行路径已移除，只在读旧会话时用来识别（见 normalizeStructuredRunner）。
   return isSessionProvider(provider)
-    && (runner === defaultStructuredRunner(provider) || provider === "claude" && runner === "claude-sdk");
+    && normalizeStructuredRunner(runner) === defaultStructuredRunner(provider);
 }
 
 /**
  * 历史值归一：`claude-sdk` 是 SDK 执行路径的遗留会话值（含旧客户端仍会提交的值）。
  * SDK 已移除，读路径把它映射成同一套 `claude -p` 执行，不报错、不丢会话。
+ * Qoder print 只在回合之间升级为 ACP；在途恢复由会话 owner 保留 print 协议。
  */
 export function normalizeStructuredRunner(runner: unknown): unknown {
-  return runner === "claude-sdk" ? "claude-cli-print" : runner;
+  if (runner === "claude-sdk") return "claude-cli-print";
+  // Only normalize between turns; detached print runs retain their original replay protocol.
+  if (runner === "qoder-cli-print") return "qoder-cli-acp";
+  return runner;
 }
 
 export function resolveStructuredRunner(

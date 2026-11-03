@@ -4,6 +4,8 @@ import { stampNewToolUseTimes } from "./tool-use-timestamps.js";
 import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
+import { AcpTurnReducer, type AcpPromptResult } from "./structured-acp-reducer.js";
+import { asRecord } from "./structured-content.js";
 import { applyOpenCodeEvent } from "./structured-opencode-adapter.js";
 import { applyGrokEvent } from "./structured-grok-adapter.js";
 import { applyPiEvent } from "./structured-pi-adapter.js";
@@ -41,6 +43,51 @@ export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor 
         return reducer.apply(event);
       },
     };
+  }
+  if (runner === "qoder-cli-acp") {
+    const reducer = new AcpTurnReducer(session);
+    const processor: ReplayProcessor = {
+      state: reducer.state,
+      stderr: "",
+      primaryError: null,
+      feed: (line) => {
+        let record: Record<string, unknown> | null;
+        try { record = asRecord(JSON.parse(line)); } catch { return false; }
+        if (!record) return false;
+        if (record.type === "wand_qoder_session" && typeof record.sessionId === "string") {
+          reducer.setSessionId(record.sessionId);
+          return true;
+        }
+        if (record.type === "wand_qoder_question" && typeof record.id === "string" && Array.isArray(record.questions)) {
+          return reducer.applyQuestion(record.id, record.questions);
+        }
+        if (record.type === "wand_qoder_question_resolved" && typeof record.id === "string") {
+          return reducer.resolveQuestion(record.id);
+        }
+        if (record.type === "wand_input_ready" && typeof record.id === "string") {
+          reducer.state.inputMessageId = record.id;
+          return false;
+        }
+        if (record.type === "wand_input_committed") {
+          const message = asRecord(record.message);
+          if (typeof message?.id === "string") reducer.startInput(message.id);
+          return false;
+        }
+        if (record.method === "session/update") {
+          const update = asRecord(asRecord(record.params)?.update);
+          return update ? reducer.applyUpdate(update) : false;
+        }
+        const error = asRecord(record.error);
+        if (error) {
+          processor.primaryError = typeof error.message === "string" ? error.message : "Qoder ACP 执行失败。";
+          reducer.dropErrorEcho(processor.primaryError);
+          return true;
+        }
+        const result = asRecord(record.result);
+        return typeof result?.stopReason === "string" ? reducer.applyPromptResult(result as AcpPromptResult) : false;
+      },
+    };
+    return processor;
   }
   if (runner === "claude-cli-print" || runner === "qoder-cli-print") {
     const reducer = new ClaudeCliProtocolReducer(session);
@@ -113,6 +160,7 @@ export function recoveredCommandLabel(runner: SessionRunner | undefined): string
     case "codex-cli-exec": return "codex exec";
     case "opencode-cli-run": return "opencode run";
     case "grok-cli-headless": return "grok -p --output-format streaming-json";
+    case "qoder-cli-acp": return "qodercli --acp";
     case "qoder-cli-print": return "qodercli -p --output-format stream-json";
     case "pi-cli-json": return "pi --mode json";
     default: return "claude -p";
@@ -135,13 +183,13 @@ export function findUnpairedAskUserQuestion(
 ): { id: string } | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const turn = messages[i];
-    if (turn.role !== "assistant") continue;
+    if (turn.role !== "assistant" || turn.notice) continue;
     for (const block of turn.content) {
       if (block.type === "tool_use" && block.name === "AskUserQuestion") {
         const toolUseId = block.id;
         // 检查后续 turn 中是否已有对应 tool_result
         let answered = false;
-        for (let j = i + 1; j < messages.length; j++) {
+        for (let j = i; j < messages.length; j++) {
           const nextTurn = messages[j];
           for (const nb of nextTurn.content) {
             if (nb.type === "tool_result" && nb.tool_use_id === toolUseId) {
@@ -350,7 +398,7 @@ export class TruncatedReplayView {
   private primed = false;
 
   constructor(messages: ConversationTurn[] | undefined) {
-    const last = messages && messages.length > 0 ? messages[messages.length - 1] : undefined;
+    const last = messages?.slice().reverse().find(turn => !turn.notice);
     this.base = last && last.role === "assistant" ? last.content : null;
   }
 
@@ -428,6 +476,9 @@ export function upsertAssistantMessage(
   stampNewTools = true,
 ): ConversationTurn[] {
   const msgs = [...(messages ?? [])];
+  // Delivery notices are independent history, never a streaming assistant segment.
+  const notices: ConversationTurn[] = [];
+  while (msgs.at(-1)?.notice) notices.unshift(msgs.pop()!);
   const last = msgs[msgs.length - 1];
   const observedAt = isoNow();
   const createdAt = (last?.role === "assistant" ? last.createdAt : undefined) ?? turn.createdAt ?? observedAt;
@@ -444,5 +495,5 @@ export function upsertAssistantMessage(
   else if (last?.role === "assistant" && last.completedAt) next.completedAt = last.completedAt;
   if (last?.role === "assistant") msgs[msgs.length - 1] = next;
   else msgs.push(next);
-  return msgs;
+  return [...msgs, ...notices];
 }

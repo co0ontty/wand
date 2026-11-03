@@ -118,6 +118,21 @@ export class AcpTurnReducer {
     if (sessionId) this.state.sessionId = sessionId;
   }
 
+  /** A committed native input starts a new segment in the same ACP session. */
+  startInput(messageId: string): void {
+    this.entries.clear();
+    this.order.length = 0;
+    this.textByKey.clear();
+    this.thoughtByKey.clear();
+    this.toolCalls.clear();
+    this.toolResults.clear();
+    this.lastTextKey = null;
+    this.state.blocks = [];
+    this.state.result = "";
+    this.state.usage = undefined;
+    this.state.inputMessageId = messageId;
+  }
+
   applyQuestion(id: string, questions: unknown[]): boolean {
     const block: ToolUseBlock = {
       type: "tool_use",

@@ -45,7 +45,7 @@ const DEFAULT_STRUCTURED_RUNNERS = {
   codex: "codex-cli-exec",
   opencode: "opencode-cli-run",
   grok: "grok-cli-headless",
-  qoder: "qoder-cli-print",
+  qoder: "qoder-cli-acp",
   pi: "pi-cli-json",
 } as const satisfies Record<SessionProvider, SessionRunner>;
 
@@ -101,6 +101,7 @@ export const PROVIDER_ALIASES: Readonly<Record<string, SessionProvider>> = {
   "opencode-cli-run": "opencode",
   qoder: "qoder",
   "qoder-cli": "qoder",
+  "qoder-cli-acp": "qoder",
   "qoder-cli-print": "qoder",
   qodercli: "qoder",
   pi: "pi",

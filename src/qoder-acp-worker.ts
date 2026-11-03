@@ -2,10 +2,10 @@
  * Qoder ACP 执行工作进程。
  *
  * 由持久化宿主（terminald / wand-structured-renderd 或进程内宿主）托管。
- * 它的生命周期跨越 Web 服务重启：即使 Wand 服务重启，此工作进程与 Qoder ACP stdio 仍保持长驻。
+ * 持久化宿主下，此工作进程与 Qoder ACP stdio 跨 Web 服务重启存活；进程内宿主不提供该保证。
  * 通过 stdin 读取单次启动配置，通过 stdout 向上抛出 NDJSON 事件，通过 control.sock 接收权限裁决、结构化回答与插话指令。
  */
-import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -76,7 +76,9 @@ let failed = false;
 let controlsInFlight = 0;
 let cancelTimer: ReturnType<typeof setTimeout> | null = null;
 let promptRpcId: number | null = null;
+const steeringPromptIds = new Set<number>();
 let imagesSupported = false;
+let steeringSupported = false;
 
 const requests = new Map<number, {
   method: string;
@@ -88,8 +90,14 @@ const requests = new Map<number, {
 interface PendingPermission {
   rpcId: number;
   options: Array<Record<string, unknown>>;
+  toolCall: unknown;
 }
 const pendingPermissions = new Map<string, PendingPermission>();
+const resolvedPermissions = new Map<string, StructuredPermissionDecision>();
+const emitNextPermission = (): void => {
+  const next = pendingPermissions.entries().next().value;
+  if (next) emit({ type: "wand_qoder_permission", id: next[0], toolCall: next[1].toolCall, options: next[1].options });
+};
 
 interface PendingElicitation {
   rpcId: number;
@@ -194,37 +202,55 @@ const server = createServer((socket) => {
 
         // 1. 权限裁决
         if (command.type === "permission_resolution") {
+          const previous = resolvedPermissions.get(command.escalationId);
+          if (previous) {
+            if (previous !== command.resolution) throw Object.assign(new Error("该授权已有不同的裁决。"), { rejected: true });
+            emit({ type: "wand_qoder_permission_resolved", id: command.escalationId, resolution: previous });
+            socket.end(`${JSON.stringify({ ok: true })}\n`);
+            return;
+          }
           const pending = pendingPermissions.get(command.escalationId);
-          if (!pending) throw new Error("授权请求已失效或已处理。");
-          pendingPermissions.delete(command.escalationId);
+          if (!pending) throw Object.assign(new Error("授权请求已失效或已处理。"), { rejected: true });
           const optionId = pickOptionId(pending.options, command.resolution);
           wire({
             jsonrpc: "2.0",
             id: pending.rpcId,
             result: optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } },
           });
-          emit({ type: "wand_qoder_permission_resolved", id: command.escalationId });
+          pendingPermissions.delete(command.escalationId);
+          resolvedPermissions.set(command.escalationId, command.resolution);
+          emit({ type: "wand_qoder_permission_resolved", id: command.escalationId, resolution: command.resolution });
+          emitNextPermission();
           socket.end(`${JSON.stringify({ ok: true })}\n`);
           return;
         }
 
         // 2. 结构化询问回答
         if (command.type === "question_answer") {
+          if (!/^[a-f0-9-]{36}$/i.test(command.id)) throw Object.assign(new Error("回答交接标识无效。"), { rejected: true });
           const pending = pendingElicitations.get(command.toolUseId);
-          if (!pending) throw new Error("问题已失效或已被回答。");
-          pendingElicitations.delete(command.toolUseId);
-          const lines = command.text.split("\n").map(l => l.trim()).filter(Boolean);
+          if (!pending) throw Object.assign(new Error("问题已失效或已被回答。"), { rejected: true });
+          receipt(command.id, { state: "pending", text: command.text });
+          const lines = command.text.trim().split("\n").map(line => line.trim());
+          if (lines.length !== pending.propertyKeys.length) {
+            throw Object.assign(new Error("回答数量与当前表单不一致。"), { rejected: true });
+          }
           const content: Record<string, any> = {};
           pending.propertyKeys.forEach((key, idx) => {
             const prop = pending.properties[key] ?? {};
-            const answerLine = lines[idx] ?? lines[0] ?? "";
+            const answerLine = lines[idx] ?? "";
             if (prop.type === "array") {
-              content[key] = answerLine.split(",").map(s => s.trim()).filter(Boolean);
+              // React cards join choices with ；; native/legacy cards use commas.
+              content[key] = answerLine.split(/[,，;；]/).map(value => value.trim()).filter(Boolean);
             } else if (prop.type === "boolean") {
+              if (!/^(true|false|yes|no|是|否|1|0)$/i.test(answerLine)) throw Object.assign(new Error("布尔回答无效。"), { rejected: true });
               content[key] = /^(true|yes|是|1)$/i.test(answerLine);
             } else if (prop.type === "integer" || prop.type === "number") {
               const num = Number(answerLine);
-              content[key] = Number.isFinite(num) ? num : 0;
+              if (!answerLine || !Number.isFinite(num) || prop.type === "integer" && !Number.isInteger(num)) {
+                throw Object.assign(new Error("数字回答无效。"), { rejected: true });
+              }
+              content[key] = num;
             } else {
               content[key] = answerLine;
             }
@@ -234,6 +260,10 @@ const server = createServer((socket) => {
             id: pending.rpcId,
             result: { action: "accept", content },
           });
+          pendingElicitations.delete(command.toolUseId);
+          receipt(command.id, { state: "committed", text: command.text });
+          emit({ type: "wand_input_committed", questionId: command.toolUseId,
+            message: { id: command.id, text: command.text, boundaryId: command.toolUseId, incarnationId: config.requestId } });
           emit({ type: "wand_qoder_question_resolved", id: command.toolUseId });
           socket.end(`${JSON.stringify({ ok: true })}\n`);
           return;
@@ -241,17 +271,39 @@ const server = createServer((socket) => {
 
         // 3. 运行中实时插话
         if (command.type === "steer") {
-          if (finished || !promptRpcId || !nativeSessionId) {
-            throw Object.assign(new Error("Qoder 当前回合已结束，插话已保留至下次回合。"), { rejected: true });
+          if (!/^[a-f0-9-]{36}$/i.test(command.id)) throw Object.assign(new Error("插话交接标识无效。"), { rejected: true });
+          // A repeated control request must not duplicate a provider prompt.
+          let previous: { state?: string; text?: string } | undefined;
+          try {
+            previous = JSON.parse(readFileSync(path.join(directory, `${command.id}.json`), "utf8"));
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Qoder 插话记录不可读，送达未知，不重复发送。");
           }
-          receipt(command.id, { state: "committed", text: command.text });
+          if (previous) {
+            if (previous.state === "committed" && previous.text === command.text) {
+              socket.end(`${JSON.stringify({ ok: true })}\n`);
+              return;
+            }
+            throw new Error("Qoder 插话已有未确认记录，不自动重复发送。");
+          }
+          if (finished || !promptRpcId || !nativeSessionId || !steeringSupported) {
+            throw Object.assign(new Error("Qoder 当前回合不接受插话，消息已保留至下次回合。"), { rejected: true });
+          }
+          receipt(command.id, { state: "pending", text: command.text });
           const steerBlocks = buildAcpPromptBlocks(command.text, imagesSupported);
-          wire({
-            jsonrpc: "2.0",
-            id: ++sequence,
-            method: "session/prompt",
-            params: { sessionId: nativeSessionId, prompt: steerBlocks },
+          const steeringId = ++sequence;
+          steeringPromptIds.add(steeringId);
+          await new Promise<void>((resolve, reject) => {
+            child.stdin.write(`${JSON.stringify({
+              jsonrpc: "2.0",
+              id: steeringId,
+              method: "session/prompt",
+              params: { sessionId: nativeSessionId, prompt: steerBlocks },
+            })}\n`, (error) => error ? reject(error) : resolve());
           });
+          // Durable submission to the provider channel, NOT a model-consumption ack.
+          // A failed write leaves a pending (unknown) receipt and is never replayed.
+          receipt(command.id, { state: "committed", text: command.text });
           emit({
             type: "wand_input_committed",
             message: { id: command.id, text: command.text, boundaryId: config.requestId, incarnationId: config.requestId },
@@ -291,7 +343,7 @@ function triggerCancel(): void {
   interrupted = true;
   for (const [id, pending] of pendingPermissions.entries()) {
     wire({ jsonrpc: "2.0", id: pending.rpcId, result: { outcome: { outcome: "cancelled" } } });
-    emit({ type: "wand_qoder_permission_resolved", id });
+    emit({ type: "wand_qoder_permission_resolved", id, resolution: "deny" });
   }
   pendingPermissions.clear();
   for (const [id, pending] of pendingElicitations.entries()) {
@@ -330,10 +382,17 @@ const applyLine = (line: string): void => {
           pending.resolve(frame.result);
         }
       }
-      if (id === promptRpcId) {
+      const steeringResult = steeringPromptIds.delete(id ?? -1);
+      if (id === promptRpcId || steeringResult) {
         emit(frame);
-        finished = true;
-        close();
+        if (frame.error) failed = true;
+        // Qoder promptQueueing coalesces inputs into the primary turn and may
+        // never respond separately to steering IDs. Its primary result owns turn
+        // completion; missing steering replies are not a reason to hang or replay.
+        if (id === promptRpcId) {
+          finished = true;
+          close();
+        }
       }
       return;
     }
@@ -354,13 +413,8 @@ const applyLine = (line: string): void => {
           return;
         }
         const escalationId = randomUUID();
-        pendingPermissions.set(escalationId, { rpcId: id, options });
-        emit({
-          type: "wand_qoder_permission",
-          id: escalationId,
-          toolCall: params.toolCall,
-          options: params.options,
-        });
+        pendingPermissions.set(escalationId, { rpcId: id, options, toolCall: params.toolCall });
+        if (pendingPermissions.size === 1) emitNextPermission();
         return;
       }
 
@@ -468,6 +522,7 @@ try {
   }
   const promptCapabilities = init?.agentCapabilities?.promptCapabilities;
   imagesSupported = Boolean(promptCapabilities?.image);
+  steeringSupported = init?.agentCapabilities?._meta?.qoder?.promptQueueing === true;
 
   let sessionInfo: Record<string, unknown> | undefined;
   if (config.claudeSessionId?.trim()) {
@@ -493,7 +548,6 @@ try {
   }
 
   emit({ type: "wand_qoder_session", sessionId: nativeSessionId });
-  emit({ type: "wand_input_boundary", id: config.requestId });
 
   const configOptions = Array.isArray(sessionInfo?.configOptions)
     ? (sessionInfo.configOptions as AcpConfigOption[])
@@ -531,6 +585,8 @@ try {
     close();
   } else {
     promptRpcId = ++sequence;
+    if (config.inputMessageId) emit({ type: "wand_input_ready", id: config.inputMessageId });
+    if (steeringSupported) emit({ type: "wand_input_boundary", id: config.requestId });
     const promptBlocks: AcpPromptContent[] = buildAcpPromptBlocks(config.prompt, imagesSupported);
     wire({
       jsonrpc: "2.0",

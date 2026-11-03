@@ -10,6 +10,7 @@ const STRUCTURED_RUNNERS = new Set([
   "codex-cli-exec",
   "opencode-cli-run",
   "grok-cli-headless",
+  "qoder-cli-acp",
   "qoder-cli-print",
   "pi-cli-json",
 ]);

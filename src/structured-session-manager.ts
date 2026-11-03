@@ -48,7 +48,9 @@ import { ClaudeCliRunner } from "./structured-claude-adapter.js";
 
 import { OpenCodeRunner } from "./structured-opencode-adapter.js";
 import { GrokRunner } from "./structured-grok-adapter.js";
-import { QoderRunner } from "./structured-qoder-adapter.js";
+import { QoderAcpRunner, escalationFor } from "./structured-qoder-acp-adapter.js";
+import { sendQoderControl, resolveQoderInput, forgetQoderControl } from "./qoder-acp-control.js";
+import { asRecord } from "./structured-content.js";
 import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
 import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
 import { PiProtocolReader } from "./pi-protocol-reader.js";
@@ -58,7 +60,7 @@ import { upsertPiAssistantSegment } from "./structured-session-manager-replay.js
 import type { PiNativeGcReport } from "./pi-tmux-host.js";
 import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
-import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeThinkingEffort, resolveStructuredRunner } from "./structured-provider-common.js";
+import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeStructuredRunner, normalizeThinkingEffort, resolveStructuredRunner } from "./structured-provider-common.js";
 import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
 
 import { logInfo } from "./runtime-log.js";
@@ -253,6 +255,8 @@ export class StructuredSessionManager {
   private readonly openCodeRunner: StructuredRunnerAdapter;
   private readonly grokRunner: StructuredRunnerAdapter;
   private readonly qoderRunner: StructuredRunnerAdapter;
+  private readonly qoderInputDispatches = new Set<string>();
+  private readonly qoderReadyRequests = new Map<string, string>();
   private readonly piRunner: StructuredRunnerAdapter;
   /** 进程内 core 引擎供员工候选显式启用；普通 Pi 主功能不使用它。 */
   private readonly coreRunner: StructuredRunnerAdapter;
@@ -285,7 +289,7 @@ export class StructuredSessionManager {
     this.codexRunner = wrap(runners.codex ?? new CodexRunner(undefined, this.execHost));
     this.openCodeRunner = wrap(runners.opencode ?? new OpenCodeRunner(undefined, this.execHost));
     this.grokRunner = wrap(runners.grok ?? new GrokRunner(undefined, this.execHost));
-    this.qoderRunner = wrap(runners.qoder ?? new QoderRunner(undefined, this.execHost));
+    this.qoderRunner = wrap(runners.qoder ?? new QoderAcpRunner(undefined, this.execHost));
     this.piRunner = wrap(withAutomaticPiResources(
       runners.pi ?? new PiRunner(undefined, this.execHost, coreHarnessAgentDir(config.harness),
         openRouter ? { storage, service: openRouter } : undefined,
@@ -337,13 +341,16 @@ export class StructuredSessionManager {
       const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
       // Legacy/corrupt snapshots are normalized on restore so send dispatch can
       // rely on the provider/runner invariant without making startup fail.
-      const runner = isStructuredRunnerForProvider(provider, storedRunner)
-        ? storedRunner
-        : defaultStructuredRunner(provider);
       const recoverableDetachedRun = snapshot.status === "running"
         && this.execHost?.persistent === true
         // 进程内 core 回合不会比服务活得更久；重启后只能算中断，不能去 daemon 里领养。
         && snapshot.structuredState?.engine !== "core";
+      // An in-flight print run must finish with its original decoder before upgrading.
+      const runner = recoverableDetachedRun && provider === "qoder" && storedRunner === "qoder-cli-print"
+        ? storedRunner
+        : isStructuredRunnerForProvider(provider, storedRunner)
+          ? normalizeStructuredRunner(storedRunner) as SessionRunner
+          : defaultStructuredRunner(provider);
       if (recoverableDetachedRun) this.pendingRecoveryIds.push(snapshot.id);
       const restored: SessionSnapshot = {
         ...snapshot,
@@ -356,7 +363,7 @@ export class StructuredSessionManager {
         autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
         approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
         queuedMessages: snapshot.queuedMessages ?? [],
-        pendingEscalation: null,
+        pendingEscalation: recoverableDetachedRun && runner === "qoder-cli-acp" ? snapshot.pendingEscalation ?? null : null,
         permissionBlocked: false,
         structuredState: {
           // 保留既有可读投影（engine / contextUsage / compactions / phase），只覆盖受管字段。
@@ -637,6 +644,10 @@ export class StructuredSessionManager {
         await this.resumeDetachedRun(this.requireSession(sessionId), attached,
           checkpoint && attached.stdoutFrom === checkpoint.offset ? checkpoint : undefined);
         this.pendingRecoveryIds = this.pendingRecoveryIds.filter((id) => id !== sessionId);
+        const recovered = this.sessions.get(sessionId);
+        if (recovered?.runner === "qoder-cli-acp" && recovered.structuredState?.activeRequestId) {
+          this.dispatchQoderInputs(sessionId, recovered.structuredState.activeRequestId);
+        }
       } catch (error) {
         console.error(`[WAND] structured run recovery failed for ${sessionId}:`, error);
         if (!this.disposed && !this.pendingRecoveryIds.includes(sessionId)) {
@@ -666,7 +677,9 @@ export class StructuredSessionManager {
   private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState, checkpoint?: PiCliCheckpoint): Promise<void> {
     const sessionId = snapshot.id;
     if (this.disposed || !this.execHost || !snapshot.structuredState) return;
-    const requestId = `recover-${initialState.incarnationId}`;
+    // The worker control socket and input receipts are keyed by the original request.
+    const requestId = snapshot.runner === "qoder-cli-acp" && snapshot.structuredState.activeRequestId
+      ? snapshot.structuredState.activeRequestId : `recover-${initialState.incarnationId}`;
     const logicalRequestId = snapshot.automationId?.startsWith("wand-task-comment:")
       ? snapshot.structuredState.activeRequestId
         ?? [...(snapshot.messages ?? [])].reverse().find(message => message.role === "user")?.requestId
@@ -804,6 +817,11 @@ export class StructuredSessionManager {
         const event = JSON.parse(line) as Record<string, unknown>;
         this.handleNativeInputEvent(sessionId, requestId, event, processor.state);
       }
+      if (resumed.runner === "qoder-cli-acp") {
+        let event: Record<string, unknown> | null = null;
+        try { event = asRecord(JSON.parse(line)); } catch { /* Partial/truncated protocol lines are not control events. */ }
+        if (event) this.handleQoderInputEvent(sessionId, requestId, event, processor.state, !replayingHistory);
+      }
       onApplied(processor.feed(line, replayingHistory ? undefined : new Date().toISOString()));
     };
     const piReader = resumed.provider === "pi" && resumed.structuredState?.engine !== "core"
@@ -938,6 +956,10 @@ export class StructuredSessionManager {
     // 首轮 feed + attach 完成后再定锚点，之后 onStream 的事件都走合并视图。
     replayView.prime([...processor.state.blocks]);
     replayingHistory = false;
+    if (resumed.runner === "qoder-cli-acp") {
+      this.qoderReadyRequests.set(sessionId, requestId);
+      this.dispatchQoderInputs(sessionId, requestId);
+    }
     if (!replayTruncated && runningHandle.protocolSource && piReader?.atBoundary) {
       this.savePiCheckpoint(sessionId, requestId, { version: 1, requestId,
         incarnationId: runningHandle.incarnationId, source: runningHandle.protocolSource, offset: lastStdoutSeq,
@@ -1005,10 +1027,12 @@ export class StructuredSessionManager {
     if (execution) this.releasePendingRunnerExecution(sessionId, execution);
     else this.execHost?.forgetRun(structuredRunId(sessionId));
     this.settleNativeInputs(sessionId, requestId, processor.state);
+    if (this.sessions.get(sessionId)?.runner === "qoder-cli-acp" && !outcome.lost) forgetQoderControl(sessionId, requestId);
     const current = this.sessions.get(sessionId);
     if (!current) return;
 
     const commandLabel = recoveredCommandLabel(current.runner);
+    const nextRunner = current.runner === "qoder-cli-print" ? defaultStructuredRunner("qoder") : current.runner;
     const interruptedForQuestion = processor.stopReason === "ask-user-question";
     // 退出码/信号是 CLI 的权威结论：daemon 的 replay 日志被截断只说明我们重建不出
     // 完整过程记录，不代表这一轮失败（否则 exit 0 会被报成 "exited with code 0"）。
@@ -1033,6 +1057,8 @@ export class StructuredSessionManager {
         processor.state,
         { keepTranscript: replayTruncated },
       );
+      failed.runner = nextRunner;
+      if (failed.structuredState && nextRunner) failed.structuredState.runner = nextRunner;
       this.sessions.set(sessionId, failed);
       this.saveAuthoritativeSession(failed);
       this.emitStructuredSnapshot(failed);
@@ -1048,6 +1074,7 @@ export class StructuredSessionManager {
       : this.buildCompletedAssistantMessages(current, processor.state, false);
     const finished: SessionSnapshot = {
       ...current,
+      runner: nextRunner,
       status: keepRunning ? "running" : "idle",
       exitCode: keepRunning ? null : 0,
       endedAt: keepRunning ? null : new Date().toISOString(),
@@ -1061,6 +1088,7 @@ export class StructuredSessionManager {
       permissionBlocked: false,
       structuredState: {
         ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
+        ...(nextRunner ? { runner: nextRunner } : {}),
         model: processor.state.model ?? current.structuredState?.model,
         inFlight: false,
         activeRequestId: null,
@@ -1422,7 +1450,7 @@ export class StructuredSessionManager {
           : provider === "grok"
             ? "grok -p --output-format streaming-json"
           : provider === "qoder"
-            ? "qodercli -p --output-format stream-json"
+            ? "qodercli --acp"
           : provider === "pi"
             ? "pi --mode json --print"
           : runner === "claude-cli-print"
@@ -1674,9 +1702,13 @@ export class StructuredSessionManager {
     const scheduling: EmployeeInputScheduling = { ...(opts?.scheduling
       ?? { source: opts?.source ?? "task", enqueuedAt: acceptedAt, sequence: ++this.inputSequence,
         teamRequestStarted: opts?.teamRequestStarted }), acceptanceId };
+    if (session.runner === "qoder-cli-acp" && session.structuredState?.inFlight && !opts?.promotion) {
+      scheduling.nativeQuestionId = findUnpairedAskUserQuestion(session.messages ?? [])?.id;
+    }
     const relay = this.relayHandlerFor(session);
     const childActive = this.pendingRunnerExecutions.has(id) || this.pendingRecoveryIds.includes(id) || this.nativeProcessExits.has(id);
-    const interrupt = !!opts?.interrupt && !!session.structuredState?.inFlight && childActive;
+    const nativeSteering = session.runner === "qoder-cli-acp" && childActive && session.structuredState?.inFlight;
+    const interrupt = !nativeSteering && !!opts?.interrupt && !!session.structuredState?.inFlight && childActive;
     if (interrupt) {
       this.requireRecoveryControl(id);
       this.assertNativeInputMutable(session);
@@ -1700,8 +1732,8 @@ export class StructuredSessionManager {
     }
     const accepted: SessionSnapshot = relay
       ? { ...session, messages: [...(session.messages ?? []), buildUserTurn(prompt, undefined, acceptedAt, undefined, undefined, acceptedAt)] }
-      : { ...session, queuedMessages: interrupt ? [prompt, ...queue] : [...queue, prompt],
-        queuedInputScheduling: interrupt ? [scheduling, ...metadata] : [...metadata, scheduling] };
+      : { ...session, queuedMessages: interrupt || nativeSteering && opts?.interrupt ? [prompt, ...queue] : [...queue, prompt],
+        queuedInputScheduling: interrupt || nativeSteering && opts?.interrupt ? [scheduling, ...metadata] : [...metadata, scheduling] };
     // Persist before publishing state, generating a topic, interrupting or starting a runner.
     const inserted = receipt ? this.storage.acceptStructuredInput(accepted, signature, receipt, !!relay)
       : this.storage.transaction(() => {
@@ -1718,6 +1750,9 @@ export class StructuredSessionManager {
     if (relay) return this.relayUserMessage(id, prompt, relay, true);
     if (mustQueue && !interrupt) {
       this.emitStructuredSnapshot(accepted);
+      if (accepted.runner === "qoder-cli-acp" && accepted.structuredState?.activeRequestId) {
+        this.dispatchQoderInputs(id, accepted.structuredState.activeRequestId);
+      }
       if (accepted.employeeId) this.employeeInputAdmission?.schedule(accepted.employeeId);
       return accepted;
     }
@@ -1798,7 +1833,7 @@ export class StructuredSessionManager {
     // lifecycle tokens and must never be copied into persisted/public messages.
     const transcriptRequestId = session.automationId?.startsWith("wand-task-comment:") ? requestId : undefined;
     const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt, transcriptRequestId,
-      session.provider === "pi" && session.structuredState?.engine !== "core" ? randomUUID() : undefined,
+      (session.provider === "pi" && session.structuredState?.engine !== "core") || session.provider === "qoder" ? randomUUID() : undefined,
       userTurnAt);
     this.unacceptedTeamStarts.delete(id);
     if (this.unsupportedStructuredProviders.has(id)) {
@@ -1807,14 +1842,17 @@ export class StructuredSessionManager {
     if (session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId)) {
       session = { ...session, claudeSessionId: null };
     }
+    const runner = session.provider === "qoder" ? defaultStructuredRunner("qoder") : session.runner;
     const updated: SessionSnapshot = {
       ...session,
+      runner,
       status: "running",
       exitCode: null,
       endedAt: null,
       messages: [...(session.messages ?? []), userTurn],
       structuredState: this.beginTurn(id, {
-        ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
+        ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", runner)),
+        ...(runner ? { runner } : {}),
         inFlight: true,
         activeRequestId: requestId,
         lastError: null,
@@ -2013,8 +2051,8 @@ export class StructuredSessionManager {
       await this.runStructuredStreaming(id, updated, prompt, requestId, {
         runner: this.qoderRunner,
         provider: "qoder",
-        commandLabel: "qodercli -p",
-        logKind: "qoder-print",
+        commandLabel: "qodercli --acp",
+        logKind: "qoder-acp",
         installHint: "请安装 @qoder-ai/qodercli，或重跑 `wand service:install` 刷新服务的 PATH",
       });
     } else if (provider === "pi") {
@@ -2589,6 +2627,32 @@ export class StructuredSessionManager {
     if (resolution !== "approve_once" && resolution !== "approve_turn" && resolution !== "deny") {
       throw new Error("resolution 必须是 approve_once、approve_turn 或 deny。");
     }
+    if (session.runner === "qoder-cli-acp" && session.structuredState?.activeRequestId) {
+      this.requireRecoveryControl(sessionId);
+      const activeRequestId = session.structuredState.activeRequestId;
+      // Keep the card until the durable worker acknowledges this exact decision.
+      void sendQoderControl(sessionId, activeRequestId, {
+        type: "permission_resolution", escalationId: requestId, resolution,
+      }).catch((error) => {
+        const current = this.currentSessionForRequest(sessionId, activeRequestId);
+        if (!current || current.pendingEscalation?.requestId !== requestId) return;
+        const updated: SessionSnapshot = { ...current, messages: appendNoticeTurn(current.messages, {
+          role: "assistant", notice: true,
+          content: [{ type: "text", text: `Qoder 授权回执未确认，请核对审批卡片：${getErrorMessage(error)}` }],
+        }) };
+        this.saveAuthoritativeSession(updated);
+        this.sessions.set(sessionId, updated);
+        this.emitStructuredSnapshot(updated);
+      });
+      return session;
+    }
+    return this.applyEscalationResolution(sessionId, requestId, resolution);
+  }
+
+  private applyEscalationResolution(sessionId: string, requestId: string, resolution: "approve_once" | "approve_turn" | "deny"): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const pending = session.pendingEscalation;
+    if (!pending || pending.requestId !== requestId) return session;
     const approved = resolution !== "deny";
     const scope = pending.scope;
     if (approved && scope) {
@@ -2609,7 +2673,7 @@ export class StructuredSessionManager {
     this.emit({
       type: "status",
       sessionId,
-      data: { permissionBlocked: false, approvalStats: updated.approvalStats, sessionKind: "structured" },
+      data: { pendingEscalation: null, permissionBlocked: false, approvalStats: updated.approvalStats, sessionKind: "structured" },
     });
     return updated;
   }
@@ -2816,7 +2880,8 @@ export class StructuredSessionManager {
    */
   private settleTurn(sessionId: string, state: StructuredSessionState): StructuredSessionState {
     this.turnHeartbeat.cancel(sessionId);
-    return { ...state, turnStartedAt: null, lastActivityAt: null };
+    this.qoderReadyRequests.delete(sessionId);
+    return { ...state, inputMode: "turn-end", turnStartedAt: null, lastActivityAt: null };
   }
 
   /**
@@ -2883,7 +2948,7 @@ export class StructuredSessionManager {
   }
 
   /** A claim is the native transcript commit: persist the boundary and remove only that reservation. */
-  private commitNativeInput(sessionId: string, requestId: string, offer: PiInputOffer, state: StructuredRunnerTurnState): void {
+  private commitNativeInput(sessionId: string, requestId: string, offer: PiInputOffer, state: StructuredRunnerTurnState, questionId?: string): void {
     const current = this.currentSessionForRequest(sessionId, requestId);
     if (!current) return;
     const scheduling = queuedInputScheduling(current);
@@ -2898,7 +2963,7 @@ export class StructuredSessionManager {
       queuedMessages: current.queuedMessages?.filter((_, at) => at !== index),
       queuedInputScheduling: scheduling.filter((_, at) => at !== index),
       messages: preceding.some(turn => turn.messageId === offer.id) ? preceding
-        : [...preceding, buildUserTurn(offer.text, undefined, isoNow(), undefined, offer.id)],
+        : [...preceding, buildUserTurn(offer.text, questionId ? { id: questionId } : undefined, isoNow(), undefined, offer.id)],
     };
     this.saveAuthoritativeSession(committed);
     state.blocks = [];
@@ -2907,6 +2972,125 @@ export class StructuredSessionManager {
     state.inputMessageId = offer.id;
     this.sessions.set(sessionId, committed);
     this.emitStructuredSnapshot(committed);
+  }
+
+  private handleQoderInputEvent(
+    sessionId: string, requestId: string, event: Record<string, unknown>, state: StructuredRunnerTurnState, dispatch = true,
+  ): void {
+    let current = this.currentSessionForRequest(sessionId, requestId);
+    if (!current || current.runner !== "qoder-cli-acp") return;
+    if (dispatch) this.qoderReadyRequests.set(sessionId, requestId);
+    if (event.type === "wand_input_ready" && typeof event.id === "string") state.inputMessageId = event.id;
+    if (event.type === "wand_input_boundary" && current.structuredState?.inputMode !== "steer") {
+      current = { ...current, structuredState: { ...current.structuredState!, inputMode: "steer" } };
+      this.sessions.set(sessionId, current);
+      this.storage.updateSessionRuntimeMetadata(current);
+      this.emitStructuredSnapshot(current);
+    }
+    if (event.type === "wand_input_committed") {
+      const offer = event.message as PiInputOffer | undefined;
+      if (offer && typeof offer.id === "string" && typeof offer.text === "string") {
+        this.commitNativeInput(sessionId, requestId, offer, state, typeof event.questionId === "string" ? event.questionId : undefined);
+      }
+    }
+    if (event.type === "wand_qoder_permission" && typeof event.id === "string") {
+      const escalation = escalationFor(asRecord(event.toolCall) ?? {});
+      const pending = { requestId: event.id, scope: escalation.scope, runner: "json" as const,
+        source: "tool_permission_request" as const, reason: escalation.reason,
+        ...(escalation.target ? { target: escalation.target } : {}) };
+      const updated: SessionSnapshot = { ...current, pendingEscalation: pending, permissionBlocked: false };
+      this.sessions.set(sessionId, updated);
+      this.storage.updateSessionRuntimeMetadata(updated);
+      this.emitStructuredSnapshot(updated);
+    }
+    if (event.type === "wand_qoder_permission_resolved" && typeof event.id === "string") {
+      const resolution = event.resolution;
+      if (resolution === "approve_once" || resolution === "approve_turn" || resolution === "deny") {
+        if (dispatch) this.emitStructuredSnapshot(this.applyEscalationResolution(sessionId, event.id, resolution));
+        else if (current.pendingEscalation?.requestId === event.id) {
+          // Journal replay reconstructs pending state; it must not count historical approvals again.
+          const updated: SessionSnapshot = { ...current, pendingEscalation: null, permissionBlocked: false };
+          this.sessions.set(sessionId, updated);
+          this.storage.updateSessionRuntimeMetadata(updated);
+        }
+      }
+    }
+    if (event.type === "wand_qoder_question_resolved" && typeof event.id === "string") {
+      current = this.currentSessionForRequest(sessionId, requestId);
+      if (current) {
+        const metadata = queuedInputScheduling(current);
+        const expired = new Set(metadata.flatMap((item, index) => item.nativeQuestionId === event.id && !item.handoff ? [index] : []));
+        if (expired.size) {
+          const text = current.queuedMessages?.filter((_, index) => expired.has(index)).join("\n\n");
+          const updated: SessionSnapshot = { ...current,
+            queuedMessages: current.queuedMessages?.filter((_, index) => !expired.has(index)),
+            queuedInputScheduling: metadata.filter((_, index) => !expired.has(index)),
+            messages: appendNoticeTurn(current.messages, { role: "assistant", notice: true,
+              content: [{ type: "text", text: `Qoder 问题已处理，以下回答未再次提交：\n\n${text}` }] }),
+          };
+          this.saveAuthoritativeSession(updated);
+          this.sessions.set(sessionId, updated);
+          this.emitStructuredSnapshot(updated);
+        }
+      }
+    }
+    if (dispatch && (event.type === "wand_input_boundary" || event.type === "wand_input_committed" || event.type === "wand_qoder_question")) {
+      queueMicrotask(() => this.dispatchQoderInputs(sessionId, requestId));
+    }
+  }
+
+  /** Reserve with the existing queue owner before sending; an unknown receipt never authorizes replay. */
+  private dispatchQoderInputs(sessionId: string, requestId: string): void {
+    if (this.disposed || this.pendingRecoveryIds.includes(sessionId)) return;
+    const dispatchKey = `${sessionId}:${requestId}`;
+    if (this.qoderInputDispatches.has(dispatchKey) || this.qoderReadyRequests.get(sessionId) !== requestId) return;
+    const current = this.currentSessionForRequest(sessionId, requestId);
+    if (!current || current.runner !== "qoder-cli-acp" || !current.structuredState?.inFlight
+      || this.interruptedWith.has(sessionId)) return;
+    const metadata = queuedInputScheduling(current);
+    if (metadata.some(item => item.handoff)) return;
+    const questionId = findUnpairedAskUserQuestion(current.messages ?? [])?.id;
+    if (!questionId && current.structuredState.inputMode !== "steer") return;
+    const index = metadata.findIndex(item => item.source === "user" && !item.nativeSteeringRejected && item.nativeQuestionId === questionId);
+    const text = index >= 0 ? current.queuedMessages?.[index] : undefined;
+    if (!text) return;
+    const handoff = { id: randomUUID(), boundaryId: questionId ?? requestId, incarnationId: requestId };
+    const reserved: SessionSnapshot = { ...current,
+      queuedInputScheduling: metadata.map((item, at) => at === index ? { ...item, handoff } : item),
+    };
+    this.storage.updateSessionRuntimeMetadata(reserved);
+    this.sessions.set(sessionId, reserved);
+    this.emitStructuredSnapshot(reserved);
+    this.qoderInputDispatches.add(dispatchKey);
+    void sendQoderControl(sessionId, requestId, questionId
+      ? { type: "question_answer", id: handoff.id, toolUseId: questionId, text }
+      : { type: "steer", id: handoff.id, text }).catch((error) => {
+      const latest = this.currentSessionForRequest(sessionId, requestId);
+      if (!latest) return;
+      const scheduling = queuedInputScheduling(latest);
+      const at = scheduling.findIndex(item => item.handoff?.id === handoff.id);
+      if (at < 0) return;
+      const resolution = resolveQoderInput(sessionId, requestId, handoff);
+      if (resolution.state === "committed") return; // The journal event or final reconciliation will commit it once.
+      const unclaimed = resolution.state === "unclaimed" || error?.definiteRejection === true;
+      const updated: SessionSnapshot = { ...latest,
+        queuedMessages: unclaimed ? latest.queuedMessages : latest.queuedMessages?.filter((_, i) => i !== at),
+        queuedInputScheduling: unclaimed ? scheduling.map((item, i) => {
+          if (i !== at) return item;
+          const { handoff: _handoff, ...rest } = item;
+          return { ...rest, nativeSteeringRejected: true };
+        }) : scheduling.filter((_, i) => i !== at),
+        messages: appendNoticeTurn(latest.messages, { role: "assistant", notice: true,
+          content: [{ type: "text", text: unclaimed ? `Qoder 未接受本次输入，消息保留在队列：${getErrorMessage(error)}`
+            : `Qoder 输入送达未确认，未自动重发。以下原文仅供核对：\n\n${text}` }] }),
+      };
+      this.saveAuthoritativeSession(updated);
+      this.sessions.set(sessionId, updated);
+      this.emitStructuredSnapshot(updated);
+    }).finally(() => {
+      this.qoderInputDispatches.delete(dispatchKey);
+      queueMicrotask(() => this.dispatchQoderInputs(sessionId, requestId));
+    });
   }
 
   private handleNativeInputEvent(sessionId: string, requestId: string, event: Record<string, unknown>, state: StructuredRunnerTurnState): void {
@@ -2938,10 +3122,12 @@ export class StructuredSessionManager {
     for (const item of reservations) {
       const handoff = item.handoff!;
       let resolution: import("./pi-native-input.js").PiInputResolution | undefined;
-      try { resolution = forceUnknown ? undefined : this.execHost?.resolvePiInput?.(structuredRunId(sessionId), handoff); }
+      try { resolution = forceUnknown ? undefined : current.runner === "qoder-cli-acp"
+        ? resolveQoderInput(sessionId, requestId, handoff)
+        : this.execHost?.resolvePiInput?.(structuredRunId(sessionId), handoff); }
       catch { /* An unreadable receipt is unknown delivery, never permission to replay. */ }
       if (resolution?.state === "committed" && resolution.offer) {
-        this.commitNativeInput(sessionId, requestId, resolution.offer, state);
+        this.commitNativeInput(sessionId, requestId, resolution.offer, state, item.nativeQuestionId);
         continue;
       }
       current = this.currentSessionForRequest(sessionId, requestId);
@@ -3138,6 +3324,10 @@ export class StructuredSessionManager {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
+      ...(provider === "qoder" ? {
+        onQoderInputEvent: (event: Record<string, unknown>, state: StructuredRunnerTurnState) =>
+          this.handleQoderInputEvent(sessionId, requestId, event, state),
+      } : {}),
       ...(provider === "pi" && session.structuredState?.engine !== "core" ? {
         onPiInputEvent: (event: Record<string, unknown>, state: StructuredRunnerTurnState) =>
           this.handleNativeInputEvent(sessionId, requestId, event, state),
@@ -3234,6 +3424,10 @@ export class StructuredSessionManager {
       };
     }
 
+    if (provider === "qoder") {
+      this.settleNativeInputs(sessionId, requestId, result.state);
+      if (result.processExited !== false) forgetQoderControl(sessionId, requestId);
+    }
     this.throwUnacceptedInput(sessionId, result, commandLabel,
       `（PATH 中找不到 ${providerCliCommand(provider)} 可执行文件；${options.installHint ?? `请确认 ${providerCliCommand(provider)} 已安装，或重跑 wand service:install 刷新服务的 PATH`}）`);
 
