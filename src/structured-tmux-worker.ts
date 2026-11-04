@@ -5,6 +5,7 @@ import { createConnection } from "node:net";
 import { existsSync, appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 
 import { fileURLToPath } from "node:url";
+import { StructuredPaneMonitor } from "./structured-pane-monitor.js";
 
 interface Launch {
   file: string;
@@ -47,6 +48,7 @@ const validateIdentity = (): void => {
   }
 };
 validateIdentity();
+const monitor = new StructuredPaneMonitor(launch.identity.runId);
 const save = (fields: Record<string, unknown>): void => {
   validateIdentity();
   const temporary = `${launch.state}.${process.pid}.tmp`;
@@ -74,6 +76,7 @@ const signalChild = (signal: NodeJS.Signals): void => {
 };
 const stopOnFailure = (error: unknown): void => {
   failure ??= (error as NodeJS.ErrnoException).code ?? "EWORKER";
+  monitor.stopping(failure);
   signalChild("SIGTERM");
   escalation ??= setTimeout(() => signalChild("SIGKILL"), 1000);
   escalation.unref();
@@ -99,14 +102,15 @@ child.on("message", (message: { pid?: number; exitCode?: number | null; signal?:
   if (message.pid) {
     cliPid = message.pid;
     save({ status: "running", pid: cliPid, workerPid: process.pid, supervisorPid: child.pid, exitCode: null, signal: null });
+    monitor.running(cliPid);
     if (launch.stdinData !== undefined) child.stdin?.end(launch.stdinData);
   } else {
     cliExit = { exitCode: message.exitCode ?? null, signal: message.signal ?? null, failure: message.failure };
     failure ??= message.failure;
   }
 });
-child.stdout?.on("data", (bytes: Buffer) => append("stdout", bytes));
-child.stderr?.on("data", (bytes: Buffer) => append("stderr", bytes));
+child.stdout?.on("data", (bytes: Buffer) => { append("stdout", bytes); monitor.output("stdout", bytes); });
+child.stderr?.on("data", (bytes: Buffer) => { append("stderr", bytes); monitor.output("stderr", bytes); });
 child.stdout?.on("error", stopOnFailure);
 child.stderr?.on("error", stopOnFailure);
 child.stdin?.on("error", stopOnFailure);
@@ -115,14 +119,23 @@ child.once("close", (code, signal) => {
   closed = true;
   if (escalation) clearTimeout(escalation);
   // Losing the supervisor is not evidence that its CLI exited.
-  if (!cliExit && cliPid > 0) { process.exitCode = 1; return; }
+  if (!cliExit && cliPid > 0) {
+    monitor.finish(null, null, "supervisor 断开，执行退出尚未确认");
+    process.exitCode = 1; return;
+  }
   // close follows closure of both output pipes, including failed-spawn cases.
+  const exitCode = failure ? 1 : cliExit?.exitCode ?? code;
+  const exitSignal = cliExit?.signal ?? signal ?? null;
   try {
     save({ status: "exited", pid: cliPid, workerPid: process.pid, supervisorPid: child.pid,
-      exitCode: failure ? 1 : cliExit?.exitCode ?? code, signal: cliExit?.signal ?? signal ?? null, ...(failure ? { spawnError: failure } : {}) });
-  } catch { process.exitCode = 1; return; }
+      exitCode, signal: exitSignal, ...(failure ? { spawnError: failure } : {}) });
+  } catch {
+    monitor.finish(null, null, "退出状态写入失败");
+    process.exitCode = 1; return;
+  }
+  monitor.finish(exitCode, exitSignal, failure);
   process.exitCode = failure ? 1 : code ?? 1;
 });
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.on(signal, () => signalChild(signal));
+  process.on(signal, () => { monitor.stopping(signal); signalChild(signal); });
 }

@@ -2,12 +2,11 @@ import { taskWorkflowStage } from "../../../task-types.js";
 import * as React from "react";
 import type { ConversationSummary } from "../../../conversation-types.js";
 import { isSidebarConversationVisible } from "../../group-chat-visibility.js";
-import { agentToolDisplayName } from "../../provider-identity";
 import { sessionWorktree } from "../workspaces/worktree-presentation";
 import { matchesSessionRuntime, runtimeSelections, isSessionNeedsConfirmation } from "./runtime-filter";
-import { workspaceSessionProvider } from "../workspaces/session-order";
 import { isSessionActive, isSessionAttention } from "../workspaces/sidebar-display-mode";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
+import { matchesUnifiedSidebarSearch } from "./unified-sidebar-filters";
 import { useTaskGroups, taskGroupsStore } from "../workspaces/task-groups-store";
 import type { TaskDirectoryGroup, TaskSummary, WorkspaceSessionSummary } from "../workspaces/types";
 import {
@@ -99,19 +98,7 @@ export function useUnifiedSidebar(enabled: boolean, titles: Readonly<Record<stri
     && (!ui.listWorktree || sessionWorktree(entry.group, entry.task, entry.session)?.path === ui.listWorktree)
     && (facets.archive === "all" || (facets.archive === "archived" ? entry.archived : !entry.archived))
     && (!facets.activityOnly || (!entry.archived && isSessionActive(entry.session)))
-    && sidebarSearchMatches(
-      query,
-      titles[entry.session.id] ?? "",
-      entry.session.title ?? "",
-      entry.taskName ?? "",
-      entry.group.workspaceName,
-      sessionWorktree(entry.group, entry.task, entry.session)?.name ?? "",
-      sessionWorktree(entry.group, entry.task, entry.session)?.branch ?? "",
-      entry.session.cwd ?? "",
-      entry.session.employeeName ?? "",
-      entry.conversation?.title ?? "",
-      agentToolDisplayName(workspaceSessionProvider(entry.session), entry.session.engine),
-    )), [entries, facets, ui.listWorktree, query, titles]);
+    && matchesUnifiedSidebarSearch(entry, query, titles[entry.session.id])), [entries, facets, ui.listWorktree, query, titles]);
   const queuedTasks = groups.groups.flatMap(group => group.tasks.flatMap(task => {
     const count = task.queuedDispatchCount ?? (task.executionStatus === "queued" ? task.queuedExecutionCount ?? 0 : 0);
     if (!task.boardTaskId || task.archived || count <= 0) return [];

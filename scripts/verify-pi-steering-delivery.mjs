@@ -3,10 +3,14 @@ import { loginToInstalledService } from "./installed-service-login.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const output = join(process.cwd(), "output/pi-steering"); mkdirSync(output, { recursive: true });
+const runs = join(process.cwd(), "output/pi-steering/runs"); mkdirSync(runs, { recursive: true });
+const output = mkdtempSync(join(runs, new Date().toISOString().replace(/[:.]/g, "-") + "-fixture-"));
+writeFileSync(join(output, "run.json"), JSON.stringify({ schemaVersion: 1, startedAt: new Date().toISOString(),
+  kind: "installed-service-local-fixture", output }, null, 2) + "\n", { flag: "wx" });
+console.log(JSON.stringify({ evidenceDirectory: output }));
 const { origin, cookie } = await loginToInstalledService(AbortSignal.timeout(20000));
 const api = async (route, body, method = body ? "POST" : "GET") => {
   let response;
@@ -71,7 +75,8 @@ try {
   const runId = "structured:" + session.id;
   const slot = createHash("sha256").update(runId).digest("hex").slice(0, 24);
   const job = JSON.parse(readFileSync(join(process.env.HOME, ".wand/pi-native", slot, "current.json"), "utf8"));
-  const pid = JSON.parse(readFileSync(job.ready, "utf8")).pid;
+  const ready = JSON.parse(readFileSync(job.ready, "utf8"));
+  const pid = ready.pid;
   await api(`/api/sessions/${session.id}/input`, { input: "Local steering acceptance: second", view: "chat", respondImmediately: true });
   await api(`/api/sessions/${session.id}/input`, { input: "Local steering acceptance: third", view: "chat", respondImmediately: true });
   const finish = (index, text, tool) => {
@@ -89,6 +94,13 @@ try {
   await wait(() => calls.length === 3, "second steering");
   assert.ok(JSON.stringify(calls[2]).includes("Local steering acceptance: third"));
   assert.equal(JSON.parse(readFileSync(job.ready, "utf8")).pid, pid);
+  // Preserve committed evidence while the fixture CLI is still live; normal
+  // native-host cleanup may reclaim its private files after completion.
+  const receiptFiles = readdirSync(job.input).flatMap(boundaryId => {
+    const file = join(job.input, boundaryId, "committed.json");
+    return existsSync(file) ? [{ boundaryId, bytes: readFileSync(file) }] : [];
+  });
+  const nativeBytes = readFileSync(ready.sessionFile, "utf8");
   finish(2, "third answer", false);
   let snapshot;
   await wait(async () => { snapshot = await api(`/api/sessions/${session.id}?format=chat`); return !snapshot.structuredState?.inFlight; }, "completion");
@@ -98,10 +110,30 @@ try {
   assert.deepEqual(texts, [["user", "Local steering acceptance: first"], ["assistant", "first answer"],
     ["user", "Local steering acceptance: second"], ["assistant", "second answer"],
     ["user", "Local steering acceptance: third"], ["assistant", "third answer"]]);
+  const receipts = receiptFiles.map(({ boundaryId, bytes }) => {
+    const receipt = JSON.parse(bytes.toString("utf8"));
+    assert.equal(receipt.boundaryId, boundaryId);
+    assert.equal(receipt.incarnationId, job.incarnationId);
+    assert.equal(snapshot.messages.filter(turn => turn.role === "user" && turn.messageId === receipt.id
+      && turn.content.filter(block => block.type === "text").map(block => block.text).join("") === receipt.text).length, 1);
+    return { ...receipt, sha256: createHash("sha256").update(bytes).digest("hex") };
+  });
+  assert.equal(receipts.length, 2);
+  const nativeTranscript = nativeBytes.split("\n").filter(Boolean).map(line => JSON.parse(line));
+  assert.equal(nativeTranscript.find(entry => entry.type === "session")?.id, snapshot.claudeSessionId);
+  const nativeInputs = nativeTranscript.filter(entry => entry.type === "custom_message" && entry.customType === "wand-user-input"
+    && receipts.some(receipt => receipt.id === entry.details?.inputId && receipt.text === entry.content));
+  for (const receipt of receipts) assert.equal(nativeInputs.filter(entry => entry.details.inputId === receipt.id).length, 1);
+  writeFileSync(join(output, "installed-native-receipts.json"), JSON.stringify({ runId: job.runId, requestId: job.requestId,
+    incarnationId: job.incarnationId, pid, nativeSessionId: snapshot.claudeSessionId, receipts, nativeInputs }, null, 2), { flag: "wx" });
+  writeFileSync(join(output, "installed-acceptance-transcript.json"), JSON.stringify({ sessionId: session.id,
+    nativeSessionId: snapshot.claudeSessionId, messages: snapshot.messages, queuedMessages: snapshot.queuedMessages,
+    inputMode: snapshot.structuredState?.inputMode }, null, 2), { flag: "wx" });
   const report = { ok: true, installedService: true, localProvider: true, modelRequests: calls.length,
+    observedAt: new Date().toISOString(), serviceVersion: (await api("/api/config")).currentVersion,
     defaultsUnchanged: true,
     samePiProcess: true, turnBoundaries: 2, queuedMessages: 0, sessionId: session.id, inputMode: snapshot.structuredState?.inputMode };
-  writeFileSync(join(output, "installed-acceptance.json"), JSON.stringify(report, null, 2));
+  writeFileSync(join(output, "installed-acceptance.json"), JSON.stringify(report, null, 2), { flag: "wx" });
   completed = true;
   console.log(JSON.stringify(report, null, 2));
 } finally {

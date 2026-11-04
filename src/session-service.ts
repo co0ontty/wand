@@ -3,7 +3,6 @@ import { parseExecutionMode } from "./session-request.js";
 
 import { ProcessManager,PtyInputDeliveryError,SessionInputError } from "./process-manager.js";
 import { WandStorage } from "./storage.js";
-import { StructuredSessionManager } from "./structured-session-manager.js";
 import { ExecutionMode, SessionProvider, SessionSnapshot } from "./types.js";
 
 import { getWorktreeMergeErrorCode, WorktreeMergeError } from "./git-worktree.js";
@@ -13,8 +12,8 @@ import { getErrorMessage } from "./error-utils.js";
 import { buildIterationCommitContext, readCommitContextMode, resolveCommitContextInput, type IterationCommitContext } from "./iteration-log.js";
 import { buildProviderResumeCommand } from "./resume-policy.js";
 import { buildDirectoryTree, type SessionDirectoryNode } from "./session-directory-tree.js";
-import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
-import { deleteOwnedSessionWithHistory, SessionRegistry, type ProviderHistoryDeleter } from "./session-registry.js";
+import { inferProviderFromCommand, isSessionProvider } from "./session-provider.js";
+import { SessionRegistry } from "./session-registry.js";
 import { projectCwdForSession, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { badRequest } from "./http-error.js";
 
@@ -101,32 +100,6 @@ export function getInputDebugMeta(error: unknown) {
     return { name: error.name, message: error.message, stack: error.stack };
   }
   return { error };
-}
-
-export type SessionDeletionProcesses = Pick<
-  ProcessManager,
-  "get" | "delete"
-> & ProviderHistoryDeleter;
-
-export type SessionDeletionStructured = Pick<StructuredSessionManager, "get" | "delete">;
-
-/**
- * A Wand-managed session and its provider-native history represent the same
- * conversation. Delete both in one operation so the native history cannot
- * immediately reappear as a "non-Wand" session after the Wand row is removed.
- */
-export function deleteSessionWithProviderHistory(
-  processes: SessionDeletionProcesses,
-  structured: SessionDeletionStructured,
-  storage: Pick<WandStorage, "getConfigValue" | "setConfigValue">,
-  id: string,
-): void {
-  deleteOwnedSessionWithHistory(() => {
-    const snapshot = structured.get(id) ?? processes.get(id);
-    if (snapshot?.sessionKind === "structured") structured.delete(id);
-    else processes.delete(id);
-    return snapshot;
-  }, processes, storage);
 }
 
 export type SessionListPageEntry = {
@@ -312,7 +285,7 @@ export function resolvePtyResumeProvider(snapshot: SessionSnapshot): SessionProv
 }
 
 export function isPtyProviderCommand(provider: SessionProvider, command: string): boolean {
-  return new RegExp(`^${providerCliCommand(provider)}\\b`, "i").test(command.trim());
+  return inferProviderFromCommand(command) === provider;
 }
 
 export async function startResumedPtySession(
@@ -379,7 +352,7 @@ export async function restoreArchivedSession(
   const command = existing.command.trim();
   if (!command) return cleared;
   const provider = existing.provider ?? inferProviderFromCommand(command) ?? undefined;
-  if (existing.claudeSessionId && provider && isPtyProviderCommand(provider, command)) {
+  if (existing.claudeSessionId) {
     return startResumedPtySession(processes, storage, { ...existing, ...cleared }, sessionId, defaultMode, {});
   }
   return processes.start(command, existing.cwd, parseExecutionMode(existing.mode, defaultMode), undefined, {
@@ -400,7 +373,7 @@ export function getAutoResumeInitialInput(
   shortcutKey?: string,
 ): string | null {
   if (view === "terminal") {
-    const isCodexPty = Boolean(snapshot?.provider === "codex" || /^codex\b/.test(snapshot?.command.trim() ?? ""));
+    const isCodexPty = Boolean((snapshot?.provider ?? inferProviderFromCommand(snapshot?.command)) === "codex");
     if (!isCodexPty) return null;
     if (shortcutKey && shortcutKey !== "enter_text") return null;
     if (/[\x00-\x08\x0B-\x1F\x7F]/.test(input.replace(/[\r\n]+$/g, ""))) return null;

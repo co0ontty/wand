@@ -360,7 +360,7 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
               onArchive={async archived => { await archiveSidebarSession(session.id, archived); await refreshSessionLists(); }}
               row={<div className="conversation-person-session"><ImSidebarItem id={session.id}
                 title={label} titleGenerating={session.titleGenerating}
-                avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)}
+                avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus({ ...session, archived: entry.archived })}
                 summary={[sidebarSessionState(session).label, sidebarWorkspaceLabel(entry.group),
                   agentToolDisplayName(workspaceSessionProvider(session), session.engine)].filter(Boolean).join(" · ")}
                 active={session.id === selectedSessionId} onClick={() => onOpenSession?.(session.id)}/></div>}/>;
@@ -403,7 +403,7 @@ function ConversationOtherSessions({ entries, query, enabled, selectedSessionId,
           onArchive={async archived => { await archiveSidebarSession(session.id, archived); await refresh(); }}
           row={<div className="conversation-person-session"><ImSidebarItem id={session.id}
             title={label} titleGenerating={session.titleGenerating}
-            avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)}
+            avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus({ ...session, archived: entry.archived })}
             summary={[sidebarSessionState(session).label, sidebarWorkspaceLabel(entry.group),
               agentToolDisplayName(workspaceSessionProvider(session), session.engine)].filter(Boolean).join(" · ")}
             active={session.id === selectedSessionId} onClick={() => onOpenSession?.(session.id)}/></div>}/>;

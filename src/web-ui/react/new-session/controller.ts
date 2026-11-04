@@ -20,6 +20,7 @@ export interface NewTaskDraftOptions {
 
 export interface NewSessionControllerSnapshot extends DialogLifecycle {
   initialCwd: string;
+  initialText: string;
   initialEmployeeId: string;
   /** 侧栏新建空白终端等入口可指定会话形态；空串表示用默认形态。 */
   initialKind: NewSessionKind | "";
@@ -32,6 +33,7 @@ export interface NewSessionControllerSnapshot extends DialogLifecycle {
 
 export interface NewSessionOpenOptions {
   initialCwd?: string;
+  initialText?: string;
   initialEmployeeId?: string;
   initialKind?: NewSessionKind;
   workspaceId?: string;
@@ -58,6 +60,7 @@ export interface WandNewSessionController extends DialogControls {
 let runtime: NewSessionRuntimeAdapter | null = null;
 const emptyFields: Omit<NewSessionControllerSnapshot, keyof DialogLifecycle> = {
   initialCwd: "",
+  initialText: "",
   initialEmployeeId: "",
   initialKind: "",
   workspaceId: "",
@@ -75,6 +78,7 @@ export const newSessionController: WandNewSessionController = {
     if (!runtime || (dialog.snapshot.open && !dialog.snapshot.dismissable)) return false;
     runtime.onOpen();
     dialog.publish(true, {
+      initialText: options.initialText ?? "",
       initialCwd: (options.initialCwd ?? "").trim(),
       initialEmployeeId: (options.initialEmployeeId ?? "").trim(),
       initialKind: options.initialKind ?? "",

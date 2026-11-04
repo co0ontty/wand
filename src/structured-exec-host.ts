@@ -1,13 +1,9 @@
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
-
-import { signalNumberFromName } from "./signal-utils.js";
 
 /**
  * Ownership seam for structured CLI runs, mirroring TerminalHost for PTYs.
- * Persistent adapters (terminald) outlive web restarts; the in-process adapter
- * deliberately keeps the legacy "die with the server" lifecycle.
+ * Persistent adapters outlive web restarts; the local execution path lives in
+ * structured-exec-pump.ts.
  */
 
 /** Per-stream replay log cap inside the daemon. Reducers need full history. */
@@ -31,8 +27,12 @@ export interface StructuredSpawnRequest {
 }
 
 export interface StructuredRunState {
+  /** Owner and process group are absent; original exit status was not recorded. */
+  ownerLost?: boolean;
   runId: string;
   incarnationId: string;
+  /** Original execution identity retained by the persistent owner. */
+  requestId?: string;
   pid: number;
   status: "running" | "exited";
   exitCode: number | null;
@@ -56,6 +56,7 @@ export interface StructuredStreamEvent {
 }
 
 export interface StructuredExitEvent {
+  ownerLost?: boolean;
   exitCode: number | null;
   signal: number | null;
   /** false for observation/transport failure, not an OS process exit. */
@@ -120,118 +121,4 @@ export function createUtf8TextDecoder(): Utf8TextDecoder {
 /** Resolve a stable daemon-side key for a session's active structured run. */
 export function structuredRunId(sessionId: string): string {
   return `structured:${sessionId}`;
-}
-
-class InProcessStructuredExecProcess implements StructuredExecProcess {
-  readonly incarnationId = randomUUID();
-  private stdoutSeq = 0;
-  private stderrSeq = 0;
-  private readonly stdoutDecoder = createUtf8TextDecoder();
-  private readonly stderrDecoder = createUtf8TextDecoder();
-  private readonly streamEvents: StructuredStreamEvent[] = [];
-  private readonly streamListeners = new Set<(event: StructuredStreamEvent) => void>();
-  private readonly exitListeners = new Set<(event: StructuredExitEvent) => void>();
-  private exitEvent: StructuredExitEvent | null = null;
-
-  constructor(
-    readonly runId: string,
-    private readonly child: import("node:child_process").ChildProcess,
-  ) {
-    const emit = (stream: "stdout" | "stderr", data: string): void => {
-      if (!data) return;
-      const event: StructuredStreamEvent = {
-        stream,
-        data,
-        seq: stream === "stdout" ? ++this.stdoutSeq : ++this.stderrSeq,
-      };
-      this.streamEvents.push(event);
-      for (const listener of this.streamListeners) listener(event);
-    };
-    this.child.stdout?.on("data", (chunk: Buffer | string) => emit("stdout", this.stdoutDecoder.write(chunk)));
-    this.child.stderr?.on("data", (chunk: Buffer | string) => emit("stderr", this.stderrDecoder.write(chunk)));
-    const settleExit = (event: StructuredExitEvent): void => {
-      if (this.exitEvent) return;
-      // Flush pending bytes before announcing exit; decoders no-op once ended.
-      emit("stdout", this.stdoutDecoder.end());
-      emit("stderr", this.stderrDecoder.end());
-      this.exitEvent = event;
-      for (const listener of this.exitListeners) listener(event);
-    };
-    this.child.on("close", (code, signal) => {
-      settleExit({
-        exitCode: code,
-        signal: signal === null || signal === undefined ? null : signalNumberFromName(signal),
-      });
-    });
-    this.child.on("error", () => settleExit({ exitCode: null, signal: null }));
-    this.child.stdin?.on("error", () => {
-      // EPIPE is emitted by stdin, not by ChildProcess. Never claim success
-      // when a child exits before consuming its one-shot prompt.
-      settleExit({ exitCode: -1, signal: null });
-      this.interrupt();
-    });
-  }
-
-  get pid(): number {
-    return this.child.pid ?? -1;
-  }
-
-  interrupt(signal?: string): void {
-    try { this.child.kill((signal ?? "SIGTERM") as NodeJS.Signals); } catch { /* best-effort */ }
-  }
-
-  onStream(listener: (event: StructuredStreamEvent) => void): { dispose(): void } {
-    for (const event of this.streamEvents) listener(event);
-    this.streamListeners.add(listener);
-    return { dispose: () => { this.streamListeners.delete(listener); } };
-  }
-
-  onExit(listener: (event: StructuredExitEvent) => void): { dispose(): void } {
-    if (this.exitEvent) {
-      listener(this.exitEvent);
-      return { dispose: () => { /* already delivered */ } };
-    }
-    this.exitListeners.add(listener);
-    return { dispose: () => { this.exitListeners.delete(listener); } };
-  }
-}
-
-/** Legacy/local adapter and deterministic test adapter for the structured seam. */
-export class InProcessStructuredExecHost implements StructuredExecHost {
-  readonly persistent = false;
-  private readonly processes = new Map<string, InProcessStructuredExecProcess>();
-
-  async spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess> {
-    const existing = this.processes.get(request.runId);
-    if (existing && existing.pid > 0) return existing;
-    const wantsStdin = typeof request.stdinData === "string";
-    const child = spawn(request.file, request.args, {
-      cwd: request.cwd,
-      env: request.env,
-      stdio: wantsStdin ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
-    });
-    const wrapped = new InProcessStructuredExecProcess(request.runId, child);
-    if (wantsStdin) child.stdin?.end(request.stdinData);
-    // Keep exited records until forgetRun so a late attach can still answer.
-    this.processes.set(request.runId, wrapped);
-    return wrapped;
-  }
-
-  async attachRun(_runId: string): Promise<StructuredRunState | null> {
-    return null;
-  }
-
-  async adoptRun(_runId: string): Promise<StructuredExecProcess | null> {
-    return null;
-  }
-
-  async listRuns(): Promise<StructuredRunState[]> {
-    return [];
-  }
-
-  forgetRun(runId: string): void {
-    const wrapped = this.processes.get(runId);
-    this.processes.delete(runId);
-    if (wrapped) wrapped.interrupt();
-  }
 }

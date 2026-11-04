@@ -14,6 +14,8 @@ import { taskAcceptanceLabel, taskSessionIsRunning, taskSessionSummary } from ".
 import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { DEFAULT_ITERATION_NAME } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
+import { normalizeProviderId } from "../../provider-identity";
+import { sidebarSessionState } from "../workspaces/sidebar-session-state";
 import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
 import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
 import { classNames } from "../ui/class-names";
@@ -290,19 +292,13 @@ export function TaskBoardArchiveFolder({
   </div>;
 }
 
-/**
- * 会话状态的界面名，唯一来源（原来这里和「已指派的 Agent」列表各有一份映射，同概念两套词）。
- * 覆盖 SessionStatus 的全部取值 + 看板用到的 thinking / waiting-input；认不出来才回退原值，
- * 空值给「会话」，不再一律显示「空闲」把异常状态藏起来。
- */
-function sessionStatusLabel(status: string): string {
-  if (status === "queued") return "排队中";
-  if (status === "running" || status === "thinking") return "运行中";
-  if (status === "waiting-input") return "等待输入";
-  if (status === "idle") return "空闲";
-  if (status === "exited" || status === "stopped") return "已结束";
-  if (status === "failed") return "失败";
-  return status || "会话";
+/** Keep assigned-session vocabulary aligned with sidebar state. */
+function sessionStatusLabel(session: IssueSessionSummary): string {
+  return session.archived ? "已归档" : sidebarSessionState({
+    ...session,
+    provider: normalizeProviderId(session.provider) ?? undefined,
+    engine: session.engine === "sdk" ? "core" : session.engine,
+  }).label;
 }
 
 function TaskBoardListRow({
@@ -791,7 +787,7 @@ export function TaskBoardAgentSessionList({ sessions, assigned, subject, assigne
       {person.sessions.map(session => <WandButton key={session.id} kind="ghost" type="button" className="task-board-agent-session" onClick={() => onOpenSession?.(session.id)}>
         <span className={classNames("task-board-agent-session-status", issueSessionRunning(session.status) && "is-running")}/>
         <strong>{session.title || person.name}</strong>
-        <small>{[issueAgentLabel(session.provider, session.engine), wandModelDisplayName(catalog ?? null, session.provider, session.model), issueAgentEffortLabel(session.thinkingEffort), issueAgentModeLabel(session.mode), sessionStatusLabel(session.status)].join(" · ")}</small>
+        <small>{[issueAgentLabel(session.provider, session.engine), wandModelDisplayName(catalog ?? null, session.provider, session.model), issueAgentEffortLabel(session.thinkingEffort), issueAgentModeLabel(session.mode), sessionStatusLabel(session)].join(" · ")}</small>
       </WandButton>)}
     </section>)}
   </div>;

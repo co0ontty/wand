@@ -12,6 +12,7 @@ import { thinkingEffortToQoderEffort } from "./structured-provider-common.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import { createNdjsonLineHandler } from "./structured-ndjson.js";
 import { asRecord } from "./structured-content.js";
+import { isSystemAiCall } from "./system-ai-call.js";
 import { whichSync } from "./path-repair.js";
 import { sendQoderControl } from "./qoder-acp-control.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
@@ -144,8 +145,11 @@ export class QoderAcpRunner implements StructuredRunnerAdapter {
       requestId: activeRequestId,
       claudeSessionId: session.claudeSessionId ?? null,
       prompt: context.prompt,
+      resident: !isSystemAiCall(session),
       cwd: session.cwd,
-      systemPrompt: [session.systemPrompt?.trim(), session.runtimeSystemPrompt?.trim()].filter(Boolean).join("\n\n") || undefined,
+      systemPrompt: [session.systemPrompt?.trim(), session.runtimeSystemPrompt?.trim(),
+        "当前 Qoder ACP 的跨轮后台回复不可靠，Wand 使用兼容等待：原生 PostToolUse Hook 会等待 Bash 后台命令真正退出并提供任务ID、退出码和输出路径，之后本轮再继续。不要把后台启动提示当作已完成；以宿主Hook中的实际退出码为准，读取输出后交付。长驻服务会一直等待，可由用户停止；不重复启动未知状态的命令。",
+      ].filter(Boolean).join("\n\n"),
       model: session.selectedModel?.trim() || undefined,
       thinkingEffort: thinkingEffortToQoderEffort(session.thinkingEffort),
       mode: qoderAcpMode(session),
@@ -210,6 +214,10 @@ export class QoderAcpRunner implements StructuredRunnerAdapter {
             return;
           }
 
+          if (record.type === "wand_qoder_phase") {
+            context.onQoderInputEvent?.(record, reducer.state);
+            return;
+          }
           if (record.type === "wand_qoder_permission_resolved") {
             context.onQoderInputEvent?.(record, reducer.state);
             return;

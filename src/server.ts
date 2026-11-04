@@ -458,19 +458,21 @@ export async function startServer(
   const knownPtySessionIds = storage.loadSessions()
     .filter((session) => (session.sessionKind ?? "pty") === "pty" && session.status === "running")
     .map((session) => session.id);
-  // PTY 所有者可以是 legacy terminald 或常驻的 Rust Render：升级期由复合 host 按所有权
-  // 路由（旧会话留在 legacy，新会话进 Render），对客户端契约没有任何改变。
+  const useTmux = tmuxEnabled();
+  // tmux owns new executions by default. Legacy/Render only connect when they
+  // already own work; disabling tmux starts the configured daemon backend.
   const ptyHosts = options.terminalHost
     ? { host: options.terminalHost, renderHost: null, legacyHost: null }
     : await createUpgradeAwareTerminalHost(configPath, {
         engine: config.render?.engine,
         binaryPath: config.render?.binaryPath,
         knownSessionIds: knownPtySessionIds,
+        startNew: !useTmux,
       });
   const tmuxTerminals = options.terminalHost
     ? { host: ptyHosts.host, client: null, configPath, maintenanceTarget: undefined }
     : await createTmuxTerminalHost(configPath, ptyHosts.host);
-  if (tmuxEnabled()) {
+  if (useTmux) {
     const probe = probeTmuxSupport();
     if (probe.ok) {
       logInfo(`tmux runtime active (${probe.version}, ${probe.path}); terminal and structured CLI runs hosted.`);
@@ -486,21 +488,20 @@ export async function startServer(
     { resolveDecisionEvaluate: () => autoAssignEvaluate, free: openRouter });
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   systemCalls.attach({ logger: structuredLogger });
-  // Production startup provides a daemon-backed host for structured CLI runs
-  // even when Render owns every PTY. In-process hosts are for test injection.
+  // An empty persistent composite still lets the tmux wrapper start the first
+  // run directly, without requiring an otherwise unused legacy daemon.
   const legacyStructuredHost = ptyHosts.legacyHost
     ?? (ptyHosts.host instanceof TerminalDaemonClient ? ptyHosts.host : null);
   const structuredHosts = await createUpgradeAwareStructuredHost(
-    configPath, legacyStructuredHost, config.structured?.processHost,
+    configPath, legacyStructuredHost, config.structured?.processHost, !useTmux,
   );
   let structuredHost = structuredHosts.host;
   let structuredTmuxHost: StructuredTmuxHost | null = null;
   if (structuredHost?.persistent) {
-    const enabled = tmuxEnabled();
-    structuredTmuxHost = new StructuredTmuxHost(configDir, structuredHost, enabled);
+    structuredTmuxHost = new StructuredTmuxHost(configDir, structuredHost, useTmux);
     // Keep both routes available after disabling new tmux launches: existing
     // native and generic runs still belong to their original persistent owner.
-    structuredHost = new PiTmuxHost(configDir, structuredTmuxHost, enabled && process.env.WAND_PI_NATIVE_TMUX !== "0");
+    structuredHost = new PiTmuxHost(configDir, structuredTmuxHost, useTmux && process.env.WAND_PI_NATIVE_TMUX !== "0");
   }
   const structuredSessions = new StructuredSessionManager(
     storage, config, structuredLogger, {},

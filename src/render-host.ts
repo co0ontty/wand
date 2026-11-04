@@ -32,6 +32,8 @@ export interface RenderHostOptions {
   binaryPath?: string;
   /** DB 中仍在运行的 PTY，用于旧版 Render 的超大 list 失败时逐个 attach。 */
   knownSessionIds?: readonly string[];
+  /** False when tmux owns new executions; only adopt already-running daemons. */
+  startNew?: boolean;
 }
 
 /**
@@ -98,11 +100,13 @@ export interface UpgradeAwareTerminalHost {
 
 export interface RoutedTerminalHosts {
   legacy: TerminalHost | null;
-  render: TerminalHost;
+  render: TerminalHost | null;
+  newHost?: TerminalHost | null;
 }
 
 /**
- * 升级期无损路由：旧会话留在 legacy terminald，新会话一律进 Render。
+ * Existing daemon owners stay attached; newHost chooses new executions.
+ * With tmux enabled, newHost is null and this composite only adopts old work.
  * MIGRATION-COMPAT: 旧 PTY/Render v1 路由须保留到用户另行要求删除；
  * 不能因为新 Render 负责新会话就杀掉或丢弃旧 owner。
  *
@@ -112,35 +116,32 @@ export interface RoutedTerminalHosts {
 export class CompositeTerminalHost implements TerminalHost {
   readonly persistent = true;
   private readonly legacy: TerminalHost | null;
-  private readonly render: TerminalHost;
+  private readonly render: TerminalHost | null;
+  private readonly newHost: TerminalHost | null;
 
   constructor(hosts: RoutedTerminalHosts) {
     this.legacy = hosts.legacy;
     this.render = hosts.render;
+    this.newHost = hosts.newHost === undefined ? hosts.render : hosts.newHost;
   }
 
   attach(sessionId: string, afterSeq = 0): TerminalAttachResult | null {
-    // legacy 命中就直接用；返回 null 说明这条会话不属于它（新会话在 Render）。
-    const fromLegacy = this.attachFromLegacy(sessionId, afterSeq);
-    if (fromLegacy) return fromLegacy;
-    return this.render.attach(sessionId, afterSeq);
+    return this.ownerOf(sessionId, afterSeq)?.attached ?? null;
   }
 
   async createOrAttach(request: TerminalSpawnRequest, afterSeq = 0): Promise<TerminalAttachResult> {
-    if (this.legacyOwns(request.sessionId)) {
-      return this.legacy!.createOrAttach(request, afterSeq);
-    }
-    return this.render.createOrAttach(request, afterSeq);
+    const host = this.ownerOf(request.sessionId)?.host ?? this.newHost;
+    if (!host) throw new Error("No legacy/Render owner for this terminal; new executions belong to tmux");
+    return host.createOrAttach(request, afterSeq);
   }
 
   forget(sessionId: string): void {
-    this.legacy?.forget(sessionId);
-    this.render.forget(sessionId);
+    this.ownerOf(sessionId)?.host.forget(sessionId);
   }
 
   flush(): void {
     this.legacy?.flush?.();
-    this.render.flush?.();
+    this.render?.flush?.();
   }
 
   /**
@@ -149,16 +150,16 @@ export class CompositeTerminalHost implements TerminalHost {
    */
   disconnect(): void {
     this.legacy?.disconnect();
-    this.render.disconnect();
+    this.render?.disconnect();
   }
 
   /** An unavailable owner is not proof of absence; never duplicate its workload. */
-  private attachFromLegacy(sessionId: string, afterSeq: number): TerminalAttachResult | null {
-    return this.legacy?.attach(sessionId, afterSeq) ?? null;
-  }
-
-  private legacyOwns(sessionId: string): boolean {
-    return this.legacy ? this.legacy.attach(sessionId) !== null : false;
+  private ownerOf(sessionId: string, afterSeq = 0): { host: TerminalHost; attached: TerminalAttachResult } | null {
+    const legacy = this.legacy?.attach(sessionId, afterSeq);
+    const render = this.render?.attach(sessionId, afterSeq);
+    if (legacy && render) throw new Error("Conflicting legacy and Render terminal owners; refusing duplicate execution");
+    if (legacy && this.legacy) return { host: this.legacy, attached: legacy };
+    return render && this.render ? { host: this.render, attached: render } : null;
   }
 }
 
@@ -183,18 +184,45 @@ export async function createUpgradeAwareTerminalHost(
 
   const engine = resolveRenderEngine(process.env.WAND_RENDER_ENGINE, options.engine);
 
+  if (options.startNew === false) {
+    const legacy = await connectExistingTerminalHost(configPath);
+    try {
+      const render = await connectExistingRenderHost(configPath, options);
+      return {
+        host: new CompositeTerminalHost({ legacy, render, newHost: null }),
+        renderHost: render,
+        legacyHost: legacy,
+      };
+    } catch (error) {
+      legacy?.disconnect();
+      throw error;
+    }
+  }
+
   // engine=legacy 等价于当前行为：adopt 已有 terminald，不存在才 spawn。
   if (engine === "legacy") {
     const legacy = await createTerminalHost(configPath);
-    return { host: legacy, renderHost: null, legacyHost: asTerminalDaemonClient(legacy) };
+    try {
+      const render = await connectExistingRenderHost(configPath, options);
+      return {
+        host: new CompositeTerminalHost({ legacy, render, newHost: legacy }),
+        renderHost: render,
+        legacyHost: asTerminalDaemonClient(legacy),
+      };
+    } catch (error) {
+      legacy.disconnect();
+      throw error;
+    }
   }
 
   // 先 adopt 升级前的 terminald，以它的 inventory 判定旧 PTY 的 owner。
   const legacy = await connectExistingTerminalHost(configPath);
+  // An unavailable existing Render is not a reason to start another backend.
+  const existingRender = await connectExistingRenderHost(configPath, options);
   const configuredBinary = options.binaryPath?.trim();
   const binaryPath = configuredBinary || resolveRenderBinaryPath(configPath);
 
-  if (!binaryPath) {
+  if (!binaryPath && !existingRender) {
     if (engine === "rust") {
       throw new Error(
         "render.engine=rust but no wand-render binary was found (checked WAND_RENDER_BIN, render/target/{release,debug}, " +
@@ -217,8 +245,8 @@ export async function createUpgradeAwareTerminalHost(
 
   let render: RenderDaemonClient;
   try {
-    render = await createRenderTerminalHost(configPath, {
-      binaryPath,
+    render = existingRender ?? await createRenderTerminalHost(configPath, {
+      binaryPath: binaryPath ?? undefined,
       knownSessionIds: options.knownSessionIds,
     });
   } catch (error) {
@@ -247,7 +275,7 @@ export async function createUpgradeAwareTerminalHost(
     render.disconnect();
     throw error;
   }
-  const version = await readRenderBinaryVersion(binaryPath);
+  const version = binaryPath ? await readRenderBinaryVersion(binaryPath) : null;
   logInfo(
     `Render engine active (${version ? `wand-render ${version}` : "version unknown"}, ${binaryPath}); ` +
     "terminald available for structured CLI runs and pre-upgrade PTYs.",
@@ -269,6 +297,18 @@ export async function createRenderTerminalHost(
   configPath: string,
   options: { binaryPath?: string; knownSessionIds?: readonly string[] } = {},
 ): Promise<RenderDaemonClient> {
+  const binaryPath = options.binaryPath ?? resolveRenderBinaryPath(configPath);
+  const existing = await connectExistingRenderHost(configPath, { ...options, binaryPath: binaryPath ?? undefined });
+  if (existing) return existing;
+  if (!binaryPath) throw new Error("wand-render binary is required to start Render");
+  return spawnDetachedRender(configPath, binaryPath, options.knownSessionIds, createRenderDaemonReviver(configPath, binaryPath));
+}
+
+/** Observe every existing owner without starting an unused execution backend. */
+async function connectExistingRenderHost(
+  configPath: string,
+  options: { binaryPath?: string; knownSessionIds?: readonly string[] },
+): Promise<RenderDaemonClient | null> {
   const binaryPath = options.binaryPath ?? resolveRenderBinaryPath(configPath);
   // Adoption never restarts an owner. The server maintenance worker waits for
   // every execution family and closes admission before replacing idle daemons.
@@ -308,8 +348,7 @@ export async function createRenderTerminalHost(
     );
   }
 
-  if (!binaryPath) throw new Error("wand-render binary is required to start Render");
-  return spawnDetachedRender(configPath, binaryPath, options.knownSessionIds, reviveDaemon);
+  return null;
 }
 
 /**
@@ -403,15 +442,22 @@ function reapUnreadyRender(pid: number | undefined): void {
 
 
 function readLiveRenderPid(pidPath: string): number | null {
-  let pid: number;
-  try { pid = Number(readFileSync(pidPath, "utf8").trim()); }
-  catch { return null; }
-  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  let value: string;
+  try { value = readFileSync(pidPath, "utf8").trim(); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const pid = Number(value);
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(pid)) {
+    throw new Error("Render PID evidence is invalid; refusing unknown ownership");
+  }
   try {
     process.kill(pid, 0);
     return pid;
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return null;
+    throw error;
   }
 }
 

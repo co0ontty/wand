@@ -17,7 +17,9 @@ export function modeHint({ provider, mode, kind, engine }: Pick<NewSessionForm, 
       : "Grok 使用自身权限配置；需要确认的操作可能等待或被阻止。";
   }
   if (provider === "qoder") {
-    return "Qoder 在所有模式下都跳过工具权限确认。";
+    return kind !== "structured" || mode === "full-access" || mode === "managed" || mode === "auto-edit"
+      ? "Qoder 自动批准工具权限请求。"
+      : "Qoder 保留工具权限确认，需要批准时会在对话中询问。";
   }
   if (provider === "pi") {
     return engine === "sdk"
@@ -34,5 +36,5 @@ export function modeHint({ provider, mode, kind, engine }: Pick<NewSessionForm, 
 /** Visual risk marker only: it never gates submission and never grants permissions. */
 export function hasAutomaticPermissions(form: Pick<NewSessionForm, "provider" | "mode" | "kind">): boolean {
   return form.kind !== "shell" && (form.mode === "full-access" || form.mode === "managed"
-    || form.provider === "codex" || form.provider === "qoder");
+    || form.provider === "codex" || (form.provider === "qoder" && (form.kind !== "structured" || form.mode === "auto-edit")));
 }

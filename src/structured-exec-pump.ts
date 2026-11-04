@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { appendDiagnosticTail, MAX_PROTOCOL_LINE_BYTES } from "./bounded-process-output.js";
+import { appendDiagnosticTail } from "./bounded-process-output.js";
+import { BoundedProtocolLineReader } from "./structured-ndjson.js";
 import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
 
 import {
@@ -50,6 +51,8 @@ export interface StructuredCliPumpOptions<S extends StructuredRunnerTurnState> {
   requestId?: string;
   /** Provider-owned streaming projection; defaults to the strict shared line framer. */
   createProtocolReader?(onLine: (line: string) => void): { push(text: string): void; finish(): void; readonly atBoundary?: boolean };
+  /** Provider-owned diagnostic framing, before observers and the bounded stderr tail. */
+  createStderrReader?(emit: (text: string) => void): { push(text: string): void; finish(): void };
   /** Called only at native-file chunk boundaries after complete parsed events. */
   checkpoint?(source: { incarnationId: string; source: { file: string; dev: number; ino: number }; offset: number }): void;
   /** Fresh per-run state (or reducer-owned state) for the pump context. */
@@ -83,12 +86,18 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     requestStop: () => requestStop(),
   };
 
+  const emitStderrText = (text: string): void => {
+    if (!text || !observer.isActive()) return;
+    observer.onStderr?.(text);
+    ctx.stderr = appendDiagnosticTail(ctx.stderr, text);
+  };
+  const stderrReader = options.createStderrReader?.(emitStderrText);
+
   let source: PumpSource | null = null;
   let stdoutFile: PiOutputFile | null = null;
   const launchController = options.nativePi || options.requestId ? new AbortController() : null;
-  let lineBuffer = "";
-  let lineBytes = 0;
-  const protocolReader = options.createProtocolReader?.((line) => options.processLine(line, ctx));
+  const onLine = (line: string) => options.processLine(line, ctx);
+  const protocolReader = options.createProtocolReader?.(onLine) ?? new BoundedProtocolLineReader(onLine);
   // Compact Pi's transport before journaling it: a single image or redundant
   // history snapshot must not exhaust the raw-file quota before SAX can read it.
   const captureReader = options.stdoutFile ? options.createProtocolReader?.((line) => stdoutFile?.append(line + "\n")) : undefined;
@@ -134,12 +143,12 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       // Preserve already validated output even if a later source frame failed.
       stdoutFile?.drain();
       if (settled) return;
-      if (!protocolError) protocolReader?.finish();
+      if (!protocolError) protocolReader.finish();
     } catch (error) { protocolError ??= error instanceof Error ? error : new Error(String(error)); }
     if (settled) return;
     settled = true;
     try {
-      if (!protocolError && lineBuffer.trim()) options.processLine(lineBuffer, ctx);
+      stderrReader?.finish();
       const result = { ...options.finalize(ctx, exitCode, signal, spawnError), processExited };
       resolveCompletion(beforeSpawn ? { ...result, primaryError: spawnError?.message ?? "Pi 实时事件文件初始化失败。",
         inputAccepted: false, retryForbidden: true, failure: { kind: "preflight", delivery: "rejected", retryable: false } }
@@ -150,8 +159,6 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       rejectCompletion(error);
     } finally {
       stdoutFile?.dispose();
-      lineBuffer = "";
-      lineBytes = 0;
     }
     if (protocolError) interruptSource();
   };
@@ -161,19 +168,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     observer.onStdout?.(text);
     options.onStdoutText?.(text);
     try {
-      if (protocolReader) { protocolReader.push(text); return; }
-      const parts = text.split("\n");
-      for (let index = 0; index < parts.length; index++) {
-        const part = parts[index];
-        lineBytes += Buffer.byteLength(part, "utf8");
-        if (lineBytes > MAX_PROTOCOL_LINE_BYTES) throw new Error("CLI 协议单行超过 8 MiB 上限；本轮已停止，送达结果不能据此推定为未接受。");
-        lineBuffer += part;
-        if (index < parts.length - 1) {
-          options.processLine(lineBuffer, ctx);
-          lineBuffer = "";
-          lineBytes = 0;
-        }
-      }
+      protocolReader.push(text);
     } catch (error) {
       // Settle the failure before kill can synchronously deliver a close event.
       finish(1, null, undefined, error instanceof Error ? error : new Error(String(error)));
@@ -183,8 +178,8 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
 
   const handleStderrText = (text: string): void => {
     if (settled || !text || !observer.isActive()) return;
-    observer.onStderr?.(text);
-    ctx.stderr = appendDiagnosticTail(ctx.stderr, text);
+    if (stderrReader) stderrReader.push(text);
+    else emitStderrText(text);
   };
 
   const execution: StructuredRunnerExecution = {
@@ -301,7 +296,7 @@ function wireRemoteHandle(
   handle: StructuredExecProcess,
   onStdout: (text: string) => void,
   onStderr: (text: string) => void,
-  finish: (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException) => void,
+  finish: (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException, protocolError?: Error) => void,
   acknowledgeExit: () => void,
   observationFailed: () => void,
   afterStream?: (event: import("./structured-exec-host.js").StructuredStreamEvent) => void,
@@ -319,7 +314,8 @@ function wireRemoteHandle(
     ended = true;
     exit?.dispose();
     acknowledgeExit();
-    finish(event.exitCode, signalNameFromNumber(event.signal));
+    finish(event.exitCode, signalNameFromNumber(event.signal), undefined, event.ownerLost
+      ? new Error("运行进程及监管进程已消失，退出状态未能保存；本轮结果未知，已保留历史，请核对后继续。") : undefined);
   });
   if (ended) exit.dispose();
 }

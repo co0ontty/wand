@@ -7,7 +7,6 @@ import type { DecisionResult } from "./decision-types.js";
 import { getDefaultModelForProvider } from "./config.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { ChildProcess } from "node:child_process";
 import { existsSync, unlinkSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -18,7 +17,7 @@ import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
 import { ClaudePtyBridge, type PermissionResolution } from "./claude-pty-bridge.js";
-import { SessionTimers, type ProviderDiscoveryKind } from "./process-manager-timers.js";
+import { SessionTimers } from "./process-manager-timers.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { buildChildEnv, isRunningAsRoot, systemEnvValue } from "./env-utils.js";
@@ -26,7 +25,7 @@ import { coreHarnessAgentDir } from "./harness-engine.js";
 import { waitForSessionProcessExit } from "./session-artifact-cleanup.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
-import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
+import { getProviderCommandSessionId } from "./resume-policy.js";
 import { commandWithSystemPrompt, composeSystemFallback, normalizeThinkingEffort, systemPromptFlag, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToGrokEffort, thinkingEffortToPiLevel, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
 import { consumePtyInputForTopic, createPtyTopicLineBuffer, SessionNativeTitleTracker, SessionTopicCoordinator, type PtyTopicLineBuffer } from "./session-topic.js";
 import { SessionMetadataService } from "./session-metadata-service.js";
@@ -48,7 +47,7 @@ import { ProviderHistoryScanner, type ClaudeHistorySession, type CodexHistorySes
 import { logInfo } from "./runtime-log.js";
 
 import { isCommandAllowedByPrefixes } from "./process-manager-command-policy.js";
-import { getClaudeProjectDir, getLatestClaudeProjectSessionId, getLatestCodexSessionId, isClaudeSessionFileAvailable, listClaudeProjectSessionMtimes, listCodexSessionMtimes, listOpenCodeSessionMtimes, listRecentClaudeProjectSessionIds, recoverClaudeSessionIdFromHistory, recoverCodexSessionIdFromHistory, selectClaudeProjectSessionForTimeWindow, selectCodexSessionForTimeWindow, selectOpenCodeSessionForRecord, selectOpenCodeSessionForTimeWindow } from "./process-manager-native-history.js";
+import { getClaudeProjectDir, isClaudeSessionFileAvailable } from "./process-manager-native-history.js";
 import { PersistedMessageState, deriveSessionSummary, getPersistedMessageState, recoverMessagesFromSnapshot, shouldPersistMessages } from "./process-manager-message-state.js";
 export { isCommandAllowedByPrefixes };
 export type {
@@ -106,8 +105,6 @@ export interface SessionRecord extends SessionSnapshot {
   storedOutput: string;
   /** Structured conversation messages derived from PTY chat output */
   messages: ConversationTurn[];
-  /** Child process reference reserved for compatibility */
-  childProcess: ChildProcess | null;
   /** PTY bridge for parsing output and emitting events */
   ptyBridge: ClaudePtyBridge | null;
   /** 运行时每轮忙碌信号（对齐 structured inFlight）；由 bridge 事件驱动，不持久化 */
@@ -131,18 +128,10 @@ export interface SessionRecord extends SessionSnapshot {
   /** Current PTY dimensions, last applied by resize(). */
   ptyCols: number;
   ptyRows: number;
-  /** Claude task ids visible before this session started */
-  knownClaudeTaskIds?: Set<string>;
-  /** Timers for PTY turn tracking, delayed initial input and provider id discovery (see SessionTimers). */
+  /** Timers for PTY turn tracking and delayed initial input. */
   timers: SessionTimers;
   /** Assembles terminal-view keystrokes into a prompt for session titles. */
   ptyTopicDraft?: PtyTopicLineBuffer;
-  /** Claude project jsonl mtimes visible before this session started */
-  knownClaudeProjectMtimes?: Map<string, number>;
-  /** Codex rollout mtimes visible before this session started */
-  knownCodexSessionMtimes?: Map<string, number>;
-  /** OpenCode sessions visible before this PTY started, keyed by provider session id. */
-  knownOpenCodeSessionMtimes?: Map<string, number>;
   /** Auto-approval stats per session */
   approvalStats: { tool: number; command: number; file: number; total: number };
 }
@@ -294,11 +283,6 @@ export class ProcessManager extends EventEmitter {
       storage,
       free: this.free,
     });
-    let startupCodexHistory: CodexHistorySession[] | null = null;
-    const getStartupCodexHistory = (): CodexHistorySession[] => {
-      startupCodexHistory ??= this.providerHistory.listCodexHistorySessions();
-      return startupCodexHistory;
-    };
 
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "pty") {
@@ -306,33 +290,13 @@ export class ProcessManager extends EventEmitter {
       }
       this.lastPersistedMessageState.set(snapshot.id, getPersistedMessageState(snapshot.messages ?? []));
       const provider = snapshot.provider ?? inferProviderFromCommand(snapshot.command);
-      const isClaudeCmd = provider === "claude";
-      const isCodexCmd = provider === "codex";
-      const isOpenCodeCmd = provider === "opencode";
       const resumeCommandSessionId = provider
         ? getProviderCommandSessionId(provider, snapshot.command)
         : null;
       const orphanEndedAt = snapshot.status === "running" ? new Date().toISOString() : null;
-      const sessionIdFromHistory = isClaudeCmd
-        ? recoverClaudeSessionIdFromHistory({
-            ...snapshot,
-            provider: "claude",
-            endedAt: snapshot.endedAt ?? orphanEndedAt,
-          })
-        : isCodexCmd
-          ? recoverCodexSessionIdFromHistory({
-              ...snapshot,
-              provider: "codex",
-              endedAt: snapshot.endedAt ?? orphanEndedAt,
-            }, getStartupCodexHistory())
-          : isOpenCodeCmd
-            ? selectOpenCodeSessionForTimeWindow({
-                cwd: snapshot.cwd,
-                startedAt: snapshot.startedAt,
-                endedAt: snapshot.endedAt ?? orphanEndedAt,
-              })?.id ?? null
-          : null;
-      const restoredSessionId = resumeCommandSessionId ?? snapshot.claudeSessionId ?? sessionIdFromHistory;
+      // A matching cwd or history timestamp is not evidence that a native
+      // conversation belongs to this terminal. Preserve only explicit bindings.
+      const restoredSessionId = snapshot.claudeSessionId ?? resumeCommandSessionId;
       let attached: ReturnType<TerminalHost["attach"]> = null;
       let ownershipUnknown = false;
       // Runtime ownership wins over a stale UI status, including a prior
@@ -377,16 +341,10 @@ export class ProcessManager extends EventEmitter {
         else this.storage.saveSessionMetadata(updated);
       }
       if (restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {
-        const label = isCodexCmd ? "Codex thread" : isOpenCodeCmd ? "OpenCode session" : "Claude session";
-        logInfo(`Recovered ${label} ID for ${live ? "reattached" : "saved"} PTY ${snapshot.id}: ${restoredSessionId}`);
+        logInfo(`Recovered ${provider} session ID for ${live ? "reattached" : "saved"} PTY ${snapshot.id}: ${restoredSessionId}`);
       }
 
-      const record = this.makeRestoredRecord(updated, provider, live?.process ?? null, live?.state ?? null, {
-        isClaudeCmd,
-        isCodexCmd,
-        isOpenCodeCmd,
-        startupCodexHistory: getStartupCodexHistory,
-      });
+      const record = this.makeRestoredRecord(updated, provider, live?.process ?? null, live?.state ?? null);
       this.sessions.set(snapshot.id, record);
       if (live?.process) {
         this.bindRestoredTerminal(record, live);
@@ -470,12 +428,6 @@ export class ProcessManager extends EventEmitter {
     provider: SessionProvider | undefined,
     ptyProcess: TerminalProcess | null,
     terminal: TerminalSessionState | null,
-    history: {
-      isClaudeCmd: boolean;
-      isCodexCmd: boolean;
-      isOpenCodeCmd: boolean;
-      startupCodexHistory: () => CodexHistorySession[];
-    },
   ): SessionRecord {
     return {
       ...snapshot,
@@ -503,13 +455,8 @@ export class ProcessManager extends EventEmitter {
       storedOutput: terminal?.output ?? snapshot.output,
       output: terminal?.output ?? snapshot.output,
       messages: snapshot.messages ?? [],
-      childProcess: null,
       ptyBridge: null,
-      knownClaudeTaskIds: undefined,
       timers: new SessionTimers(),
-      knownClaudeProjectMtimes: history.isClaudeCmd ? listClaudeProjectSessionMtimes(snapshot.cwd) : undefined,
-      knownCodexSessionMtimes: history.isCodexCmd ? listCodexSessionMtimes(history.startupCodexHistory()) : undefined,
-      knownOpenCodeSessionMtimes: history.isOpenCodeCmd ? listOpenCodeSessionMtimes() : undefined,
       claudeSessionId: snapshot.claudeSessionId ?? null,
       approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
       titleGenerating: false,
@@ -721,9 +668,6 @@ export class ProcessManager extends EventEmitter {
     current.ptyBusy = false;
     current.pendingEscalation = null;
     current.ptyPermissionBlocked = false;
-    this.captureClaudeSessionId(current, { allowTimeWindowFallback: true });
-    this.captureCodexSessionId(current, { allowTimeWindowFallback: true });
-    this.captureOpenCodeSessionId(current, { allowTimeWindowFallback: true });
     current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
     current.exitCode = current.stopRequested ? null : exitCode;
     current.endedAt = new Date().toISOString();
@@ -767,27 +711,11 @@ export class ProcessManager extends EventEmitter {
     }
 
     const bridgeSessionId = current.ptyBridge?.getClaudeSessionId();
-    if (bridgeSessionId && bridgeSessionId !== current.claudeSessionId) {
+    if (bridgeSessionId && !current.claudeSessionId) {
       current.claudeSessionId = bridgeSessionId;
       this.markDirty(current.id, { metadata: true });
       this.providerHistory.invalidate("claude");
       logInfo(`Captured Claude session ID: ${bridgeSessionId}`);
-    }
-
-    if (current.providerCliActive && boundary.exitCode === null && !current.claudeSessionId && current.knownClaudeTaskIds) {
-      current.messages = snapshotMessages(current);
-      const discoveredTaskId = getLatestClaudeProjectSessionId({
-        cwd: current.cwd,
-        startedAt: current.startedAt,
-        knownClaudeProjectMtimes: current.knownClaudeProjectMtimes,
-        messages: current.messages,
-      });
-      if (discoveredTaskId) {
-        current.claudeSessionId = discoveredTaskId;
-        this.markDirty(current.id, { metadata: true });
-        current.knownClaudeTaskIds.add(discoveredTaskId);
-        logInfo(`Captured Claude project session ID: ${discoveredTaskId}`);
-      }
     }
 
     if (chunk && current.providerCliActive && current.autoApprovePermissions && !current.ptyBridge && current.provider === "claude") {
@@ -990,7 +918,6 @@ export class ProcessManager extends EventEmitter {
       ? undefined
       : opts?.provider ?? inferProviderFromCommand(command);
     const effectiveMode = provider === "codex" ? "full-access" : mode;
-    const isClaudeProvider = provider === "claude";
     const selectedModel = autoAssignedSelector ?? (opts?.model?.trim() || undefined);
     // Resolve before touching a resume record/worktree; invalid groups must not disturb prior work.
     // PTY has no reliable pre-input acceptance fact: use the preferred member, never replay automatically.
@@ -1002,8 +929,6 @@ export class ProcessManager extends EventEmitter {
     // 会话级系统提示：provider 有系统提示开关就走开关（PTY 与结构化行为一致），没有就并进首条输入。
     const systemPrompt = (opts?.systemPrompt ?? inheritedRole?.systemPrompt)?.trim() || undefined;
     let initialInputText = initialInput;
-    const isCodexProvider = provider === "codex";
-    const isOpenCodeProvider = provider === "opencode";
     const existingProviderSessionId = provider
       ? getProviderCommandSessionId(provider, processedCommand)
         ?? getProviderCommandSessionId(provider, command)
@@ -1017,14 +942,6 @@ export class ProcessManager extends EventEmitter {
     if (assignedProviderSessionId) {
       processedCommand = `${processedCommand} --session-id ${assignedProviderSessionId}`;
     }
-    const knownClaudeTaskIds = isClaudeProvider ? new Set(listRecentClaudeProjectSessionIds(resolvedCwd, new Date().toISOString())) : null;
-    const knownClaudeProjectMtimes = isClaudeProvider ? listClaudeProjectSessionMtimes(resolvedCwd) : null;
-    const knownCodexSessionMtimes = isCodexProvider && !existingProviderSessionId
-      ? listCodexSessionMtimes(this.providerHistory.listCodexHistorySessions())
-      : null;
-    const knownOpenCodeSessionMtimes = isOpenCodeProvider && !existingProviderSessionId
-      ? listOpenCodeSessionMtimes()
-      : null;
     const initialClaudeSessionId = existingProviderSessionId ?? assignedProviderSessionId;
     const startedAt = new Date().toISOString();
 
@@ -1079,13 +996,8 @@ export class ProcessManager extends EventEmitter {
       rememberedEscalationTargets: new Set(),
       storedOutput: "",
       messages: priorMessages,
-      childProcess: null,
       ptyBridge: null,
-      knownClaudeTaskIds: knownClaudeTaskIds ?? undefined,
       timers: new SessionTimers(),
-      knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
-      knownCodexSessionMtimes: knownCodexSessionMtimes ?? undefined,
-      knownOpenCodeSessionMtimes: knownOpenCodeSessionMtimes ?? undefined,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
       thinkingEffort: initialThinkingEffort,
@@ -1228,62 +1140,6 @@ export class ProcessManager extends EventEmitter {
       record.timers.initialInput.unref?.();
     }
 
-    // Provider-id discovery polls the provider's on-disk history after launch.
-    // Each loop is bounded (attempt cap, backoff, deadline) and is cancelled by
-    // exit, stop, cleanup and delete through record.timers.clearAll().
-    const isCurrentLiveRecord = (): SessionRecord | null => {
-      if (this.disposed) return null;
-      const current = this.sessions.get(id);
-      if (current !== record || current.ptyProcess !== child || current.status !== "running") return null;
-      return current;
-    };
-    const onDiscoveryExhausted = (kind: ProviderDiscoveryKind) => (attempts: number) => {
-      logInfo(`Stopped ${kind} session discovery for ${id} after ${attempts} attempts without a provider session id.`);
-    };
-
-    if (record.knownClaudeTaskIds) {
-      record.timers.startDiscovery("claude", () => {
-        const current = isCurrentLiveRecord();
-        if (!current || current.claudeSessionId || !current.knownClaudeTaskIds) return true;
-        if (getProviderResumeCommandSessionId("claude", current.command)) return true;
-        current.messages = snapshotMessages(current);
-        const discoveredTaskId = getLatestClaudeProjectSessionId({
-          cwd: current.cwd,
-          startedAt: current.startedAt,
-          knownClaudeProjectMtimes: current.knownClaudeProjectMtimes,
-          messages: current.messages
-        });
-        if (!discoveredTaskId) return false;
-        current.claudeSessionId = discoveredTaskId;
-        current.knownClaudeTaskIds.add(discoveredTaskId);
-        logInfo(`Discovered Claude resumable project session ID: ${discoveredTaskId}`);
-        this.persist(current);
-        return true;
-      }, onDiscoveryExhausted("claude"));
-    }
-
-    if (record.knownCodexSessionMtimes) {
-      record.timers.startDiscovery("codex", () => {
-        const current = isCurrentLiveRecord();
-        if (!current || current.claudeSessionId || !current.knownCodexSessionMtimes) return true;
-        if (getProviderResumeCommandSessionId("codex", current.command)) return true;
-        if (!this.captureCodexSessionId(current)) return false;
-        this.persist(current);
-        return true;
-      }, onDiscoveryExhausted("codex"));
-    }
-
-    if (record.knownOpenCodeSessionMtimes) {
-      record.timers.startDiscovery("opencode", () => {
-        const current = isCurrentLiveRecord();
-        if (!current || current.claudeSessionId || !current.knownOpenCodeSessionMtimes) return true;
-        if (getProviderResumeCommandSessionId("opencode", current.command)) return true;
-        if (!this.captureOpenCodeSessionId(current)) return false;
-        this.persist(current);
-        return true;
-      }, onDiscoveryExhausted("opencode"));
-    }
-
     return this.snapshot(record);
   }
 
@@ -1374,80 +1230,6 @@ export class ProcessManager extends EventEmitter {
     return this.providerHistory.deleteGrokHistoryFiles(sessionIds);
   }
 
-
-  private captureCodexSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
-    if (record.provider !== "codex" || record.claudeSessionId) {
-      return false;
-    }
-    const discoveredThreadId = record.knownCodexSessionMtimes
-      ? getLatestCodexSessionId({
-          cwd: record.cwd,
-          startedAt: record.startedAt,
-          knownCodexSessionMtimes: record.knownCodexSessionMtimes,
-        }, this.providerHistory.listCodexHistorySessions())
-      : null;
-    const fallbackThreadId = discoveredThreadId
-      ? null
-      : options?.allowTimeWindowFallback
-        ? selectCodexSessionForTimeWindow(record, this.providerHistory.listCodexHistorySessions())?.claudeSessionId ?? null
-        : null;
-    const threadId = discoveredThreadId ?? fallbackThreadId;
-    if (!threadId) {
-      return false;
-    }
-    record.claudeSessionId = threadId;
-    record.knownCodexSessionMtimes?.set(threadId, Date.now());
-    this.providerHistory.invalidate("codex");
-    logInfo(`Captured Codex thread ID: ${threadId}`);
-    return true;
-  }
-
-  private captureOpenCodeSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
-    if (record.provider !== "opencode" || record.claudeSessionId) return false;
-    const discovered = record.knownOpenCodeSessionMtimes
-      ? selectOpenCodeSessionForRecord(record)
-      : null;
-    const fallback = discovered
-      ? null
-      : options?.allowTimeWindowFallback
-        ? selectOpenCodeSessionForTimeWindow(record)
-        : null;
-    const providerSessionId = discovered?.id ?? fallback?.id ?? null;
-    if (!providerSessionId) return false;
-    record.claudeSessionId = providerSessionId;
-    record.knownOpenCodeSessionMtimes?.set(providerSessionId, discovered?.updatedAtMs ?? fallback?.updatedAtMs ?? Date.now());
-    logInfo(`Captured OpenCode session ID: ${providerSessionId}`);
-    return true;
-  }
-
-  private captureClaudeSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
-    if (record.provider !== "claude" || record.claudeSessionId) {
-      return false;
-    }
-    record.messages = snapshotMessages(record);
-    const discoveredSessionId = record.knownClaudeProjectMtimes
-      ? getLatestClaudeProjectSessionId({
-          cwd: record.cwd,
-          startedAt: record.startedAt,
-          knownClaudeProjectMtimes: record.knownClaudeProjectMtimes,
-          messages: record.messages,
-        })
-      : null;
-    const fallbackSessionId = discoveredSessionId
-      ? null
-      : options?.allowTimeWindowFallback
-        ? selectClaudeProjectSessionForTimeWindow(record)?.id ?? null
-        : null;
-    const sessionId = discoveredSessionId ?? fallbackSessionId;
-    if (!sessionId) {
-      return false;
-    }
-    record.claudeSessionId = sessionId;
-    record.knownClaudeProjectMtimes?.set(sessionId, Date.now());
-    this.providerHistory.invalidate("claude");
-    logInfo(`Captured Claude session ID: ${sessionId}`);
-    return true;
-  }
 
   get(id: string): SessionSnapshot | null {
     const record = this.sessions.get(id);
@@ -1730,9 +1512,6 @@ export class ProcessManager extends EventEmitter {
     }
     record.pendingEscalation = null;
     record.ptyPermissionBlocked = false;
-    this.captureClaudeSessionId(record, { allowTimeWindowFallback: true });
-    this.captureCodexSessionId(record, { allowTimeWindowFallback: true });
-    this.captureOpenCodeSessionId(record, { allowTimeWindowFallback: true });
     if (record.ptyBridge) {
       record.output = record.ptyBridge.getRawOutput();
       record.ptyBridge.removeAllListeners();
@@ -1772,11 +1551,6 @@ export class ProcessManager extends EventEmitter {
     record.ptyLaunchMarkerToken = null;
     this.clearPtyTurn(record);
     record.ptyBusy = false;
-    // Kill any running child process (from JSON chat turns)
-    if (record.childProcess) {
-      record.childProcess.kill();
-      record.childProcess = null;
-    }
     // Kill the PTY process
     if (record.ptyProcess) {
       record.ptyProcess.kill();
@@ -1790,11 +1564,6 @@ export class ProcessManager extends EventEmitter {
     record.exitCode = null;
     record.endedAt = new Date().toISOString();
     record.ptyProcess = null;
-    // Update lifecycle before dropping the bridge so Claude project-session
-    // discovery can still inspect the latest parsed turns.
-    this.captureClaudeSessionId(record, { allowTimeWindowFallback: true });
-    this.captureCodexSessionId(record, { allowTimeWindowFallback: true });
-    this.captureOpenCodeSessionId(record, { allowTimeWindowFallback: true });
     if (record.ptyBridge) {
       record.messages = record.ptyBridge.getMessages();
       record.ptyBridge.removeAllListeners();
@@ -1820,11 +1589,6 @@ export class ProcessManager extends EventEmitter {
     }
     if (record.status === "running") {
       if (terminateTerminal) record.stopRequested = true;
-      if (record.childProcess) {
-        const child = record.childProcess;
-        record.childProcess = null;
-        child.kill();
-      }
       if (record.ptyProcess && terminateTerminal) {
         const ptyProcess = record.ptyProcess;
         ptyProcess.kill();
@@ -1860,13 +1624,6 @@ export class ProcessManager extends EventEmitter {
         return () => listener.dispose();
       }));
     }
-    const child = record.childProcess;
-    if (child && child.exitCode === null && child.signalCode === null) {
-      waits.push(waitForSessionProcessExit((done) => {
-        child.once("close", done);
-        return () => { child.off("close", done); };
-      }));
-    }
     if (!waits.length) return null;
     const barrier = Promise.all(waits).then(() => {});
     this.nativeCleanupBarriers.set(id, barrier);
@@ -1899,10 +1656,6 @@ export class ProcessManager extends EventEmitter {
     if (record.status === "running") {
       try {
         record.stopRequested = true;
-        // For native mode, kill the child process
-        if ((record.mode === "native" || record.mode === "managed") && record.childProcess) {
-          record.childProcess.kill();
-        }
         // For PTY mode, kill the pty process
         if (record.ptyProcess) {
           record.ptyProcess.kill();
@@ -1913,7 +1666,6 @@ export class ProcessManager extends EventEmitter {
     }
 
     // Always clean up all state references, regardless of current status
-    record.childProcess = null;
     record.ptyProcess = null;
     if (record.ptyBridge) {
       record.ptyBridge.removeAllListeners();

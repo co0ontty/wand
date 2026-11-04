@@ -9,7 +9,8 @@ import { isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
 import { getErrorMessage } from "./error-utils.js";
 import { cliUnacceptedFacts, hasStructuredExecutionProgress } from "./structured-failure.js";
 
-import { settleThinkingRound, updateThinkingActivity } from "./structured-thinking.js";
+import { reconcilePiAssistantContent, startPiAssistantContent, updatePiAssistantContent } from "./pi-assistant-content.js";
+import { lastPiAssistantMessage } from "./pi-event-projection.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { PiOutputFileOptions } from "./pi-output-file.js";
 import { PiProtocolReader } from "./pi-protocol-reader.js";
@@ -25,21 +26,12 @@ import type {
   StructuredRunnerResult,
   StructuredRunnerTurnState,
 } from "./structured-runner.js";
-import type { ContentBlock, SessionSnapshot } from "./types.js";
+import type { SessionSnapshot } from "./types.js";
 
 type PiTurnState = StructuredRunnerTurnState & { pendingSessionId?: string };
 
 export function isMissingPiSession(error: string | null | undefined, sessionId: string | null | undefined): boolean {
   return !!sessionId && !!error?.includes(`No session found matching '${sessionId}'`);
-}
-
-function textContent(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map((item) => textContent(item)).filter(Boolean).join("\n");
-  const item = asRecord(value);
-  if (!item) return "";
-  if (item.type === "text" && typeof item.text === "string") return item.text;
-  return textContent(item.content);
 }
 
 export function piToolsArgs(session: Pick<SessionSnapshot, "piSettings">): string[] {
@@ -96,46 +88,7 @@ function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Reco
     };
   }
 
-  const texts: string[] = [];
-  const thinkings: string[] = [];
-  const parts = Array.isArray(message.content) ? message.content : [];
-  for (const part of parts) {
-    const item = asRecord(part);
-    if (!item) continue;
-    if (item.type === "text") {
-      const text = typeof item.text === "string" ? item.text : textContent(item);
-      if (text) texts.push(text);
-    } else if (item.type === "thinking") {
-      const thinking = typeof item.thinking === "string"
-        ? item.thinking
-        : typeof item.text === "string" ? item.text : "";
-      if (thinking) thinkings.push(thinking);
-    }
-  }
-  const thinking = thinkings.join("");
-  // 流式事件只给出边界时，最后一轮会停在空占位上。这里用完整正文补齐，
-  // 而不是因为「已经有思考块」就把真实内容整段丢掉；单轮时更长的正文为准。
-  const thinkingBlocks = state.blocks.filter((block) => block.type === "thinking");
-  const lastThinking = thinkingBlocks.at(-1) as Extract<ContentBlock, { type: "thinking" }> | undefined;
-  if (thinking) {
-    if (!lastThinking) state.blocks.push({ type: "thinking", thinking });
-    else if (!lastThinking.thinking.trim()) lastThinking.thinking = thinking;
-    else if (thinkingBlocks.length === 1 && thinking.length > lastThinking.thinking.length) {
-      lastThinking.thinking = thinking;
-    }
-  } else {
-    settleThinkingRound(state.blocks, thinking);
-  }
-  const text = texts.join("");
-  if (text) {
-    const lastText = [...state.blocks].reverse().find((block) => block.type === "text");
-    if (lastText?.type === "text") {
-      if (text.length >= lastText.text.length) lastText.text = text;
-    } else {
-      state.blocks.push({ type: "text", text });
-    }
-    if (text.length >= state.result.length) state.result = text;
-  }
+  reconcilePiAssistantContent(state, message);
 
   if (message.stopReason === "error") {
     return typeof message.errorMessage === "string" ? message.errorMessage : "Pi CLI execution failed";
@@ -151,30 +104,14 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>,
   if (event.type === "turn_start" || event.type === "message_start" || event.type === "tool_execution_start") {
     state.phase = "responding";
   }
+  if (event.type === "message_start") {
+    const message = asRecord(event.message);
+    if (message?.role === "assistant") startPiAssistantContent(state, message);
+  }
   if (event.type === "message_update") {
     state.phase = "responding";
     const update = asRecord(event.assistantMessageEvent);
-    const delta = typeof update?.delta === "string" ? update.delta : "";
-    updateThinkingActivity(state.blocks, update, observedAt);
-    if (update?.type === "text_delta" && delta) {
-      const last = state.blocks.at(-1);
-      if (last?.type === "text") last.text += delta;
-      else state.blocks.push({ type: "text", text: delta });
-      state.result += delta;
-    } else if (update?.type === "thinking_delta" && delta) {
-      const last = state.blocks.at(-1);
-      if (last?.type === "thinking") last.thinking += delta;
-      else state.blocks.push({ type: "thinking", thinking: delta });
-    } else if (update?.type === "text_end" && typeof update.content === "string" && update.content) {
-      const last = state.blocks.at(-1);
-      if (last?.type === "text") last.text = update.content;
-      else state.blocks.push({ type: "text", text: update.content });
-      if (update.content.length >= state.result.length) state.result = update.content;
-    } else if (update?.type === "thinking_end" && typeof update.content === "string" && update.content) {
-      const last = state.blocks.at(-1);
-      if (last?.type === "thinking") last.thinking = update.content;
-      else state.blocks.push({ type: "thinking", thinking: update.content });
-    }
+    if (update) updatePiAssistantContent(state, update, observedAt);
   }
   if (event.type === "tool_execution_start") {
     const id = typeof event.toolCallId === "string" ? event.toolCallId : crypto.randomUUID();
@@ -198,16 +135,12 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>,
       return error;
     }
   }
-  if (event.type === "agent_end" && Array.isArray(event.messages)) {
-    let error: string | null = null;
-    for (const raw of event.messages) {
-      const message = asRecord(raw);
-      if (message?.role === "assistant") {
-        if (state.pendingSessionId) state.sessionId = state.pendingSessionId;
-        error = applyPiAssistantMessage(state, message);
-      }
+  if (event.type === "agent_end") {
+    const message = lastPiAssistantMessage(event);
+    if (message) {
+      if (state.pendingSessionId) state.sessionId = state.pendingSessionId;
+      return applyPiAssistantMessage(state, message);
     }
-    return error;
   }
   return null;
 }

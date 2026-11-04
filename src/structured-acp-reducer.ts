@@ -142,7 +142,9 @@ export class AcpTurnReducer {
     };
     this.toolCalls.set(id, block);
     this.workObserved = true;
-    this.replace(`question:${id}`, [block]);
+    // Elicitation and the native AskUserQuestion tool share one call identity.
+    // Updating that entry also handles either event order without duplicate cards.
+    this.replace(`tool:${id}`, [block]);
     return true;
   }
 
@@ -168,6 +170,11 @@ export class AcpTurnReducer {
     if (kind === "tool_call_update") return this.upsertToolCallUpdate(update);
     if (kind === "plan") return this.upsertPlan(update);
     if (kind === "usage_update") return this.applyUsageUpdate(update);
+    if (kind === "config_option_update" && Array.isArray(update.configOptions)) {
+      const model = update.configOptions.map(asRecord).find(option => option?.id === "model");
+      if (typeof model?.currentValue === "string") this.state.model = model.currentValue;
+      return true;
+    }
     // available_commands_update / config_option_update / current_mode_update /
     // session_info_update / user_message_chunk / notice / compaction_* 不改写这一轮的转录。
     return false;
@@ -270,7 +277,10 @@ export class AcpTurnReducer {
     const hasShape = !!getString(update.kind) || !!getString(update.title) || !!asRecord(update.rawInput);
     if (!existing && hasShape) return this.upsertToolCall(update);
     if (existing && (hasShape || Array.isArray(update.locations))) {
-      const normalized = normalizeToolCall({ ...update, title: getString(update.title) || existing.description }, toolLocations(update));
+      // ACP updates are partial: a new input/title must not erase the original
+      // native tool identity (notably TodoWrite and AskUserQuestion).
+      const normalized = normalizeToolCall({ name: existing.name, ...update,
+        title: getString(update.title) || existing.description }, toolLocations(update));
       const block: ToolUseBlock = {
         ...existing,
         name: normalized.name,
@@ -314,7 +324,7 @@ export class AcpTurnReducer {
         status: status === "completed" ? "completed" : status === "in_progress" ? "in_progress" : "pending",
       };
     }).filter((todo) => todo.content.length > 0);
-    if (todos.length === 0) return false;
+    if (!Array.isArray(update.entries)) return false;
     this.workObserved = true;
     this.replace("plan", [{
       type: "tool_use",

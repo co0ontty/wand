@@ -68,6 +68,7 @@ export interface StructuredRunnerContext {
   /** Core-only: synchronously persist one queued user turn and the preceding assistant segment. */
   takeSteering?(state: StructuredRunnerTurnState): string | null;
   /** Native CLI control events, before the provider reducer mutates its segment. */
+  onCodexInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
   onPiInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
   onQoderInputEvent?(event: Record<string, unknown>, state: StructuredRunnerTurnState): void;
   requestPermission?(request: StructuredPermissionRequest): Promise<StructuredPermissionDecision | null>;

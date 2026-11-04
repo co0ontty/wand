@@ -255,6 +255,10 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
       await this.request("hello");
       const previous = new Map(this.inventory);
       const sessions = await this.request("list") as TerminalSessionState[];
+      if (!Array.isArray(sessions) || sessions.some((state) => !state || typeof state.sessionId !== "string"
+        || !state.sessionId || (state.status !== "running" && state.status !== "exited"))) {
+        throw new Error("Terminal daemon PTY inventory is unavailable; refusing unknown ownership");
+      }
       this.inventory.clear();
       for (const session of sessions) this.inventory.set(session.sessionId, session);
       if (previous.size > 0) {
@@ -338,9 +342,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
 
   async listRuns(): Promise<StructuredRunState[]> {
     const result = await this.request("structuredList") as unknown;
-    // Defensive against protocol skew with older daemons that answer unknown
-    // methods with a generic { ok: true }.
-    if (!Array.isArray(result)) return [];
+    if (!Array.isArray(result)) throw new Error("Terminal daemon structured inventory is unavailable; refusing unknown ownership");
     const runs = result as StructuredRunState[];
     for (const run of runs) this.rememberStructuredSnapshot(run);
     return runs;
@@ -697,31 +699,9 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
 
 export async function createTerminalHost(configPath: string, options: { persistent?: boolean } = {}): Promise<TerminalHost> {
   if (!options.persistent && (process.env.WAND_TEST_MODE === "1" || process.env.NODE_TEST_CONTEXT)) return new InProcessTerminalHost();
+  const existing = await connectExistingTerminalHost(configPath);
+  if (existing) return existing;
   const paths = terminalDaemonPaths(configPath);
-  const endpointExists = process.platform === "win32" || existsSync(paths.socketPath);
-
-  if (endpointExists) {
-    const adopted = await tryConnect(paths.socketPath, paths.tokenPath);
-    if (adopted) return adopted;
-    if (await probeSocket(paths.socketPath)) {
-      const starting = await waitForTerminalDaemon(paths.socketPath, paths.tokenPath, 5_000);
-      if (starting) return starting;
-      throw new Error(
-        "Existing terminal daemon rejected adoption; refusing non-persistent fallback because web restarts must not stop running tasks.",
-      );
-    }
-  }
-
-  // Service managers can start terminald and the web process at nearly the
-  // same time. The daemon writes its pid before opening the socket, so give
-  // that owner time to become ready instead of spawning a competing daemon.
-  if (hasLiveDaemonPid(paths.pidPath)) {
-    const adopted = await waitForTerminalDaemon(paths.socketPath, paths.tokenPath, 5_000);
-    if (adopted) return adopted;
-    throw new Error(
-      "Terminal daemon process is alive but its socket is unavailable; refusing non-persistent fallback because web restarts must not stop running tasks.",
-    );
-  }
 
   try {
     startDetachedDaemon(configPath);
@@ -750,15 +730,22 @@ async function waitForTerminalDaemon(
 }
 
 function hasLiveDaemonPid(pidPath: string): boolean {
-  let pid: number;
-  try { pid = Number(readFileSync(pidPath, "utf8").trim()); }
-  catch { return false; }
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  let value: string;
+  try { value = readFileSync(pidPath, "utf8").trim(); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  const pid = Number(value);
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(pid)) {
+    throw new Error("Terminal daemon PID evidence is invalid; refusing unknown ownership");
+  }
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
   }
 }
 
@@ -780,7 +767,32 @@ async function tryConnect(socketPath: string, tokenPath: string): Promise<Termin
 /** Connect to an already-running terminal daemon without starting a replacement. */
 export async function connectExistingTerminalHost(configPath: string): Promise<TerminalDaemonClient | null> {
   const paths = terminalDaemonPaths(configPath);
-  return tryConnect(paths.socketPath, paths.tokenPath);
+  const endpointExists = process.platform === "win32" || existsSync(paths.socketPath);
+
+  if (endpointExists) {
+    const adopted = await tryConnect(paths.socketPath, paths.tokenPath);
+    if (adopted) return adopted;
+    if (await probeSocket(paths.socketPath)) {
+      const starting = await waitForTerminalDaemon(paths.socketPath, paths.tokenPath, 5_000);
+      if (starting) return starting;
+      throw new Error(
+        "Existing terminal daemon rejected adoption; refusing non-persistent fallback because web restarts must not stop running tasks.",
+      );
+    }
+  }
+
+  // Service managers can start terminald and the web process at nearly the
+  // same time. The daemon writes its pid before opening the socket, so give
+  // that owner time to become ready instead of spawning a competing daemon.
+  if (hasLiveDaemonPid(paths.pidPath)) {
+    const adopted = await waitForTerminalDaemon(paths.socketPath, paths.tokenPath, 5_000);
+    if (adopted) return adopted;
+    throw new Error(
+      "Terminal daemon process is alive but its socket is unavailable; refusing non-persistent fallback because web restarts must not stop running tasks.",
+    );
+  }
+
+  return null;
 }
 
 

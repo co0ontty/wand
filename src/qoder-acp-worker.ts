@@ -5,12 +5,15 @@
  * 持久化宿主下，此工作进程与 Qoder ACP stdio 跨 Web 服务重启存活；进程内宿主不提供该保证。
  * 通过 stdin 读取单次启动配置，通过 stdout 向上抛出 NDJSON 事件，通过 control.sock 接收权限裁决、结构化回答与插话指令。
  */
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { shellQuote } from "./shell-quote.js";
+import { QoderBackgroundTasks } from "./qoder-background.js";
 
 import { MAX_PROTOCOL_LINE_BYTES } from "./bounded-process-output.js";
 import { qoderControlDirectory, type QoderControlCommand } from "./qoder-acp-control.js";
@@ -31,6 +34,10 @@ export interface QoderAcpWorkerConfig {
   thinkingEffort?: string | null;
   mode: string;
   autoApprovePermissions?: boolean;
+  /** Capability discovery never sends session/prompt. */
+  catalogOnly?: boolean;
+  /** Keep the native session and its notifications alive across prompt turns. */
+  resident?: boolean;
 }
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -61,9 +68,19 @@ const receipt = (id: string, value: unknown): void => {
   renameSync(`${file}.tmp`, file);
 };
 
-const child = spawn(config.file, ["--acp", ...(config.systemPrompt ? ["--append-system-prompt", config.systemPrompt] : [])], {
+const helperJs = fileURLToPath(new URL("./qoder-background-helper.js", import.meta.url));
+const helperArgs = existsSync(helperJs) ? [helperJs] : ["--import", import.meta.resolve("tsx"), helperJs.replace(/\.js$/, ".ts")];
+const shellPrefix = path.join(directory, "shell-prefix");
+writeFileSync(shellPrefix, "#!/bin/sh\nexec " + [process.execPath, ...helperArgs, "shell"].map(shellQuote).join(" ") + ' "$@"\n', { mode: 0o700 });
+const hookSettings = { hooks: { PostToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: process.execPath, args: [...helperArgs, "hook"], timeout: 86400 }] }] } };
+const childEnv = { ...process.env,
+  WAND_QODER_BACKGROUND_SOCKET: path.join(directory, "control.sock"),
+  WAND_QODER_ORIGINAL_SHELL_PREFIX: process.env.QODERCN_SHELL_PREFIX || process.env.QODER_SHELL_PREFIX || process.env.CLAUDE_CODE_SHELL_PREFIX || "",
+  QODER_SHELL_PREFIX: shellPrefix, QODERCN_SHELL_PREFIX: shellPrefix, CLAUDE_CODE_SHELL_PREFIX: shellPrefix,
+};
+const child = spawn(config.file, ["--acp", "--settings", JSON.stringify(hookSettings), ...(config.systemPrompt ? ["--append-system-prompt", config.systemPrompt] : [])], {
   cwd: config.cwd,
-  env: process.env,
+  env: childEnv,
   stdio: ["pipe", "pipe", "pipe"],
 });
 
@@ -76,6 +93,11 @@ let failed = false;
 let controlsInFlight = 0;
 let cancelTimer: ReturnType<typeof setTimeout> | null = null;
 let promptRpcId: number | null = null;
+let idle = false;
+let approveThisTurn = false;
+const backgroundTasks = new QoderBackgroundTasks();
+const backgroundToolCalls = new Set<string>();
+let applyNextConfig: ((selection: NonNullable<Extract<QoderControlCommand, { type: "steer" }>["config"]>) => Promise<void>) | undefined;
 const steeringPromptIds = new Set<number>();
 let imagesSupported = false;
 let steeringSupported = false;
@@ -88,7 +110,7 @@ const requests = new Map<number, {
 }>();
 
 interface PendingPermission {
-  rpcId: number;
+  rpcId: number | string;
   options: Array<Record<string, unknown>>;
   toolCall: unknown;
 }
@@ -100,7 +122,7 @@ const emitNextPermission = (): void => {
 };
 
 interface PendingElicitation {
-  rpcId: number;
+  rpcId: number | string;
   properties: Record<string, any>;
   propertyKeys: string[];
 }
@@ -146,6 +168,7 @@ const fail = (error: Error): void => {
   if (!failed && !finished) {
     emit({ jsonrpc: "2.0", id: 0, error: { code: -32603, message: error.message } });
   }
+  backgroundTasks.cancel();
   failed = true;
   finished = true;
   close();
@@ -167,20 +190,10 @@ child.once("close", (code) => {
 });
 
 function pickOptionId(options: Array<Record<string, unknown>>, decision: StructuredPermissionDecision): string | null {
-  const wanted = decision === "deny"
-    ? ["reject_once", "reject_always"]
-    : decision === "approve_turn"
-      ? ["allow_always", "allow_once"]
-      : ["allow_once", "allow_always"];
-  for (const kind of wanted) {
-    const match = options.find((option) => String(option.kind ?? "") === kind);
-    if (match) return String(match.optionId ?? "") || null;
-  }
-  const fallback = options.find((option) => {
-    const name = String(option.name ?? "").toLowerCase();
-    return decision === "deny" ? /reject|deny|no\b/.test(name) : /allow|approve|yes\b/.test(name);
-  });
-  return fallback ? String(fallback.optionId ?? "") || null : null;
+  // A host turn approval must never install a persistent native allow rule.
+  const kind = decision === "deny" ? "reject_once" : "allow_once";
+  const match = options.find(option => option.kind === kind);
+  return match && typeof match.optionId === "string" ? match.optionId : null;
 }
 
 const server = createServer((socket) => {
@@ -199,6 +212,19 @@ const server = createServer((socket) => {
     void (async () => {
       try {
         const command = JSON.parse(buffer.slice(0, buffer.indexOf("\n"))) as QoderControlCommand;
+        if (command.type === "background") {
+          if (finished || interrupted || stopping) { socket.end(JSON.stringify({ ok: false, cancelled: true }) + "\n"); return; }
+          if (command.event.kind === "task") {
+            socket.setTimeout(0);
+            if (typeof command.event.toolCallId !== "string" || !backgroundToolCalls.has(command.event.toolCallId)) {
+              throw new Error("后台工具调用不属于当前 ACP 执行。");
+            }
+            const completion = await backgroundTasks.waitForTask(command.event, nativeSessionId);
+            if (!completion.cancelled) emit({ type: "wand_qoder_background_completed", tasks: [completion] });
+            socket.end(JSON.stringify({ ok: true, completion }) + "\n");
+          } else socket.end(JSON.stringify({ ok: backgroundTasks.accept(command.event, nativeSessionId) }) + "\n");
+          return;
+        }
 
         // 1. 权限裁决
         if (command.type === "permission_resolution") {
@@ -212,6 +238,7 @@ const server = createServer((socket) => {
           const pending = pendingPermissions.get(command.escalationId);
           if (!pending) throw Object.assign(new Error("授权请求已失效或已处理。"), { rejected: true });
           const optionId = pickOptionId(pending.options, command.resolution);
+          if (optionId && command.resolution === "approve_turn") approveThisTurn = true;
           wire({
             jsonrpc: "2.0",
             id: pending.rpcId,
@@ -286,13 +313,22 @@ const server = createServer((socket) => {
             }
             throw new Error("Qoder 插话已有未确认记录，不自动重复发送。");
           }
-          if (finished || !promptRpcId || !nativeSessionId || !steeringSupported) {
+          if (finished || interrupted || !nativeSessionId || (!idle && (!promptRpcId || !steeringSupported))) {
             throw Object.assign(new Error("Qoder 当前回合不接受插话，消息已保留至下次回合。"), { rejected: true });
+          }
+          if (idle && command.config) {
+            try { await applyNextConfig?.(command.config); }
+            catch (error) { throw Object.assign(error as Error, { rejected: true }); }
           }
           receipt(command.id, { state: "pending", text: command.text });
           const steerBlocks = buildAcpPromptBlocks(command.text, imagesSupported);
           const steeringId = ++sequence;
-          steeringPromptIds.add(steeringId);
+          if (idle) {
+            idle = false;
+            promptRpcId = steeringId;
+            steeringPromptIds.clear();
+            emit({ type: "wand_qoder_phase", phase: "responding", foregroundRequestId: command.id, at: new Date().toISOString() });
+          } else steeringPromptIds.add(steeringId);
           await new Promise<void>((resolve, reject) => {
             child.stdin.write(`${JSON.stringify({
               jsonrpc: "2.0",
@@ -322,6 +358,7 @@ const server = createServer((socket) => {
         throw new Error("未知的 Qoder 控制命令。");
       } catch (error) {
         const rejected = (error as any).rejected === true;
+        emit({ type: "wand_qoder_control_error", message: (error as Error).message });
         socket.end(`${JSON.stringify({ ok: false, rejected, error: (error as Error).message })}\n`);
       } finally {
         controlsInFlight--;
@@ -339,6 +376,7 @@ await new Promise<void>((resolve, reject) => {
 chmodSync(path.join(directory, "control.sock"), 0o600);
 
 function triggerCancel(): void {
+  backgroundTasks.cancel();
   if (interrupted) return;
   interrupted = true;
   for (const [id, pending] of pendingPermissions.entries()) {
@@ -351,6 +389,7 @@ function triggerCancel(): void {
     emit({ type: "wand_qoder_question_resolved", id });
   }
   pendingElicitations.clear();
+  if (idle) { finished = true; close(); return; }
   if (nativeSessionId) {
     wire({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: nativeSessionId } });
   }
@@ -368,12 +407,12 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 const applyLine = (line: string): void => {
   try {
     const frame = JSON.parse(line) as Record<string, unknown>;
-    const id = typeof frame.id === "number" ? frame.id : null;
+    const id = typeof frame.id === "number" || typeof frame.id === "string" ? frame.id : null;
 
     if (id !== null && !frame.method) {
-      const pending = requests.get(id);
+      const pending = typeof id === "number" ? requests.get(id) : undefined;
       if (pending) {
-        requests.delete(id);
+        requests.delete(id as number);
         clearTimeout(pending.timer);
         if (frame.error) {
           const rec = frame.error as Record<string, unknown>;
@@ -382,7 +421,7 @@ const applyLine = (line: string): void => {
           pending.resolve(frame.result);
         }
       }
-      const steeringResult = steeringPromptIds.delete(id ?? -1);
+      const steeringResult = typeof id === "number" && steeringPromptIds.delete(id);
       if (id === promptRpcId || steeringResult) {
         emit(frame);
         if (frame.error) failed = true;
@@ -390,8 +429,17 @@ const applyLine = (line: string): void => {
         // never respond separately to steering IDs. Its primary result owns turn
         // completion; missing steering replies are not a reason to hang or replay.
         if (id === promptRpcId) {
-          finished = true;
-          close();
+          if (config.resident && !frame.error && !interrupted) {
+            idle = true;
+            approveThisTurn = false;
+            promptRpcId = null;
+            steeringPromptIds.clear();
+            emit({ type: "wand_qoder_phase", phase: "idle", pendingBackgroundTasks: backgroundTasks.pending, at: new Date().toISOString() });
+            emit({ type: "wand_input_boundary", id: config.requestId });
+          } else {
+            finished = true;
+            close();
+          }
         }
       }
       return;
@@ -402,8 +450,8 @@ const applyLine = (line: string): void => {
       if (frame.method === "session/request_permission") {
         const params = (frame.params && typeof frame.params === "object" ? frame.params : {}) as Record<string, unknown>;
         const options = Array.isArray(params.options) ? params.options as Array<Record<string, unknown>> : [];
-        if (config.autoApprovePermissions === true || config.mode === "yolo") {
-          const allowOption = options.find((opt) => String(opt.kind ?? "").startsWith("allow")) ?? options[0];
+        if (config.autoApprovePermissions === true || config.mode === "yolo" || approveThisTurn) {
+          const allowOption = options.find((opt) => opt.kind === "allow_once");
           const optionId = allowOption ? String(allowOption.optionId ?? "") : null;
           wire({
             jsonrpc: "2.0",
@@ -477,7 +525,17 @@ const applyLine = (line: string): void => {
 
     if (typeof frame.method === "string") {
       if (frame.method === "session/update") {
+        const params = frame.params as { sessionId?: string; update?: { sessionUpdate?: string; status?: string; toolCallId?: string; _meta?: { qoder?: { toolName?: string } } } } | undefined;
+        if (params?.sessionId && params.sessionId !== nativeSessionId) return;
+        if (params?.update?.sessionUpdate === "tool_call" && params.update._meta?.qoder?.toolName === "Bash"
+          && typeof params.update.toolCallId === "string") backgroundToolCalls.add(params.update.toolCallId);
+        // Unsolicited output is live work, not proof of background completion.
+        if (idle && ["agent_message_chunk", "agent_thought_chunk", "tool_call"].includes(params?.update?.sessionUpdate ?? "")) {
+          idle = false;
+          emit({ type: "wand_qoder_phase", phase: "responding", at: new Date().toISOString() });
+        }
         emit(frame);
+        if (params?.update?.toolCallId && ["completed", "failed"].includes(params.update.status ?? "")) backgroundToolCalls.delete(params.update.toolCallId);
       }
     }
   } catch (error) {
@@ -512,7 +570,8 @@ try {
   const init = await request("initialize", {
     protocolVersion: 1,
     clientCapabilities: {
-      fs: { readTextFile: true, writeTextFile: true },
+      // Qoder retains its native file tools; this host does not implement fs RPCs.
+      fs: { readTextFile: false, writeTextFile: false },
       elicitation: { form: {} },
     },
     clientInfo: { name: "wand", version: "1.0.0" },
@@ -549,41 +608,62 @@ try {
 
   emit({ type: "wand_qoder_session", sessionId: nativeSessionId });
 
-  const configOptions = Array.isArray(sessionInfo?.configOptions)
+  let configOptions = Array.isArray(sessionInfo?.configOptions)
     ? (sessionInfo.configOptions as AcpConfigOption[])
     : [];
 
-  const desiredConfigs: Array<[string, string]> = [];
-  if (config.mode) desiredConfigs.push(["mode", config.mode]);
-  if (config.model && config.model !== "default") {
-    const modelOpt = configOptions.find((o) => String(o.id ?? "") === "model");
-    if (Array.isArray(modelOpt?.options)) {
-      const match = modelOpt.options.find((opt) => {
-        const val = String(opt.value ?? "");
-        const name = String(opt.name ?? "");
-        return val === config.model || name === config.model || name.replace(/\s*\(default\)$/i, "").trim() === config.model;
-      });
-      if (match && match.value) desiredConfigs.push(["model", String(match.value)]);
+  const setConfig = async (configId: string, selected: string): Promise<void> => {
+    const option = configOptions.find(o => o.id === configId);
+    const match = option?.options?.find(opt => opt.value === selected || opt.name === selected
+      || String(opt.name ?? "").replace(/\s*\(default\)$/i, "").trim() === selected);
+    if (!match || typeof match.value !== "string") {
+      throw new Error(`Qoder ACP 不支持所选 ${configId}：${selected}。请重新选择，不会使用其他配置执行。`);
     }
-  }
-  if (config.thinkingEffort) {
-    const effortOpt = configOptions.find((o) => String(o.id ?? "") === "reasoning_effort");
-    if (Array.isArray(effortOpt?.options) && effortOpt.options.some((opt) => String(opt.value ?? "") === config.thinkingEffort)) {
-      desiredConfigs.push(["reasoning_effort", config.thinkingEffort]);
+    const result = await request("session/set_config_option", { sessionId: nativeSessionId, configId, value: match.value });
+    if (!Array.isArray(result?.configOptions)) throw new Error(`Qoder ACP 未确认 ${configId} 设置。`);
+    configOptions = result.configOptions;
+    if (configOptions.find(o => o.id === configId)?.currentValue !== match.value) {
+      throw new Error(`Qoder ACP ${configId} 设置未生效。`);
     }
-  }
+  };
 
-  for (const [configId, value] of desiredConfigs) {
-    try {
-      await request("session/set_config_option", { sessionId: nativeSessionId, configId, value });
-    } catch {
-      // ignore rejected config option
-    }
-  }
+  const defaultModel = configOptions.find(option => option.id === "model")?.currentValue;
+  applyNextConfig = async (selection) => {
+    await setConfig("mode", selection.mode);
+    const model = selection.model && selection.model !== "default" ? selection.model : defaultModel;
+    if (typeof model === "string") await setConfig("model", model);
+    if (selection.thinkingEffort && selection.thinkingEffort !== "auto") await setConfig("reasoning_effort", selection.thinkingEffort);
+    config.mode = selection.mode;
+    config.autoApprovePermissions = selection.autoApprovePermissions;
+    emit({ method: "session/update", params: { sessionId: nativeSessionId,
+      update: { sessionUpdate: "config_option_update", configOptions } } });
+  };
 
-  if (interrupted) {
+  if (config.catalogOnly) {
+    const options = configOptions.find(o => o.id === "model");
+    const models = [];
+    const defaultModel = options?.currentValue;
+    for (const option of options?.options ?? []) {
+      if (typeof option.value !== "string") continue;
+      await setConfig("model", option.value);
+      const efforts = (configOptions.find(o => o.id === "reasoning_effort")?.options ?? [])
+        .filter(o => typeof o.value === "string").map(o => ({ effort: o.value, description: o.name }));
+      models.push({ id: option.value, label: String(option.name ?? option.value).replace(/\s*\(default\)$/i, ""),
+        // Existing clients interpret an empty list as unknown and show legacy levels.
+        // `auto` is Wand's explicit no-override choice, never a fabricated native level.
+        reasoningEfforts: efforts.length ? efforts : [{ effort: "auto", description: "使用模型默认；此模型未提供推理强度设置" }] });
+    }
+    emit({ type: "wand_qoder_catalog", models, defaultModel });
+    finished = true;
+    close();
+  } else if (interrupted) {
     close();
   } else {
+    if (config.mode) await setConfig("mode", config.mode);
+    if (config.model && config.model !== "default") await setConfig("model", config.model);
+    if (config.thinkingEffort && config.thinkingEffort !== "auto") await setConfig("reasoning_effort", config.thinkingEffort);
+    emit({ method: "session/update", params: { sessionId: nativeSessionId,
+      update: { sessionUpdate: "config_option_update", configOptions } } });
     promptRpcId = ++sequence;
     if (config.inputMessageId) emit({ type: "wand_input_ready", id: config.inputMessageId });
     if (steeringSupported) emit({ type: "wand_input_boundary", id: config.requestId });

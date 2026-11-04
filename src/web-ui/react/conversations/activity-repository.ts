@@ -69,7 +69,8 @@ export const conversationActivityRepository = {
         if (session.sessionKind === "structured" || session.structuredState) await post("/stop", {});
         else await post("/input", { input: "\u001b", view: "chat", shortcutKey: "esc", responseMode: "accepted" });
       } else if (session.sessionKind === "structured" || session.structuredState) {
-        await post("/input", { input: operation.input, view: "chat", respondImmediately: true, idempotencyKey: createRequestId() });
+        await post("/input", { input: operation.input, expectedQuestionId: operation.toolId,
+          view: "chat", respondImmediately: true, idempotencyKey: createRequestId() });
       } else {
         // Even if navigation changes after the first packet, finish the captured
         // source session's Enter packet. Never redirect it to the new selection.

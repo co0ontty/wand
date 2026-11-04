@@ -2,7 +2,7 @@ import { CardExpandDefaults, ContentBlock, ConversationTurn, ExecutionMode, Harn
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { stampNewToolUseTimes } from "./tool-use-timestamps.js";
 import { compactTransportAvatar } from "./fixed-employee-avatar.js";
-import { CodexProtocolReducer } from "./structured-codex-protocol.js";
+import { CodexAppProtocolReducer } from "./codex-app-protocol.js";
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
 import { AcpTurnReducer, type AcpPromptResult } from "./structured-acp-reducer.js";
 import { asRecord } from "./structured-content.js";
@@ -29,11 +29,13 @@ export interface ReplayProcessor {
 export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
   const runner = session.runner;
   if (runner === "codex-cli-exec") {
-    const reducer = new CodexProtocolReducer(session);
+    const reducer = new CodexAppProtocolReducer(session);
+    let primaryError: string | null = null;
     return {
       state: reducer.state,
       stderr: "",
-      get primaryError() { return reducer.primaryError; },
+      get primaryError() { return primaryError ?? reducer.primaryError; },
+      set primaryError(value) { primaryError = value; },
       get errors() { return reducer.errors; },
       feed: (line) => {
         const trimmed = line.trim();
@@ -92,10 +94,12 @@ export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor 
   if (runner === "claude-cli-print" || runner === "qoder-cli-print") {
     const reducer = new ClaudeCliProtocolReducer(session);
     const managed = session.mode === "managed";
+    let primaryError: string | null = null;
     const processor: ReplayProcessor = {
       state: reducer.state,
       stderr: "",
-      primaryError: null,
+      get primaryError() { return primaryError ?? reducer.errorText ?? reducer.syntheticRefusalText; },
+      set primaryError(value) { primaryError = value; },
       stdoutTail: "",
       get askUserQuestionDetected() { return reducer.askUserQuestionDetected; },
       get stopReason() { return reducer.askUserQuestionDetected ? "ask-user-question" as const : undefined; },
@@ -157,7 +161,7 @@ export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor 
 
 export function recoveredCommandLabel(runner: SessionRunner | undefined): string {
   switch (runner) {
-    case "codex-cli-exec": return "codex exec";
+    case "codex-cli-exec": return "codex app-server";
     case "opencode-cli-run": return "opencode run";
     case "grok-cli-headless": return "grok -p --output-format streaming-json";
     case "qoder-cli-acp": return "qodercli --acp";

@@ -37,7 +37,8 @@ export default function wandNativeEvents(pi: ExtensionAPI): void {
         const e = event.assistantMessageEvent;
         // The protocol consumes deltas/boundaries, not a repeated copy of the entire growing message.
         append({ type: event.type, assistantMessageEvent: {
-          type: e.type, ...(e.type.endsWith("_delta") && "delta" in e ? { delta: e.delta } : {}),
+          type: e.type, ...("contentIndex" in e ? { contentIndex: e.contentIndex } : {}),
+          ...(e.type.endsWith("_delta") && "delta" in e ? { delta: e.delta } : {}),
           ...("content" in e ? { content: e.content } : {}),
         } });
       } else append(event);

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type Socket } from "node:net";
-import { chmodSync, closeSync, constants, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { directoryBytes, directoryLatestMtime } from "./directory-stats.js";
 import path from "node:path";
 import os from "node:os";
@@ -18,15 +18,20 @@ const LOG_MAX_BYTES = 8 * 1024 * 1024;
 const READ_BYTES = 64 * 1024;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 interface Job { runId: string; incarnationId: string; requestId: string; tmux: string; socket?: "default"; pane?: string; dir: string; state: string; stdout: string; stderr: string; ack: string; }
-interface WorkerState { runId: string; incarnationId: string; status: "starting" | "running" | "exited"; pid: number; workerPid?: number; supervisorPid?: number; exitCode: number | null; signal: string | null; spawnError?: string; }
+interface WorkerState { runId: string; incarnationId: string; status: "starting" | "running" | "exited"; pid: number; workerPid?: number; supervisorPid?: number; exitCode: number | null; signal: string | null; spawnError?: string; ownerLost?: boolean; }
+function absent(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid === 0 || pid === -1) return false;
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
 function atomic(file: string, value: unknown): void {
   const temporary = `${file}.${randomUUID()}.tmp`;
   writeFileSync(temporary, JSON.stringify(value) + "\n", { mode: 0o600 });
   renameSync(temporary, file);
 }
-function runtimeModule(name: string): string {
+function runtimeModuleArgs(name: string): string[] {
   const js = fileURLToPath(new URL(`./${name}.js`, import.meta.url));
-  return existsSync(js) ? js : js.replace(/\.js$/, ".ts");
+  return existsSync(js) ? [js] : ["--import", import.meta.resolve("tsx"), js.replace(/\.js$/, ".ts")];
 }
 function alive(pid: number): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
@@ -111,7 +116,8 @@ class TmuxProcess implements StructuredExecProcess {
         this.read("stdout", state.status === "exited"); this.read("stderr", state.status === "exited");
       }
       if (state.status !== "exited") return;
-      this.ended = { exitCode: state.exitCode, signal: state.signal ? signalNumberFromName(state.signal) : null };
+      this.ended = { exitCode: state.exitCode, signal: state.signal ? signalNumberFromName(state.signal) : null,
+        ...(state.ownerLost ? { ownerLost: true } : {}) };
     } catch {
       // Fail the observation, but retain the true-exit barrier and keep monitoring.
       this.reportObservationFailure();
@@ -133,6 +139,7 @@ export class StructuredTmuxHost implements StructuredExecHost {
   private readonly terminations = new Map<string, Promise<void>>();
   private readonly starts = new Map<string, { requestId: string; promise: Promise<StructuredExecProcess> }>();
   private readonly forgets = new Map<string, Promise<void>>();
+  private readonly ownerChecks = new Map<string, { pending: boolean; attemptedAt: number }>();
   constructor(configDir: string, private readonly legacy: StructuredExecHost, private readonly enabled = true) {
     this.root = path.join(configDir, "structured-tmux");
     const suffix = createHash("sha256").update(path.resolve(configDir)).digest("hex").slice(0, 12);
@@ -170,21 +177,64 @@ export class StructuredTmuxHost implements StructuredExecHost {
     const value = JSON.parse(readFileSync(job.state, "utf8")) as WorkerState;
     if (value.runId !== job.runId || value.incarnationId !== job.incarnationId) throw new Error("Structured tmux owner identity mismatch");
     if (!["starting", "running", "exited"].includes(value.status)) throw new Error("Invalid structured tmux worker status");
-    if (value.status !== "exited" && value.workerPid && !alive(value.workerPid) && !(value.supervisorPid && alive(value.supervisorPid))) {
+    if (value.status !== "exited" && value.workerPid && absent(value.workerPid) && (value.supervisorPid === undefined || absent(value.supervisorPid))) {
       // The supervisor may have atomically published exit after our initial read.
       const latest = JSON.parse(readFileSync(job.state, "utf8")) as WorkerState;
-      if (latest.runId === job.runId && latest.incarnationId === job.incarnationId && latest.status === "exited") return latest;
+      if (latest.runId !== job.runId || latest.incarnationId !== job.incarnationId) throw new Error("Structured tmux owner identity mismatch");
+      if (latest.status === "exited") return latest;
+      if (latest.status !== value.status || latest.pid !== value.pid || latest.workerPid !== value.workerPid || latest.supervisorPid !== value.supervisorPid) {
+        throw new Error("Structured tmux worker state changed; execution exit is unconfirmed");
+      }
       if (existsSync(`${job.state}.supervisor-exit`)) {
         const acknowledged = JSON.parse(readFileSync(`${job.state}.supervisor-exit`, "utf8"));
         if (acknowledged.runId === job.runId && acknowledged.incarnationId === job.incarnationId && acknowledged.pid === value.pid) {
           return { ...value, status: "exited", exitCode: 1, signal: acknowledged.signal, spawnError: "EWORKERLOST" };
         }
       }
+      this.reconcileLostOwner(job);
       throw new Error("Structured tmux worker disappeared; execution exit is unconfirmed");
     }
     // The child may have exited before the worker drains stdout/stderr and records
     // the close event. Only that generation's worker can authoritatively finish it.
     return value;
+  }
+  private reconcileLostOwner(job: Job): void {
+    const previous = this.ownerChecks.get(job.incarnationId);
+    if (previous && (previous.pending || Date.now() - previous.attemptedAt < 5000)) return;
+    const check = { pending: true, attemptedAt: Date.now() };
+    this.ownerChecks.set(job.incarnationId, check);
+    void (async () => {
+      const original = readFileSync(job.state, "utf8");
+      const state = JSON.parse(original) as WorkerState;
+      const gone = () => state.status === "running" && state.runId === job.runId
+        && state.incarnationId === job.incarnationId && state.pid > 1
+        && (state.workerPid ?? 0) > 1 && (state.supervisorPid ?? 0) > 1
+        && [state.pid, state.workerPid!, state.supervisorPid!, -state.pid].every(absent);
+      if (!gone()) return;
+      // A successful inventory is required. A failed tmux command is not proof
+      // of absence. Include retained/dead panes; never reuse an owned slot.
+      let panes: string;
+      try { panes = await this.tmux(job, ["list-panes", "-a", "-F", "#{session_name}\t#{pane_id}"]); }
+      catch (error) {
+        // tmux also exits 1 when there is no server. Only a missing socket
+        // corroborates that case; permission errors and stale sockets block.
+        if ((error as { code?: unknown }).code !== 1) return;
+        const socket = job.socket === "default"
+          ? path.join(systemEnvValue("TMUX_TMPDIR") || "/tmp", `tmux-${process.getuid?.() ?? 0}`, "default")
+          : this.legacySocket;
+        try { lstatSync(socket); return; }
+        catch (socketError) { if ((socketError as NodeJS.ErrnoException).code !== "ENOENT") return; }
+        panes = "";
+      }
+      if (panes.split("\n").some(line => line.split("\t")[0] === job.tmux)) return;
+      if (this.job(job.runId)?.incarnationId !== job.incarnationId
+          || readFileSync(job.state, "utf8") !== original || !gone()) return;
+      // Keep the failed generation and its logs. Never fabricate a waitpid
+      // receipt or an exit code; ENOSPC here leaves recovery pending for retry.
+      atomic(job.state, { ...state, status: "exited", exitCode: null, signal: null,
+        ownerLost: true, reconciledAt: new Date().toISOString() });
+    })().catch(() => { /* Unavailable evidence or storage: retain the barrier and retry. */ })
+      .finally(() => { check.pending = false; });
   }
   snapshot(job: Job): StructuredRunState {
     const state = this.state(job);
@@ -208,7 +258,8 @@ export class StructuredTmuxHost implements StructuredExecHost {
       } finally { closeSync(fd); }
     };
     const stdout = log(job.stdout); const stderr = log(job.stderr);
-    return { runId: job.runId, incarnationId: job.incarnationId, pid: state.pid,
+    return { runId: job.runId, incarnationId: job.incarnationId, requestId: job.requestId, pid: state.pid,
+      ...(state.ownerLost ? { ownerLost: true } : {}),
       status: state.status === "exited" ? "exited" : "running", exitCode: state.exitCode,
       signal: state.signal ? signalNumberFromName(state.signal) : null,
       stdoutSeq: stdout.size, stderrSeq: stderr.size, stdoutLog: stdout.text, stderrLog: stderr.text,
@@ -291,7 +342,7 @@ export class StructuredTmuxHost implements StructuredExecHost {
     const server = createServer((connection) => { if (handedOff || receiver) { connection.destroy(); return; } receiver = connection; deliver(); });
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
     chmodSync(socketPath, 0o600);
-    const command = `exec ${shellQuote(process.execPath)} ${shellQuote(runtimeModule("structured-tmux-worker"))} ${shellQuote(socketPath)} 2>>${shellQuote(path.join(dir, "worker-startup.log"))}`;
+    const command = `exec ${shellQuote(process.execPath)} ${runtimeModuleArgs("structured-tmux-worker").map(shellQuote).join(" ")} ${shellQuote(socketPath)} 2>>${shellQuote(path.join(dir, "worker-startup.log"))}`;
     try {
       let exists = false;
       try { await this.tmux(job, ["has-session", "-t", `=${job.tmux}`]); exists = true; } catch { /* name is available */ }
@@ -315,7 +366,11 @@ export class StructuredTmuxHost implements StructuredExecHost {
         if (state.status === "running" || state.status === "exited") return new TmuxProcess(job, this);
         await delay(25);
       }
-      throw Object.assign(new Error("Structured tmux startup timed out; launch delivery is unknown"), { deliveryUnknown: handedOff });
+      // Once handed to this durable generation, delayed child startup is not
+      // an execution failure. Keep observing its state/output instead of losing
+      // the live owner and reporting a synthetic exit under host load.
+      if (handedOff) return new TmuxProcess(job, this);
+      throw new Error("Structured tmux startup timed out before launch delivery");
     } catch (error) {
       if (!handedOff) {
         (receiver as Socket | null)?.destroy();

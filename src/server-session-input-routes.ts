@@ -170,6 +170,7 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
           interrupt: body.interrupt === true,
           preserveQueue: body.preserveQueue === true,
           idempotencyKey: body.idempotencyKey,
+          expectedQuestionId: body.expectedQuestionId,
           source: "user",
           onAccepted: receipt => { inputAccepted = true; inputReceipt = receipt; confirmAcceptance(); },
         });
@@ -223,6 +224,9 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
       const response = inputAccepted
         ? { statusCode: 503, payload: { error: getErrorMessage(error), errorCode: "INPUT_DELIVERY_UNCONFIRMED",
           ...(inputReceipt ? { inputReceipt } : {}), sessionId, sessionStatus: structured.get(sessionId)?.status ?? null } }
+        : (error as { code?: string })?.code === "question_changed"
+          ? { statusCode: 400, payload: { error: getErrorMessage(error), errorCode: "question_changed",
+            sessionId, sessionStatus: structured.get(sessionId)?.status ?? null } }
         : getInputErrorResponse(error, sessionId);
       console.error("[wand] Input request failed", {
         sessionId, inputLength: input.length, view: view ?? "chat",

@@ -129,6 +129,11 @@ export const conversationUi = {
   mode: (mode: "chats" | "tasks") => update({ mode, active: mode === "chats", directory: false, focusRequest: null }),
   worktree: (value: string) => update({ listWorktree: state.listWorktree === value ? "" : value }),
   clearWorktree: () => update({ listWorktree: "" }),
+  revealList: (value: { runtime: SessionRuntimeFilter; workspace: string; employee: string; worktree: string; query: string }) => {
+    // Automatic reveal keeps the user's remembered capsule choices and legacy facets.
+    update({ listRuntime: value.runtime, listWorkspace: value.workspace, listEmployee: value.employee,
+      listWorktree: value.worktree, filters: { ...state.filters, "list-query": value.query } });
+  },
   listFilter: (value: string) => update({ listFilter: normalizeListFilter(value) }),
   activityOnly: (value: boolean) => update({ activityOnly: value, listRuntime: value ? "active" : "all" }),
   listFacets: (value: ConversationListFilters) => {

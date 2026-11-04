@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { buildClaudeCliArgs } from "../src/structured-claude-adapter.js";
-import { buildCodexArgs } from "../src/structured-codex-adapter.js";
+import { buildCodexArgs, buildCodexLaunch } from "../src/structured-codex-adapter.js";
 import { buildGrokArgs } from "../src/structured-grok-adapter.js";
 import { buildOpenCodeArgs } from "../src/structured-opencode-adapter.js";
 import { buildPiArgs } from "../src/structured-pi-adapter.js";
@@ -21,7 +21,7 @@ const PROMPT = "Reply exactly WAND_MIGRATION_FIXTURE_OK. Do not use tools.";
 const OUT = path.resolve("output/structured-cli-recordings");
 const MAX_STREAM = 4 * 1024 * 1024;
 const ENUM_KEYS = new Set([
-  "type", "subtype", "role", "status", "kind", "stopReason", "stop_reason", "phase",
+  "type", "subtype", "role", "status", "kind", "stopReason", "stop_reason", "phase", "method",
   "sessionUpdate", "toolName", "tool_name", "reason", "level", "permissionMode",
 ]);
 const ID_KEYS = new Set([
@@ -96,9 +96,9 @@ async function record(provider: string): Promise<boolean> {
         stdinData = PROMPT;
         break;
       case "codex":
-        file = "codex";
+        file = process.execPath;
         args = buildCodexArgs(session);
-        stdinData = PROMPT;
+        stdinData = JSON.stringify(buildCodexLaunch(session, PROMPT, process.env)) + "\n";
         break;
       case "opencode":
         file = "opencode";
@@ -173,7 +173,9 @@ async function record(provider: string): Promise<boolean> {
       const event = item as Record<string, unknown>;
       if (event.is_error === true || event.type === "error") return false;
       if (provider === "claude" || provider === "qoder") return event.type === "result" && event.subtype === "success";
-      if (provider === "codex") return event.type === "turn.completed";
+      if (provider === "codex") return event.type === "wand_codex_event"
+        && (event.event as { method?: string; params?: { turn?: { status?: string } } })?.method === "turn/completed"
+        && (event.event as { params?: { turn?: { status?: string } } }).params?.turn?.status === "completed";
       if (provider === "opencode") return event.type === "step_finish";
       if (provider === "grok") return event.type === "end";
       return event.type === "agent_end";

@@ -22,6 +22,21 @@ body { margin: 0; height: 100dvh; overflow: hidden; font-family: var(--font-sans
 .wand-provider-logo { min-width: 12px; min-height: 12px; }
 .wand-employee-avatar-provider .wand-provider-logo { width: 14px; height: 14px; }
 .wand-employee-avatar-provider .ant-avatar.ant-avatar-square { border-radius:4px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border-subtle); }
+/* Logo activity uses the same semantic colors as sidebarGlowColor; shadows do not change row geometry. */
+.wand-logo-glow.glow-queued { --wand-logo-glow-color: var(--text-secondary); }
+.wand-logo-glow:is(.glow-running, .glow-just-completed) { --wand-logo-glow-color: var(--success, #4f7a58); }
+.wand-logo-glow.glow-thinking { --wand-logo-glow-color: var(--info, #4a6fa5); }
+.wand-logo-glow:is(.glow-permission, .glow-waiting-input, .glow-reconnecting) { --wand-logo-glow-color: var(--warning, #a96a2f); }
+.wand-logo-glow.glow-failed { --wand-logo-glow-color: var(--danger, #b24f45); }
+.wand-logo-glow:not(.glow-none):not([data-glow="none"]) {
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--wand-logo-glow-color, transparent) 65%, transparent));
+  animation: wand-logo-breathe var(--motion-spin) var(--ease-in-out-smooth) infinite;
+}
+@keyframes wand-logo-breathe {
+  0%, 100% { filter: drop-shadow(0 0 1px color-mix(in srgb, var(--wand-logo-glow-color, transparent) 35%, transparent)); }
+  50% { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--wand-logo-glow-color, transparent) 85%, transparent)); }
+}
+@media (prefers-reduced-motion: reduce) { .wand-logo-glow { animation: none !important; } }
 /* Real AI title generation; the text stays readable and the sweep never changes layout. */
 .title-generating { position: relative; }
 .title-generating::after { content: ""; position: absolute; inset: auto auto 0 0; width: 30%; height: 2px; border-radius: var(--radius-full); background: var(--accent); pointer-events: none; animation: session-title-generate var(--motion-spin) var(--ease-in-out-smooth) infinite; }
@@ -1318,3 +1333,17 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 
 .task-detail-navigation { position: sticky; bottom: 0; z-index: 10; display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px max(12px, env(safe-area-inset-bottom)); pointer-events: none; }
 .task-detail-navigation > button { pointer-events: auto; background: var(--bg-primary); }
+
+/* Directory hierarchy in the unified session list; controls retain shared tokens. */
+.session-directory { margin-bottom: 8px; }
+.session-directory-heading { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); text-align: left; cursor: pointer; }
+.session-directory-heading:hover { background: var(--bg-hover); }
+.session-directory-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.session-directory-label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }
+.session-directory-label strong { color: var(--text-primary); font-size: 13px; }
+.session-directory-label > span, .session-directory-count { font-size: 11px; }
+.session-directory-count { flex-shrink: 0; }
+.session-directory-children { margin-left: 12px; }
+.session-directory-sessions { margin-inline-start: 40px; }
+.session-directory-sessions-direct { margin-inline-start: 28px; }
+.session-worktree-group { margin-top: 4px; }

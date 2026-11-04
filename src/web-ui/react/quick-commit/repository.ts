@@ -136,7 +136,7 @@ export class HttpQuickCommitRepository implements QuickCommitRepository {
     options: QuickCommitLoadOptions = {},
   ): Promise<QuickCommitStatus> {
     const response = await this.fetchImpl(
-      `/api/sessions/${encodeURIComponent(sessionId)}/git-status`,
+      `/api/sessions/${encodeURIComponent(sessionId)}/git-status?fresh=1`,
       { credentials: "same-origin", signal: options.signal },
     );
     return normalizeQuickCommitStatus(await readRecord(response, "无法加载 Git 状态。"));

@@ -1,4 +1,5 @@
 // Legacy PTY transcript projection stays synchronous and shared; no rendering or session state.
+import { inferProviderFromCommand } from "../../provider-catalog.js";
 import { codexActivityRe, codexFooterRe, isPtyCodexNoiseLine, isPtyTranscriptNoiseLine } from "./pty-noise.js";
 
 function stripAnsi(text) {
@@ -28,7 +29,7 @@ export function parseMessages(output, command) {
         var carriageReturn = String.fromCharCode(13);
         var esc = String.fromCharCode(27);
 
-        if (/^codex\b/.test(String(command || "").trim())) {
+        if (inferProviderFromCommand(command) === "codex") {
           function stripCodexSegment(raw) {
             return String(raw || "")
               .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")

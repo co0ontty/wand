@@ -333,6 +333,10 @@ export function parseSessionOptions(raw: string | null): DurableSessionOptions {
           ...(isRecord(value.handoff) && typeof value.handoff.id === "string"
             && typeof value.handoff.boundaryId === "string" && typeof value.handoff.incarnationId === "string"
             ? { handoff: { id: value.handoff.id, boundaryId: value.handoff.boundaryId, incarnationId: value.handoff.incarnationId } } : {}),
+          ...(typeof value.nativeQuestionId === "string" ? { nativeQuestionId: value.nativeQuestionId } : {}),
+          ...(value.nativeSteeringRejected === true ? { nativeSteeringRejected: true } : {}),
+          ...(value.nativeSteeringRequested === true ? { nativeSteeringRequested: true } : {}),
+          ...(typeof value.nativeInputError === "string" ? { nativeInputError: value.nativeInputError } : {}),
           ...(typeof value.acceptanceId === "string" ? { acceptanceId: value.acceptanceId } : {}) }
         : { source: "task", enqueuedAt: new Date(0).toISOString() });
   }

@@ -497,6 +497,7 @@ export function renderAppShell() {
               '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
             '</div>' +
             '<div class="composer-surface">' +
+            '<div class="composer-permission-row"><span class="composer-badge-host hidden" data-composer-badge-host="permissions"></span></div>' +
             '<div class="composer-main-row">' +
               '<div id="terminal-shortcuts" class="terminal-shortcuts" hidden></div>' +
               '<div class="composer-input-wrap">' +
@@ -522,7 +523,6 @@ export function renderAppShell() {
                   // 徽章内容由 React portal 渲染（见 composer-badges 组件），宿主常驻，
                   // 空状态用宿主上的 `.hidden` 表达。
                   '<span class="composer-badge-host" data-composer-badge-host="auto-approve"></span>' +
-                  '<span class="composer-badge-host hidden" data-composer-badge-host="permissions"></span>' +
                   '<span class="composer-badge-host" data-composer-badge-host="approval-stats"></span>' +
                   // 输入区的原位结果行：空闲时常驻快捷键教学（这句话原来挂在已死的
                   // .input-hint 上，没有任何宿主），发送时依次显示 加载 → 完成/失败 → 结果，

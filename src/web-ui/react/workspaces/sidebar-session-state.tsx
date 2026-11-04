@@ -51,6 +51,7 @@ export function glowVisualStatus(glow: GlowStatus): TaskExecutionVisualStatus | 
 /** 计算左侧 Logo 的呼吸灯状态 */
 export function sessionGlowStatus(session: {
   status?: string;
+  archived?: boolean;
   permissionBlocked?: boolean;
   inFlight?: boolean;
   executionStatus?: "running" | "queued" | null;
@@ -64,6 +65,7 @@ export function sessionGlowStatus(session: {
   completionRevision?: number;
   viewedCompletionRevision?: number;
 }): GlowStatus {
+  if (session.archived) return "none";
   if (session.permissionBlocked || session.status === "permission-blocked") {
     return "permission";
   }

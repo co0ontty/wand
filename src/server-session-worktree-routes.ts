@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { Express, Response } from "express";
 
 import { SessionSnapshot } from "./types.js";
@@ -26,6 +27,20 @@ import { resolveExplicitOrFallbackModel } from "./session-model.js";
 
 /** Worktree merge/cleanup, git status/commit/push and iteration context routes. */
 export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteContext): void {
+  // Sessions sharing a worktree share in-flight reads; settled results are not cached.
+  const gitStatusReads = new Map<string, Promise<Awaited<ReturnType<typeof getGitStatusAsync>> & { worktreeCount: number }>>();
+  const readGitStatus = (cwd: string, fresh = false): Promise<Awaited<ReturnType<typeof getGitStatusAsync>> & { worktreeCount: number }> => {
+    const key = path.resolve(cwd);
+    const existing = gitStatusReads.get(key);
+    if (existing) return fresh ? existing.catch(() => {}).then(() => readGitStatus(cwd)) : existing;
+    const pending = (async () => {
+      const status = await getGitStatusAsync(cwd);
+      const worktreeCount = status.isGit ? Math.max(0, (await listGitWorktrees(cwd)).length - 1) : 0;
+      return { ...status, worktreeCount };
+    })().finally(() => { if (gitStatusReads.get(key) === pending) gitStatusReads.delete(key); });
+    gitStatusReads.set(key, pending);
+    return pending;
+  };
   const {
     storage, config, sessions, free, structured, onSessionCreated,
     wantsCompactTools, sessionResponseDTO,
@@ -127,9 +142,7 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
       return;
     }
     try {
-      const status = await getGitStatusAsync(snapshot.cwd);
-      const worktreeCount = status.isGit ? Math.max(0, (await listGitWorktrees(snapshot.cwd)).length - 1) : 0;
-      res.json({ ...status, worktreeCount });
+      res.json(await readGitStatus(snapshot.cwd, req.query.fresh === "1"));
     } catch (error) {
       res.json({ isGit: false, error: getErrorMessage(error, "无法读取 git 状态。") });
     }

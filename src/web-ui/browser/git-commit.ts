@@ -21,19 +21,19 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
         notifyLegacyUiChange("topbar:git");
       }
 
-      /** 会话工作期间工作区随时会变，徽章不能只在切会话时取一次快照。 */
+      /** 工作区变更信号合并刷新；切换和回前台主动取数，空闲期间不轮询。 */
       var gitStatusRefresh = createGitStatusRefresh({
         coalesceMs: 1200,
-        // 裸 shell、外部编辑器、别的终端手敲 git 都没有可用信号，只能兜底轮询。
-        pollMs: 20000,
         selectedSessionId: function() { return state.selectedId; },
-        hidden: function() { return document.hidden; },
         refresh: function(sessionId: string) { void loadGitStatus(sessionId, { force: true }); },
       });
 
-      /** 已经取过的状态按会话缓存：切会话时先用它顶上，徽章不会闪一下就没。 */
+      /** 已经取过的状态按会话缓存：切会话时先用缓存，徽章不会闪一下就没。 */
       var gitStatusCache = createGitStatusCache<any>();
       const gitStatusRequests = new Map<string, Promise<any>>();
+      const gitStatusInvalidations = new Map<string, number>();
+      const gitStatusReadInvalidations = new Map<string, number>();
+      const gitStatusFollowups = new Set<string>();
 
       /**
        * 写入展示状态。`fetched` 为 false 表示值来自缓存（不计入节流时间）。
@@ -64,29 +64,39 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
       }
 
       /** 工作区可能变了（回合结束/进程退出）→ 合并成一次强制刷新。 */
-      export function scheduleGitStatusRefresh() {
+      export function scheduleGitStatusRefresh(changedSessionId?: string) {
+        const selectedId = state.selectedId;
+        if (!selectedId) return;
+        if (changedSessionId && changedSessionId !== selectedId) {
+          const changed = state.sessions.find(session => session.id === changedSessionId);
+          const selected = state.sessions.find(session => session.id === selectedId);
+          if (!changed?.cwd || changed.cwd !== selected?.cwd) return;
+        }
+        gitStatusInvalidations.set(selectedId, (gitStatusInvalidations.get(selectedId) ?? 0) + 1);
         gitStatusRefresh.schedule();
       }
 
-      export function startGitStatusPolling() {
-        gitStatusRefresh.startPolling();
-      }
-
-      export function stopGitStatusPolling() {
+      export function stopGitStatusRefresh() {
         gitStatusRefresh.stop();
       }
 
       export function loadGitStatus(sessionId: any, options?: any) {
         if (!sessionId) return Promise.resolve(null);
         var force = options && options.force;
-        // Same session, fetched within 1s, and no force → skip.
-        var now = Date.now();
-        if (!force && state.gitStatusSessionId === sessionId && state.gitStatus && (now - state.gitStatusLastFetchAt) < 1000) {
-          return Promise.resolve(state.gitStatus);
-        }
-        if (!force && gitStatusRequests.has(sessionId)) {
+        // Force bypasses a settled cache, never a request already reading this session.
+        if (gitStatusRequests.has(sessionId)) {
+          if (force && (gitStatusReadInvalidations.get(sessionId) ?? 0) !== (gitStatusInvalidations.get(sessionId) ?? 0)) {
+            gitStatusFollowups.add(sessionId);
+          }
           return gitStatusRequests.get(sessionId)!;
         }
+        const cached = !force ? gitStatusCache.peek(sessionId, 1000) : null;
+        if (cached) return Promise.resolve(cached);
+        // This read covers all signals received before it starts, including a
+        // second signal queued while an older read was waiting to finish.
+        if (sessionId === state.selectedId) gitStatusRefresh.stop();
+        const invalidation = gitStatusInvalidations.get(sessionId) ?? 0;
+        gitStatusReadInvalidations.set(sessionId, invalidation);
         var requestedAt = nextGitStatusRequestTime();
         var promise = fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/git-status", {
           credentials: "same-origin"
@@ -98,7 +108,10 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
             return res.json();
           })
           .then(function(data: any) {
-            applyGitStatusSnapshot(sessionId, data || { isGit: false }, requestedAt);
+            if (data?.error) throw new Error("git-status failed");
+            if (invalidation === (gitStatusInvalidations.get(sessionId) ?? 0)) {
+              applyGitStatusSnapshot(sessionId, data || { isGit: false }, requestedAt);
+            }
             return data;
           })
           .catch(function() {
@@ -112,6 +125,13 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
           .finally(function() {
             if (gitStatusRequests.get(sessionId) === promise) {
               gitStatusRequests.delete(sessionId);
+              gitStatusReadInvalidations.delete(sessionId);
+              // A change during the read needs one trailing read. Repeated
+              // completion signals share it instead of starting parallel scans.
+              const followup = gitStatusFollowups.delete(sessionId);
+              if (followup && sessionId === state.selectedId && invalidation !== (gitStatusInvalidations.get(sessionId) ?? 0)) {
+                void loadGitStatus(sessionId, { force: true });
+              }
             }
           });
         gitStatusRequests.set(sessionId, promise);

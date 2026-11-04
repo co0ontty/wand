@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,20 +35,44 @@ export async function readPublication(version, tag, fetchImpl = fetch) {
   }
   const taggedVersion = typeof tags[tag] === "string" ? tags[tag] : null;
   let downloadable = false;
+  let tarballError = null;
   if (document) {
-    const tarball = new URL(document.dist?.tarball);
-    if (tarball.origin !== "https://registry.npmjs.org") throw new Error("Registry returned an unexpected tarball origin");
     try {
+      const tarball = new URL(document.dist?.tarball);
+      if (tarball.origin !== "https://registry.npmjs.org") throw new Error("Registry returned an unexpected tarball origin");
+      const integrity = typeof document.dist?.integrity === "string" ? document.dist.integrity : "";
+      const digests = integrity.trim().split(/\s+/)
+        .map(entry => /^(sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})(?:\?\S*)?$/.exec(entry)).filter(Boolean);
+      const algorithm = ["sha512", "sha384", "sha256"].find(candidate => digests.some(digest => digest[1] === candidate));
+      if (!algorithm) throw new Error("Registry tarball integrity is missing or unsupported");
+      tarball.searchParams.set("wand-verification", randomUUID());
       const response = await fetchImpl(tarball, {
-        method: "HEAD", headers: { "Cache-Control": "no-cache" },
-        cache: "no-store", signal: AbortSignal.timeout(15_000),
+        method: "GET", headers: { "Cache-Control": "no-cache" }, redirect: "error",
+        cache: "no-store", signal: AbortSignal.timeout(60_000),
       });
-      downloadable = response.status === 200;
-    } catch {
-      // Preserve the known version so a delayed or unavailable blob cannot cause a republish.
+      if (response.status !== 200) {
+        await response.body?.cancel();
+        throw new Error(`Registry tarball download returned HTTP ${response.status}`);
+      }
+      if (!response.body) throw new Error("Registry tarball download returned no body");
+      const hash = createHash(algorithm);
+      let bytes = 0;
+      for await (const chunk of response.body) {
+        bytes += chunk.byteLength;
+        hash.update(chunk);
+      }
+      if (bytes === 0) throw new Error("Registry tarball download was empty");
+      const actual = hash.digest("base64");
+      if (!digests.some(digest => digest[1] === algorithm && digest[2] === actual)) {
+        throw new Error(`Registry tarball ${algorithm} integrity mismatch`);
+      }
+      downloadable = true;
+    } catch (error) {
+      // Retain known metadata on every blob failure; never reupload an existing version.
+      tarballError = error instanceof Error ? error.message : "Registry tarball verification failed";
     }
   }
-  return { exists: document?.version === version, tagged: taggedVersion === version, taggedVersion, downloadable };
+  return { exists: document?.version === version, tagged: taggedVersion === version, taggedVersion, downloadable, tarballError };
 }
 
 function newerStableVersion(actual, expected) {
@@ -98,7 +122,7 @@ export async function publish(version, tag, overrides = {}) {
       const state = await read();
       if (confirmed(state)) return true;
       if (deps.now() >= deadline) return false;
-      deps.log(`Waiting for ${PACKAGE}@${version}: version visible=${state.exists}, tarball available=${!!state.downloadable}, ${tag}=${state.taggedVersion ?? "unavailable"}...`);
+      deps.log(`Waiting for ${PACKAGE}@${version}: version visible=${state.exists}, tarball verified=${!!state.downloadable}${state.tarballError ? ` (${state.tarballError})` : ""}, ${tag}=${state.taggedVersion ?? "unavailable"}...`);
       await deps.sleep(Math.min(10_000, deadline - deps.now()));
     }
   };

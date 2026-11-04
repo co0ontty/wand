@@ -33,6 +33,7 @@ export class CodexAppProtocolReducer {
       return true;
     }
     if (record.type === "wand_codex_question") {
+      if (typeof record.id !== "string" || this.state.blocks.some(block => block.type === "tool_use" && block.id === record.id)) return false;
       const questions = Array.isArray(record.questions) ? record.questions : [];
       this.state.blocks.push({ type: "tool_use", id: String(record.id), name: "AskUserQuestion",
         input: { questions: questions.map((q: any) => ({ id: q.id, header: q.header, question: q.question,
@@ -52,6 +53,7 @@ export class CodexAppProtocolReducer {
     const method = event?.method;
     if (method === "turn/completed") {
       if (params.turn?.status === "failed") this.reducer.apply({ type: "turn.failed", error: params.turn.error });
+      else if (params.turn?.status === "interrupted") this.reducer.apply({ type: "turn.failed", error: { message: "Codex 回合已中断。" } });
       return true;
     }
     if (method === "error" && !params.willRetry) {

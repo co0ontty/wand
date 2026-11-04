@@ -498,7 +498,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
           res.status(400).json({ error: "结构化会话不支持按 Claude Session ID 恢复。" });
           return;
         }
-        if (!/^claude\b/.test(command)) {
+        if (inferProviderFromCommand(command) !== "claude") {
           res.status(400).json({ error: "只有 Claude 命令支持按 Claude Session ID 恢复。" });
           return;
         }

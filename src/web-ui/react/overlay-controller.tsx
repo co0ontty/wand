@@ -1,6 +1,7 @@
 import { showWandToast, type WandToastTone } from "./ui/toast";
 import type { WandButtonKind } from "./ui/button";
 import type { WandDialogTone } from "./ui/dialog";
+import { describeError } from "./errors";
 import * as React from "react";
 
 interface OverlayDialogAction<T> {
@@ -16,6 +17,8 @@ export interface OverlayDialogOptions<T> {
   tone?: WandDialogTone;
   icon?: string;
   actions: ReadonlyArray<OverlayDialogAction<T>>;
+  /** Keep the same dialog and draft until the chosen action succeeds. */
+  onAction?(action: T, inputValue?: string): void | Promise<void>;
   input?: {
     value?: string;
     placeholder?: string;
@@ -56,6 +59,8 @@ export interface WandOverlay {
 interface DialogEntry {
   id: number;
   options: OverlayDialogOptions<unknown>;
+  busy: boolean;
+  error: string;
   resolve(result: OverlayDialogResult<unknown>): void;
 }
 
@@ -84,6 +89,8 @@ export const wandOverlay: WandOverlay = {
         {
           id,
           options: options as OverlayDialogOptions<unknown>,
+          busy: false,
+          error: "",
           resolve: resolve as (result: OverlayDialogResult<unknown>) => void,
         },
       ];
@@ -99,7 +106,7 @@ export const wandOverlay: WandOverlay = {
 
   closeTopmost(): boolean {
     const entry = dialogQueue[0];
-    if (!entry || entry.options.dismissable === false) return false;
+    if (!entry || entry.busy || entry.options.dismissable === false) return false;
     overlayStore.completeDialog(entry.id, { dismissed: true });
     return true;
   },
@@ -121,12 +128,31 @@ export const overlayStore = {
     if (entry) this.completeDialog(entry.id, { dismissed: true });
   },
 
+  async submitDialog(id: number, action: unknown, inputValue?: string): Promise<void> {
+    const entry = dialogQueue.find(dialog => dialog.id === id);
+    if (!entry || entry.busy) return;
+    if (entry.options.onAction) {
+      entry.busy = true;
+      entry.error = "";
+      publish();
+      try { await entry.options.onAction(action, inputValue); }
+      catch (cause) {
+        entry.busy = false;
+        entry.error = describeError(cause, "操作失败，请重试。");
+        publish();
+        return;
+      }
+      entry.busy = false;
+    }
+    this.completeDialog(id, { dismissed: false, action, inputValue });
+  },
+
   completeDialog(
     id: number,
     result: OverlayDialogResult<unknown>,
   ): void {
     const entry = dialogQueue.find((dialog) => dialog.id === id);
-    if (!entry) return;
+    if (!entry || entry.busy) return;
     dialogQueue = dialogQueue.filter((dialog) => dialog.id !== id);
     publish();
     entry.resolve(result);

@@ -1363,6 +1363,7 @@ import { compactSessionFetch } from "./session-fetch.js";
           busy: queueBarEditing.has(session.id) || queueBarMutating.has(session.id),
           retrieval: retrieval,
           removal: removal,
+          nativePromptQueueing: session.runner === "qoder-cli-acp",
           steering: session.structuredState?.inputMode === "steer" || (session.provider === "pi" && session.structuredState?.engine === "core"),
           onDragStart: queueBarDragStart,
           onAction: (action, index, expected) => {
@@ -1566,9 +1567,9 @@ import { compactSessionFetch } from "./session-fetch.js";
         // 接下来发生什么；不再是右上角飘走的气泡。promote POST 同样要等整轮才
         // resolve，所以带 token + 接受文案：接受信号（或兜底收口）才写「已送达」。
         var promoteToken = flashComposerSending(
-          inFlight ? "正在插队发送，准备打断当前回复…" : "正在发送这条…",
+          inFlight ? session.runner === "qoder-cli-acp" ? "正在提交插话，当前命令继续运行…" : "正在插队发送，准备打断当前回复…" : "正在发送这条…",
           session.id,
-          inFlight ? "已中断上一条回复，这条立即发送。" : "已立即发送这条消息。",
+          inFlight ? session.runner === "qoder-cli-acp" ? "插话已提交给 Qoder，等待处理。" : "已中断上一条回复，这条立即发送。" : "已立即发送这条消息。",
         );
 
         compactSessionFetch("/api/structured-sessions/" + session.id + "/queued/" + index + "/promote", {

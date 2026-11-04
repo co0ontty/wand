@@ -20,6 +20,11 @@ export interface CodexControlInput {
 
 export function sendCodexControl(sessionId: string, requestId: string, input: CodexControlInput): Promise<void> {
   return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(input) + "\n";
+    if (Buffer.byteLength(payload) > 1024 * 1024) {
+      reject(Object.assign(new Error("Codex 输入过大，尚未发送。"), { definiteRejection: true }));
+      return;
+    }
     const socket = createConnection(path.join(codexControlDirectory(sessionId, requestId), "control.sock"));
     let buffer = "";
     let settled = false;
@@ -34,7 +39,7 @@ export function sendCodexControl(sessionId: string, requestId: string, input: Co
     socket.setTimeout(30_000, () => finish(new Error("Codex 输入送达结果未知，请勿重复提交。")));
     socket.once("connect", () => {
       connected = true;
-      socket.write(JSON.stringify(input) + "\n");
+      socket.write(payload);
     });
     socket.on("data", chunk => {
       buffer += chunk;
@@ -54,7 +59,9 @@ export function resolveCodexInput(sessionId: string, requestId: string, handoff:
   if (!/^[a-f0-9-]{36}$/i.test(handoff.id)) return { state: "unknown" };
   try {
     const receipt = JSON.parse(readFileSync(path.join(codexControlDirectory(sessionId, requestId), handoff.id + ".json"), "utf8"));
-    if (receipt.state === "committed") return { state: "committed", offer: { ...handoff, text: receipt.text } };
+    if (receipt.state === "committed" && typeof receipt.text === "string") {
+      return { state: "committed", offer: { ...handoff, text: receipt.text } };
+    }
     if (receipt.state === "rejected") return { state: "unclaimed" };
     return { state: "unknown" };
   } catch (error) {

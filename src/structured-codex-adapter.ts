@@ -1,13 +1,19 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
-import { CodexProtocolReducer } from "./structured-codex-protocol.js";
+import { CodexAppProtocolReducer } from "./codex-app-protocol.js";
+import type { CodexAppLaunch } from "./codex-app-worker.js";
 import { cliUnacceptedFacts } from "./structured-failure.js";
+import { nativeImagePaths } from "./structured-attachment-input.js";
 import { whichSync } from "./path-repair.js";
 import type { SessionSnapshot } from "./types.js";
-import { thinkingEffortToCodexReasoningEffort, promptWithSystemFallback } from "./structured-provider-common.js";
+import { thinkingEffortToCodexReasoningEffort } from "./structured-provider-common.js";
 import { createNdjsonLineHandler } from "./structured-ndjson.js";
+import { createCodexStderrReader } from "./codex-stderr.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -15,34 +21,32 @@ import type {
   StructuredRunnerObserver,
 } from "./structured-runner.js";
 
-/** Build the stable CLI contract for a structured Codex turn. */
-export function buildCodexArgs(session: SessionSnapshot): string[] {
-  const args = ["exec", "--json", "--color", "never"];
-  const shouldBypass = session.autoApprovePermissions === true
-    || session.mode === "full-access"
-    || session.mode === "managed";
-
-  if (shouldBypass) {
-    args.push("--dangerously-bypass-approvals-and-sandbox");
-  } else if (session.mode === "auto-edit" || session.mode === "agent" || session.mode === "agent-max") {
-    args.push("--sandbox", "workspace-write");
-  } else {
-    args.push("--sandbox", "read-only");
-  }
-
-  args.push("--skip-git-repo-check");
-  const modelChoice = session.selectedModel?.trim();
-  if (modelChoice && modelChoice !== "default") args.push("--model", modelChoice);
-
-  const reasoningEffort = thinkingEffortToCodexReasoningEffort(session.thinkingEffort);
-  if (reasoningEffort) args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
-
-  if (session.claudeSessionId) args.push("resume", session.claudeSessionId, "-");
-  else args.push("-");
-  return args;
+/** The persistent host owns the worker and its App Server RPC connection. */
+export function buildCodexArgs(_session: SessionSnapshot): string[] {
+  const js = fileURLToPath(new URL("./codex-app-worker.js", import.meta.url));
+  return existsSync(js) ? [js] : ["--import", import.meta.resolve("tsx"), js.replace(/\.js$/, ".ts")];
 }
 
-/** Owns the Codex CLI process and translates its NDJSON protocol into runner-neutral state. */
+export function buildCodexLaunch(session: SessionSnapshot, prompt: string, env: NodeJS.ProcessEnv): CodexAppLaunch {
+  const bypass = session.autoApprovePermissions === true || session.mode === "full-access" || session.mode === "managed";
+  const writable = session.mode === "auto-edit" || session.mode === "agent" || session.mode === "agent-max";
+  return {
+    file: whichSync("codex", { env }) ?? "codex",
+    sessionId: session.id,
+    requestId: session.structuredState?.activeRequestId ?? randomUUID(),
+    inputMessageId: [...(session.messages ?? [])].reverse().find(turn => turn.role === "user")?.messageId ?? randomUUID(),
+    prompt,
+    threadId: session.claudeSessionId ?? null,
+    cwd: session.cwd,
+    model: session.selectedModel?.trim() && session.selectedModel.trim() !== "default" ? session.selectedModel.trim() : undefined,
+    developerInstructions: [session.systemPrompt?.trim(), session.runtimeSystemPrompt?.trim()].filter(Boolean).join("\n\n") || undefined,
+    effort: thinkingEffortToCodexReasoningEffort(session.thinkingEffort),
+    sandbox: bypass ? "danger-full-access" : writable ? "workspace-write" : "read-only",
+    images: nativeImagePaths(prompt),
+  };
+}
+
+/** Translates App Server events into the existing Codex runner and question-card contract. */
 export class CodexRunner implements StructuredRunnerAdapter {
   constructor(
     private readonly spawnProcess: typeof spawn = spawn,
@@ -50,29 +54,41 @@ export class CodexRunner implements StructuredRunnerAdapter {
   ) {}
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
-    const args = buildCodexArgs(context.session);
-    const file = whichSync("codex", { env: context.env }) ?? "codex";
-    const reducer = new CodexProtocolReducer(context.session);
+    const launch = buildCodexLaunch(context.session, context.prompt, context.env);
+    const reducer = new CodexAppProtocolReducer(context.session);
     let unparsedStdout = false;
     let protocolEventObserved = false;
-    const previousSessionId = context.session.claudeSessionId;
+    let rejected = false;
+    let retryForbidden = false;
+    let accepted = false;
     return startStructuredCli({
       sessionId: context.session.id,
-      file,
-      args,
+      file: process.execPath,
+      args: buildCodexArgs(context.session),
       cwd: context.session.cwd,
       env: context.env,
-      stdinData: promptWithSystemFallback(context.session, context.prompt),
+      stdinData: JSON.stringify(launch) + "\n",
       observer,
       execHost: this.execHost,
-      requestId: context.session.structuredState?.activeRequestId ?? undefined,
+      requestId: launch.requestId,
       spawnProcess: this.spawnProcess,
       createState: () => reducer.state,
+      createStderrReader: createCodexStderrReader,
       processLine: createNdjsonLineHandler({
         observer,
         onUnparsed: () => { unparsedStdout = true; },
         handleEvent: (event) => {
+          if (!event || typeof event !== "object" || Array.isArray(event)) return;
           protocolEventObserved = true;
+          const record = event as Record<string, any>;
+          if (record.type === "wand_codex_rejected") {
+            rejected = true;
+            retryForbidden = record.retryForbidden === true;
+          }
+          if (record.type === "wand_codex_accepted"
+            || (record.type === "wand_codex_event" && record.event?.method === "turn/started")) accepted = true;
+          // Commit the preceding assistant segment before the reducer opens the next one.
+          context.onCodexInputEvent?.(record, reducer.state);
           if (reducer.apply(event)) observer.onUpdate(reducer.state);
         },
       }),
@@ -84,17 +100,18 @@ export class CodexRunner implements StructuredRunnerAdapter {
         primaryError: reducer.primaryError,
         errors: reducer.errors,
         spawnError,
-        ...cliUnacceptedFacts({
+        ...(retryForbidden ? { retryForbidden: true } : {}),
+        ...(accepted ? { inputAccepted: true } : cliUnacceptedFacts({
           state: reducer.state,
           primaryError: reducer.primaryError,
-          protocolError: !!reducer.primaryError,
+          protocolError: rejected,
           unparsedStdout,
           signal,
           exitCode,
-          previousSessionId,
+          previousSessionId: context.session.claudeSessionId,
           noProtocolEvent: !protocolEventObserved,
           ...(spawnError ? { spawnError } : {}),
-        }),
+        })),
       }),
     });
   }

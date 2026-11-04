@@ -37,13 +37,23 @@ export function resolveStructuredRenderBinary(configPath: string): string | null
 }
 
 function livePid(file: string): number | null {
+  let value: string;
   try {
-    const pid = Number(readFileSync(file, "utf8").trim());
-    if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+    value = readFileSync(file, "utf8").trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const pid = Number(value);
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(pid)) {
+    throw new Error("Structured Render PID evidence is invalid; refusing unknown ownership");
+  }
+  try {
     process.kill(pid, 0);
     return pid;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM" ? -1 : null;
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return null;
+    throw error;
   }
 }
 
@@ -66,6 +76,19 @@ async function socketIsListening(socketPath: string): Promise<boolean> {
 
 async function connectExisting(configPath: string): Promise<RenderStructuredClient | null> {
   const paths = structuredRenderPaths(configPath);
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  do {
+    const client = await connectExistingEndpoint(configPath);
+    if (client) return client;
+    const pid = livePid(paths.pidPath);
+    if (pid === null && !existsSync(paths.socketPath)) return null;
+    await delay(50);
+  } while (Date.now() < deadline);
+  throw new Error("Structured Render endpoint/PID is alive but unavailable; ownership is unknown");
+}
+
+async function connectExistingEndpoint(configPath: string): Promise<RenderStructuredClient | null> {
+  const paths = structuredRenderPaths(configPath);
   if (!existsSync(paths.socketPath)) return null;
   const client = new RenderStructuredClient(configPath);
   try {
@@ -74,6 +97,9 @@ async function connectExisting(configPath: string): Promise<RenderStructuredClie
   } catch (error) {
     client.disconnect();
     if (await socketIsListening(paths.socketPath) || livePid(paths.pidPath) !== null) {
+      // bind precedes token publication during startup. Keep observing this
+      // owner; the caller must not mistake a missing token for an absent daemon.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw new Error(`Structured Render endpoint exists but refused adoption: ${getErrorMessage(error)}`);
     }
     // Only remove our own private, unlistened stale socket. Never unlink a
@@ -92,15 +118,6 @@ export async function startStructuredRenderHost(configPath: string): Promise<Ren
   const existing = await connectExisting(configPath);
   if (existing) return existing;
   const paths = structuredRenderPaths(configPath);
-  if (livePid(paths.pidPath) !== null) {
-    const deadline = Date.now() + READY_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const starting = await connectExisting(configPath);
-      if (starting) return starting;
-      await delay(50);
-    }
-    throw new Error("Structured Render PID is alive but its socket is unavailable; refusing a competing daemon");
-  }
   const binary = resolveStructuredRenderBinary(configPath);
   if (!binary) throw new Error("structured.processHost=rust requires a v2 binary; build wand-structured-renderd or set WAND_STRUCTURED_RENDER_BIN");
   const child = spawn(binary, ["--config", configPath], {
@@ -135,10 +152,8 @@ export class CompositeStructuredExecHost implements StructuredExecHost {
   constructor(
     private readonly legacy: StructuredExecHost | null,
     private readonly rust: StructuredExecHost | null,
-    private readonly newOwner: Owner,
-  ) {
-    if (!legacy && !rust) throw new Error("at least one structured daemon is required");
-  }
+    private readonly newOwner: Owner | null,
+  ) {}
 
   private getHost(owner: Owner): StructuredExecHost | null {
     return owner === "legacy" ? this.legacy : this.rust;
@@ -149,6 +164,12 @@ export class CompositeStructuredExecHost implements StructuredExecHost {
       this.legacy?.listRuns() ?? Promise.resolve([]),
       this.rust?.listRuns() ?? Promise.resolve([]),
     ]);
+    for (const runs of [legacyRuns, rustRuns]) {
+      if (!Array.isArray(runs) || runs.some((run) => !run || typeof run.runId !== "string"
+        || !run.runId || (run.status !== "running" && run.status !== "exited"))) {
+        throw new Error("Structured daemon inventory is unavailable; refusing unknown ownership");
+      }
+    }
     const legacyIds = new Set(legacyRuns.map((run) => run.runId));
     for (const run of rustRuns) {
       if (legacyIds.has(run.runId)) throw new Error(`structured run ${run.runId} has competing owners; refusing adoption`);
@@ -170,6 +191,7 @@ export class CompositeStructuredExecHost implements StructuredExecHost {
     if (pending) return pending;
     const attempt = (async () => {
       const owner = (await this.ownerOf(request.runId)) ?? this.newOwner;
+      if (!owner) throw new Error("No legacy/Rust owner for this run; new executions belong to tmux");
       const host = this.getHost(owner);
       if (!host) throw new Error(`structured owner ${owner} is unavailable; no fallback across owners`);
       const handle = await host.spawnStructured(request);
@@ -203,11 +225,12 @@ export async function createUpgradeAwareStructuredHost(
   configPath: string,
   legacy: StructuredExecHost | null,
   processHost: "legacy" | "rust" = "legacy",
+  startNew = true,
 ): Promise<{ host: StructuredExecHost | undefined; rustClient: RenderStructuredClient | null }> {
   if (process.env.WAND_TEST_MODE === "1" || process.env.NODE_TEST_CONTEXT) {
     return { host: legacy ?? undefined, rustClient: null };
   }
-  const rustClient = processHost === "rust" ? await startStructuredRenderHost(configPath) : await connectExisting(configPath);
-  if (!rustClient && !legacy) return { host: undefined, rustClient: null };
-  return { host: new CompositeStructuredExecHost(legacy, rustClient, processHost), rustClient };
+  const rustClient = startNew && processHost === "rust" ? await startStructuredRenderHost(configPath) : await connectExisting(configPath);
+  if (startNew && !rustClient && !legacy) return { host: undefined, rustClient: null };
+  return { host: new CompositeStructuredExecHost(legacy, rustClient, startNew ? processHost : null), rustClient };
 }

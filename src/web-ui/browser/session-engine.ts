@@ -1142,6 +1142,11 @@ function sessionProjectionSignature(session: any): string {
         if (normalizedSnapshot.id === state.selectedId) {
           reconcileInteractiveState();
           updateTaskDisplay();
+          if (!currentSession || ["provider", "selectedModel", "mode", "thinkingEffort"].some(
+            key => currentSession[key] !== updatedSession[key])) {
+            state.chatMode = updatedSession.mode || state.chatMode;
+            refreshAllChatModeTrios();
+          }
           // Escalation/permission toggles are the common trigger for CSI cursor-jump
           // xterm owns redraw state; status changes must never replay the PTY byte log.
         }
@@ -1712,6 +1717,7 @@ function sessionProjectionSignature(session: any): string {
         // request starts, otherwise the hidden chat DOM from the previous PTY
         // session is visible until that request completes.
         renderChat(true);
+        refreshAllChatModeTrios();
         // Update file panel cwd and refresh if open
         if (state.filePanelOpen) {
           updateFilePanelCwd(session);

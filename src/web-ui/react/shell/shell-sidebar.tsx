@@ -10,7 +10,7 @@ import { TaskStatusGlyph } from "../workspaces/task-status-glyph";
 import { glowVisualStatus } from "../workspaces/sidebar-session-state";
 import { WAND_AGENT_LABEL, normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
-import { openSessionWithOwningTask } from "../workspaces/session-open";
+import { openSessionPage } from "../../page-route";
 import { conversationUi, useConversationUi } from "../conversations/state";
 import { ConversationNavigation } from "../conversations/sidebar";
 import { SidebarFilterCapsules, UnifiedSidebarList, useUnifiedSidebar, type UnifiedSidebarEntry } from "../conversations/unified-sidebar";
@@ -291,7 +291,7 @@ function SessionEntry({
   const prominentWarning = entry.permissionBlocked
     || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
 
-  const glow = isHistory ? "none"
+  const glow = isHistory || entry.archived ? "none"
     : entry.permissionBlocked ? "permission"
     : entry.status === "waiting-input" || entry.status === "waiting_input" ? "waiting-input"
     : entry.status === "reconnecting" ? "reconnecting"
@@ -517,7 +517,8 @@ export function ShellSidebar() {
   // 报错清单默认收起：头部徽标只显示条数，点开才在下方就地展开。
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   // Secondary management surfaces borrow the list space without changing the user's pinned preference.
-  const contextRail = !snapshot.layout.sidebarDrawer && (settings.open || conversationState.directory
+  const [listCollapsed, setListCollapsed] = React.useState(false);
+  const contextRail = !snapshot.layout.sidebarDrawer && (listCollapsed || settings.open || conversationState.directory
     || taskBoard.open || knowledge.open || snapshot.layout.filePanelOpen);
   const [chatsPeekOpen, setChatsPeekOpen] = React.useState(false);
   const peekTimerRef = React.useRef<number>(0);
@@ -567,13 +568,11 @@ export function ShellSidebar() {
   };
   const openEntry = (entry: UnifiedSidebarEntry): void => {
     setChatsPeekOpen(false);
-    settingsController.close(); taskBoardController.close(); knowledgeController.close();
+    settingsController.close();
     dismissSidebarSurfaces();
+    // One route change restores task ownership and closes the previous feature page.
     if (entry.conversation) conversationUi.select(entry.conversation.id);
-    else {
-      conversationUi.suspend();
-      void openSessionWithOwningTask(entry.session.id, id => { void dispatch({ type: "session.select", id }); });
-    }
+    else openSessionPage(entry.session.id);
   };
   const navigate = (action: UiAction): void => {
     // 设置、创建表单和辅助面板只暂时覆盖当前页面，取消后仍留在原视图。
@@ -607,6 +606,13 @@ export function ShellSidebar() {
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
         aria-modal={overlay || undefined} aria-hidden={!visible || undefined}
         inert={!visible} tabIndex={-1}>
+        {listCollapsed && !snapshot.layout.sidebarDrawer && !isListPeek && <WandIconButton
+          className="sidebar-expand-tab" aria-label="展开侧边栏" title="展开侧边栏"
+          onClick={() => { window.clearTimeout(peekTimerRef.current); setListCollapsed(false); setChatsPeekOpen(false); }}>
+          <svg width="12" height="16" viewBox="0 0 12 16" fill="none" aria-hidden="true">
+            <path d="m4 4 4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </WandIconButton>}
         <Flex vertical align="center" className="sidebar-navigation-rail">
           <div className="sidebar-rail-scroll">
             <WandBrandMark className="sidebar-brand-mark" style={{ width: "var(--conversation-brand-size, 24px)", height: "var(--conversation-brand-size, 24px)" }} />
@@ -618,6 +624,11 @@ export function ShellSidebar() {
               onChatsHover={handleChatsHover}
               onNavigate={(page) => {
                 setAttentionOpen(false);
+                if (page === "chats") {
+                  setListCollapsed(false);
+                  setChatsPeekOpen(false);
+                  window.clearTimeout(peekTimerRef.current);
+                }
                 settingsController.close();
                 if (page !== "knowledge" && knowledge.open) knowledgeController.close();
                 if (page === "knowledge") {
@@ -689,6 +700,20 @@ export function ShellSidebar() {
             }
           }}>
           <Flex align="center" gap={8} className="sidebar-header" style={{ padding: "10px 12px", flexShrink: 0 }}>
+            {!snapshot.layout.sidebarDrawer && (!contextRail || listCollapsed) && <WandIconButton
+              aria-label={contextRail ? "固定展开侧边栏" : "收起侧边栏"}
+              title={contextRail ? "固定展开侧边栏" : "收起侧边栏"}
+              onClick={() => {
+                window.clearTimeout(peekTimerRef.current);
+                setListCollapsed(!contextRail);
+                setChatsPeekOpen(false);
+              }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.8"/>
+                <path d="M9 4v16" stroke="currentColor" strokeWidth="1.8"/>
+                <path d="M5 6h2v12H5z" fill="currentColor" opacity=".45"/>
+              </svg>
+            </WandIconButton>}
             <WandSearchField className="conversation-search-input sidebar-list-search" label="搜索会话" value={model.query} onValueChange={query => conversationUi.filter("list-query", query)}/>
             {snapshot.layout.sidebarDrawer && <WandIconButton id="close-drawer-button" aria-label="关闭侧栏" onClick={() => void dispatch({ type: "layout.drawer.close" })}><SidebarToggleIcon open/></WandIconButton>}
           </Flex>

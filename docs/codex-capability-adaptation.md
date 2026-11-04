@@ -6,6 +6,26 @@
 Codex CLI 基线：`codex-cli 0.166.0`（`codex app-server --listen stdio://`，schema 由
 `codex app-server generate-json-schema --experimental` 导出）。
 
+## 执行链路与恢复
+
+新结构化执行由 `CodexRunner` 启动 `codex-app-worker`，再以 stdio 启动本机
+`codex app-server`。worker 交给现有持久执行宿主托管；Server 重启只重新连接宿主。
+`codex-cli-exec` 是兼容历史及四端 DTO 的 runner 标识，不代表新回合仍运行 `codex exec`。
+升级前仍在途的 exec 执行保留原所有权，历史 NDJSON 继续通过兼容投影读取；下一轮才改走
+App Server 的 `thread/resume`，使用原生 thread ID，不重放已提交输入。
+
+模型、思考强度与沙箱沿用会话设置；角色和实时知识放入 `developerInstructions`，用户正文
+保持原输入。实时输出与宿主回放共用 `CodexAppProtocolReducer`。
+
+`default_mode_request_user_input` 通过现有 `AskUserQuestion` 卡片展示。回答在接受时绑定
+当前执行的问题 ID，提问前排队的文本不会被当成答案；多题答案逐题一行，保密问题明确拒绝。
+仅接收显式 `isBlocking=true` 且未启用 `autoResolutionMs` 的问题；非阻塞、自动解析或缺少阻塞标识的
+请求明确拒绝。0.166.0 schema 将 `isBlocking` 定义为必填，`serverRequest/resolved` 只含请求身份、
+没有答案采纳结果，不能把自动解析当作回答已提交。
+运行中用户插话沿现有持久队列预留，收到 worker commit 后才移除对应消息并提交转录。
+明确拒收保留队列，需用户编辑或取回；未知送达保留预留等待原执行回执，结算后留核对说明，
+不会自动重放。控制身份与回执绑定具体执行，恢复时不重新投递历史控制事件。
+
 ## 1. 已投影的 ThreadItem
 
 服务端在 `src/codex-app-protocol.ts`（camelCase → Wand 投影）与

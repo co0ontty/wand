@@ -24,7 +24,7 @@ export function clearQueueView(host: HTMLElement): void {
 export type QueueViewAction = "edit" | "promote-item" | "delete" | "clear-all" | "move-up" | "move-down" | "restore-retrieved" | "dismiss-retrieved" | "restore-removed" | "dismiss-removed";
 interface QueueOptions {
   expanded: boolean; onExpandedChange(expanded: boolean): void; busy: boolean;
-  retrieval: ComposerDraft["queueRetrieval"]; removal: ComposerDraft["queueRemoval"]; steering: boolean;
+  retrieval: ComposerDraft["queueRetrieval"]; removal: ComposerDraft["queueRemoval"]; steering: boolean; nativePromptQueueing?: boolean;
   onAction(action: QueueViewAction, index: number, expected: readonly string[]): void;
   onDragStart(event: PointerEvent, row: HTMLElement): void;
 }
@@ -96,10 +96,10 @@ function QueueBar({ items, inFlight, atCapacity, options }: { items: readonly st
     <WandPopover side="top" align="center" open={options.expanded} onOpenChange={change} className="composer-work-popover"
       contentId="queue-work-panel" popupOwner="composer-queue" contentRole="dialog" ariaLabel="待发送消息"
       trigger={ComposerWorkSummary({ label: "待发送", count: String(items.length), preview: items[0] || (removal ? "已移除原文保留" : "取回结果待核对"), icon: "history", expanded: options.expanded, className: "queue-bar-toggle" })}>
-      <ComposerWorkPanel title="待发送消息" className="composer-queue-panel" description={`${items.length} 条${atCapacity ? "（已满）" : ""} · ${options.steering ? "下一安全边界追加" : "当前轮结束后按顺序发送"}`}
+      <ComposerWorkPanel title="待发送消息" className="composer-queue-panel" description={`${items.length} 条${atCapacity ? "（已满）" : ""} · ${options.steering && !options.nativePromptQueueing ? "下一安全边界追加" : "当前轮结束后按顺序发送"}`}
         onClose={() => change(false)} actions={items.length > 0 && <Button size="small" type="text" disabled={options.busy || !!removal} data-action="request-clear" onClick={() => setConfirm({ action: "clear-all", index: -1, expected: items.slice() })}>清空</Button>}
         footer="取回会保留已有草稿；移除后仅可恢复到草稿，不会自动重发。">
-        {confirm && <div className="composer-work-confirm" role="group" aria-label="确认队列操作"><p>{confirm.action === "clear-all" ? `移除全部 ${confirm.expected.length} 条待发送消息？` : inFlight ? "立即发送会中断当前回复，确定继续？" : "立即发送这条消息？"}</p>
+        {confirm && <div className="composer-work-confirm" role="group" aria-label="确认队列操作"><p>{confirm.action === "clear-all" ? `移除全部 ${confirm.expected.length} 条待发送消息？` : inFlight ? options.nativePromptQueueing ? "将这条消息作为插话立即提交？当前命令会继续运行。" : "立即发送会中断当前回复，确定继续？" : "立即发送这条消息？"}</p>
           <Flex gap={8} justify="end"><Button size="small" onClick={() => setConfirm(null)}>取消</Button><Button size="small" type="primary" disabled={options.busy} danger={confirm.action === "clear-all"} data-action="confirm-queue" onClick={() => { options.onAction(confirm.action, confirm.index, confirm.expected); setConfirm(null); }}>{confirm.action === "clear-all" ? "确认清空" : "确认发送"}</Button></Flex></div>}
         {retrieval && <Alert className="queue-retrieval" type={retrieval.status === "unknown" ? "warning" : "info"}
           title={retrieval.status === "pending" ? "正在取回到输入框…" : retrieval.status === "confirmed" ? "已取回，输入法确认后可继续编辑" : retrieval.status === "rejected" ? "未取回，请核对最新队列" : "取回结果未知；原文已保留，未自动重试"}

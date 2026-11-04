@@ -17,6 +17,8 @@ import { ContentBlock, ConversationTurn, EscalationScope, ExecutionMode, Process
 
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
+import { appendDiagnosticTail } from "./bounded-process-output.js";
+import { BoundedProtocolLineReader } from "./structured-ndjson.js";
 
 import { fallbackProviderModel } from "./session-model.js";
 import { isLocalDecisionModel } from "./decision-expert-identity.js";
@@ -42,13 +44,15 @@ import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-con
 import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "./system-ai-call.js";
 
 import { CodexRunner } from "./structured-codex-adapter.js";
+import { sendCodexControl, resolveCodexInput, forgetCodexControl } from "./codex-app-control.js";
+import { nativeImagePaths } from "./structured-attachment-input.js";
 
 import { ClaudeCliRunner } from "./structured-claude-adapter.js";
 
 
 import { OpenCodeRunner } from "./structured-opencode-adapter.js";
 import { GrokRunner } from "./structured-grok-adapter.js";
-import { QoderAcpRunner, escalationFor } from "./structured-qoder-acp-adapter.js";
+import { QoderAcpRunner, escalationFor, qoderAcpMode } from "./structured-qoder-acp-adapter.js";
 import { sendQoderControl, resolveQoderInput, forgetQoderControl } from "./qoder-acp-control.js";
 import { asRecord } from "./structured-content.js";
 import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
@@ -60,7 +64,7 @@ import { upsertPiAssistantSegment } from "./structured-session-manager-replay.js
 import type { PiNativeGcReport } from "./pi-tmux-host.js";
 import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
-import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeStructuredRunner, normalizeThinkingEffort, resolveStructuredRunner } from "./structured-provider-common.js";
+import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeStructuredRunner, normalizeThinkingEffort, resolveStructuredRunner, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
 import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
 
 import { logInfo } from "./runtime-log.js";
@@ -111,7 +115,7 @@ interface CreateStructuredSessionOptions {
   workspaceTaskId?: string;
   /**
    * 恢复用的初始会话 id：
-   *   - Codex：历史 thread id，首条消息即 `codex exec ... resume <id>` 续接。
+   *   - Codex：历史 thread id，由 App Server `thread/resume` 续接。
    *   - Claude：历史 session id，首条消息即 `--resume` / SDK resume 续接。
    * 留空表示新建会话。
    */
@@ -173,6 +177,7 @@ interface StructuredSendOptions {
   origin?: import("./task-types.js").TaskCommentOrigin;
   interrupt?: boolean;
   idempotencyKey?: string;
+  expectedQuestionId?: string;
   preserveQueue?: boolean;
   queueAlreadyRemoved?: boolean;
   immediateStart?: boolean;
@@ -219,6 +224,10 @@ export class StructuredSessionManager {
   private readonly unacceptedTeamStarts = new Map<string, { requestId: string; failure: StructuredFailure }>();
   /** Original persisted request identity for an adopted run; separate from callback-generation IDs. */
   private readonly recoveredLogicalRequests = new Map<string, string>();
+  private readonly codexInputs = new Map<string, {
+    requestId: string; bridgeRequestId: string;
+    ready: boolean; busy: boolean; questionId?: string;
+  }>();
   private readonly interruptedWith = new Map<string, string>();
   /**
    * 「智能分配」正在结算的会话：这段窗口内还没有 runner 归属，新输入必须排队而不是另起一轮。
@@ -259,6 +268,7 @@ export class StructuredSessionManager {
   private readonly qoderRunner: StructuredRunnerAdapter;
   private readonly qoderInputDispatches = new Set<string>();
   private readonly qoderReadyRequests = new Map<string, string>();
+  private readonly qoderForegroundWaiters = new Map<string, () => void>();
   private readonly piRunner: StructuredRunnerAdapter;
   /** 进程内 core 引擎供员工候选显式启用；普通 Pi 主功能不使用它。 */
   private readonly coreRunner: StructuredRunnerAdapter;
@@ -343,7 +353,7 @@ export class StructuredSessionManager {
       const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
       // Legacy/corrupt snapshots are normalized on restore so send dispatch can
       // rely on the provider/runner invariant without making startup fail.
-      const recoverableDetachedRun = snapshot.status === "running"
+      const recoverableDetachedRun = (snapshot.status === "running" || snapshot.structuredState?.resident === true)
         && this.execHost?.persistent === true
         // 进程内 core 回合不会比服务活得更久；重启后只能算中断，不能去 daemon 里领养。
         && snapshot.structuredState?.engine !== "core";
@@ -421,7 +431,9 @@ export class StructuredSessionManager {
       && !(this.coreRestartDrains > 0 && this.usesCoreEngine(session)))
       .flatMap(session => {
         const metadata = queuedInputScheduling(session);
-        const available = (item: EmployeeInputScheduling) => !item.acceptanceId || !this.dispatchingAcceptedInputs.has(item.acceptanceId);
+        const available = (item: EmployeeInputScheduling) => !item.nativeInputError
+          && !(session.provider === "codex" && item.nativeQuestionId)
+          && (!item.acceptanceId || !this.dispatchingAcceptedInputs.has(item.acceptanceId));
         const userIndex = metadata.findIndex(item => available(item) && item.source === "user");
         const index = userIndex >= 0 ? userIndex : metadata.findIndex(available);
         // 同一会话只暴露最高来源档的队首，保留用户显式 reorder 的意义。
@@ -635,6 +647,7 @@ export class StructuredSessionManager {
         if (recovered?.runner === "qoder-cli-acp" && recovered.structuredState?.activeRequestId) {
           this.dispatchQoderInputs(sessionId, recovered.structuredState.activeRequestId);
         }
+        if (recovered?.provider === "codex") void this.flushCodexInput(sessionId);
       } catch (error) {
         console.error(`[WAND] structured run recovery failed for ${sessionId}:`, error);
         if (!this.disposed && !this.pendingRecoveryIds.includes(sessionId)) {
@@ -664,28 +677,64 @@ export class StructuredSessionManager {
   private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState, checkpoint?: PiCliCheckpoint): Promise<void> {
     const sessionId = snapshot.id;
     if (this.disposed || !this.execHost || !snapshot.structuredState) return;
+    let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
+    let ownerLost = false;
+    if (initialState.status === "running") {
+      // pendingRecoveryIds keeps inputs queued and rejects control operations
+      // until a handle for this exact incarnation is available. Do not publish
+      // a cancellable execution or an exit promise before adoption succeeds.
+      runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
+      if (this.disposed) return;
+      if (runningHandle && runningHandle.incarnationId !== initialState.incarnationId) {
+        throw new Error("Structured run changed owner between replay and adoption");
+      }
+      if (!runningHandle) {
+        // The process may have completed between attach and adopt. Read its
+        // final snapshot rather than treating a normal exit as a lost owner.
+        const latest = await this.execHost.attachRun(structuredRunId(sessionId), checkpoint);
+        if (this.disposed) return;
+        if (latest && latest.incarnationId !== initialState.incarnationId) {
+          throw new Error("Structured run changed owner while confirming exit");
+        }
+        if (latest?.status === "running") {
+          throw new Error("Structured run is still running but could not be adopted");
+        }
+        if (latest) {
+          initialState = latest;
+          if (checkpoint && latest.stdoutFrom !== checkpoint.offset) checkpoint = undefined;
+        } else ownerLost = true;
+      }
+      // Queued messages or metadata may have changed during the handshake.
+      snapshot = this.requireSession(sessionId);
+      if (!snapshot.structuredState) return;
+    }
     // The worker control socket and input receipts are keyed by the original request.
-    const requestId = snapshot.runner === "qoder-cli-acp" && snapshot.structuredState.activeRequestId
-      ? snapshot.structuredState.activeRequestId : `recover-${initialState.incarnationId}`;
+    const hasNativeControl = snapshot.runner === "qoder-cli-acp"
+      || (snapshot.provider === "codex" && snapshot.command === "codex app-server");
+    const requestId = (hasNativeControl
+      ? initialState.requestId ?? snapshot.structuredState.activeRequestId : null)
+      || `recover-${initialState.incarnationId}`;
+    if (snapshot.provider === "codex" && hasNativeControl) {
+      this.codexInputs.set(sessionId, { requestId, bridgeRequestId: requestId, ready: false, busy: false });
+    }
     const logicalRequestId = snapshot.automationId?.startsWith("wand-task-comment:")
-      ? snapshot.structuredState.activeRequestId
+      ? initialState.requestId ?? snapshot.structuredState.activeRequestId
         ?? [...(snapshot.messages ?? [])].reverse().find(message => message.role === "user")?.requestId
       : null;
     if (logicalRequestId) this.recoveredLogicalRequests.set(sessionId, logicalRequestId);
-    let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
-    let interruptRequested = false;
     let acknowledgeExit = () => {};
     const execution = {
       settled: new Promise<void>((resolve) => { acknowledgeExit = resolve; }),
-      interrupt: (): void => {
-        interruptRequested = true;
-        runningHandle?.interrupt();
-      },
+      interrupt: (): void => { runningHandle?.interrupt(); },
     };
-    // Reserve ownership before publishing inFlight or awaiting adoption. Inputs
-    // arriving during replay/attach must queue just like inputs to a fresh runner.
-    this.pendingRunnerExecutions.set(sessionId, execution);
-    this.trackNativeProcessExit(sessionId, { exited: execution.settled });
+    if (!ownerLost) {
+      // Register the real owner and its exit barrier together, before publishing
+      // inFlight or replaying output that may require stopping the process.
+      this.pendingRunnerExecutions.set(sessionId, execution);
+      this.trackNativeProcessExit(sessionId, { exited: execution.settled });
+      if (initialState.status === "exited") acknowledgeExit();
+      else runningHandle!.onExit((event) => { if (event.processExited !== false) acknowledgeExit(); });
+    }
 
     // Re-arm the in-flight marker so UI and request guards treat the resumed
     // turn like any other streaming turn.
@@ -704,6 +753,7 @@ export class StructuredSessionManager {
     this.sessions.set(sessionId, resumed);
     this.saveAuthoritativeSession(resumed);
     this.emitStructuredSnapshot(resumed);
+    if (!this.isCurrentRequest(sessionId, requestId)) return;
     logInfo(`resuming structured run for session ${sessionId} (daemon pid ${initialState.pid})`);
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: `${resumed.runner ?? "structured"}-recovered`,
@@ -717,6 +767,7 @@ export class StructuredSessionManager {
     });
 
     const processor = buildReplayProcessor(resumed);
+    processor.stderr = appendDiagnosticTail("", initialState.stderrLog);
     if (checkpoint) {
       Object.assign(processor.state, checkpoint.state);
       processor.primaryError = checkpoint.primaryError;
@@ -804,6 +855,11 @@ export class StructuredSessionManager {
         const event = JSON.parse(line) as Record<string, unknown>;
         this.handleNativeInputEvent(sessionId, requestId, event, processor.state);
       }
+      if (resumed.provider === "codex") {
+        let event: Record<string, unknown> | null = null;
+        try { event = asRecord(JSON.parse(line)); } catch { /* Ignore incomplete protocol lines. */ }
+        if (event) this.handleCodexInputEvent(sessionId, requestId, event, processor.state, !replayingHistory);
+      }
       if (resumed.runner === "qoder-cli-acp") {
         let event: Record<string, unknown> | null = null;
         try { event = asRecord(JSON.parse(line)); } catch { /* Partial/truncated protocol lines are not control events. */ }
@@ -813,14 +869,8 @@ export class StructuredSessionManager {
     };
     const piReader = resumed.provider === "pi" && resumed.structuredState?.engine !== "core"
       ? new PiProtocolReader(feedLine, { truncatedHead: initialState.stdoutTruncated }) : null;
-    const feedDelta = (text: string): void => {
-      if (piReader) { piReader.push(text); return; }
-      carry += text;
-      const lines = carry.split("\n");
-      carry = lines.pop() ?? "";
-      for (const line of lines) feedLine(line);
-    };
-    let carry = "";
+    const protocolReader = piReader ?? new BoundedProtocolLineReader(feedLine);
+    const feedDelta = (text: string): void => protocolReader.push(text);
 
     let stdoutFile: PiOutputFile | null = null;
     const captureReader = piReader && !initialState.nativeFile
@@ -847,6 +897,13 @@ export class StructuredSessionManager {
       }
       catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
     };
+    if (ownerLost) {
+      this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
+        exitCode: null, signal: null, stderr: processor.stderr, stdoutTruncated: false, lost: true,
+      });
+      flushEmit();
+      return;
+    }
     if (resumed.provider === "pi" && resumed.structuredState?.engine !== "core" && !initialState.nativeFile) {
       try {
         stdoutFile = new PiOutputFile(this.piOutputFileOptions(sessionId),
@@ -860,23 +917,13 @@ export class StructuredSessionManager {
     const finishProtocol = (): void => {
       captureReader?.finish();
       stdoutFile?.drain();
-      if (piReader) piReader.finish();
-      else if (carry.trim()) feedLine(carry);
-      carry = "";
+      protocolReader.finish();
     };
     const feedFullLog = (): void => {
-      if (stdoutFile || piReader) {
-        try {
-          captureStdout(initialState.stdoutLog);
-          if (!fileFailed) finishProtocol();
-        } catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
-        return;
-      }
-      const log = initialState.stdoutLog;
-      const lines = log.split("\n");
-      const tail = lines.pop() ?? "";
-      for (const line of lines) feedLine(line);
-      if (tail.trim()) feedLine(tail);
+      try {
+        captureStdout(initialState.stdoutLog);
+        if (!fileFailed) finishProtocol();
+      } catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
     };
 
     if (checkpoint) {
@@ -884,65 +931,29 @@ export class StructuredSessionManager {
       this.savePiCheckpoint(sessionId, requestId, { ...checkpoint, requestId });
     }
     if (initialState.status === "exited") {
-      acknowledgeExit();
       feedFullLog();
       stdoutFile?.dispose();
       if (fileFailed) return;
       replayView.prime([...processor.state.blocks]);
       this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: initialState.exitCode,
+        lost: initialState.ownerLost,
         signal: initialState.signal === null ? null : signalNameFromNumber(initialState.signal),
-        stderr: initialState.stderrLog,
+        stderr: processor.stderr,
         stdoutTruncated: initialState.stdoutTruncated,
       });
       flushEmit();
       return;
     }
 
-    // Still running: replay what we have, then subscribe live. Events that
-    // arrive between snapshot and subscription are deduped via fedChars.
-    if (stdoutFile || piReader) {
-      captureStdout(initialState.stdoutLog);
-      if (fileFailed) return;
-    } else {
-      const lines = initialState.stdoutLog.split("\n");
-      carry = lines.pop() ?? "";
-      for (const line of lines) feedLine(line);
-    }
-    try {
-      runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
-    } catch (error) {
-      stdoutFile?.dispose();
-      this.releasePendingRunnerExecution(sessionId, execution, false);
-      throw error;
-    }
-    // Exit acknowledgement survives callback invalidation during stop/delete.
-    runningHandle?.onExit((event) => { if (event.processExited !== false) acknowledgeExit(); });
-    // Server shutdown detaches persistent runs; only an explicit stop/delete
-    // should cancel a handle that arrived after its request was invalidated.
-    if (this.disposed) { stdoutFile?.dispose(); return; }
-    if (!this.isCurrentRequest(sessionId, requestId)) {
-      stdoutFile?.dispose();
-      runningHandle?.interrupt();
-      this.releasePendingRunnerExecution(sessionId, execution);
-      return;
-    }
-    if (!runningHandle) {
-      stdoutFile?.dispose();
-      // Run vanished between listing and adoption; fall back to failure notes.
-      this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
-        exitCode: null,
-        signal: null,
-        stderr: initialState.stderrLog,
-        stdoutTruncated: false,
-        lost: true,
-      });
-      flushEmit();
-      return;
-    }
+    // Replay the snapshot, then subscribe; sequence watermarks dedupe overlap.
+    captureStdout(initialState.stdoutLog);
+    if (fileFailed) return;
+    if (!runningHandle) return; // Exited snapshots returned above.
     // 首轮 feed + attach 完成后再定锚点，之后 onStream 的事件都走合并视图。
     replayView.prime([...processor.state.blocks]);
     replayingHistory = false;
+    if (resumed.provider === "codex") void this.flushCodexInput(sessionId);
     if (resumed.runner === "qoder-cli-acp") {
       this.qoderReadyRequests.set(sessionId, requestId);
       this.dispatchQoderInputs(sessionId, requestId);
@@ -973,7 +984,7 @@ export class StructuredSessionManager {
       if (event.seq <= lastStderrSeq) return;
       lastStderrSeq = event.seq;
       this.logger?.appendStructuredStderr(sessionId, event.data);
-      processor.stderr += event.data;
+      processor.stderr = appendDiagnosticTail(processor.stderr, event.data);
     });
     runningHandle.onExit((event) => {
       if (event.processExited === false) {
@@ -986,14 +997,13 @@ export class StructuredSessionManager {
       stdoutFile?.dispose();
       this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: event.exitCode,
+        lost: event.ownerLost,
         signal: event.signal === null ? null : signalNameFromNumber(event.signal),
         stderr: processor.stderr,
         stdoutTruncated: initialState.stdoutTruncated,
       });
       flushEmit();
     });
-    // Install exit listeners before delivering an interrupt that arrived during adopt.
-    if (interruptRequested) runningHandle.interrupt();
   }
 
   private finalizeRecoveredRun(
@@ -1014,11 +1024,13 @@ export class StructuredSessionManager {
     if (execution) this.releasePendingRunnerExecution(sessionId, execution);
     else this.execHost?.forgetRun(structuredRunId(sessionId));
     this.settleNativeInputs(sessionId, requestId, processor.state);
+    if (!outcome.lost) this.finishCodexInput(sessionId, requestId);
     if (this.sessions.get(sessionId)?.runner === "qoder-cli-acp" && !outcome.lost) forgetQoderControl(sessionId, requestId);
     const current = this.sessions.get(sessionId);
     if (!current) return;
 
-    const commandLabel = recoveredCommandLabel(current.runner);
+    const commandLabel = current.provider === "codex" && current.command.includes("codex exec")
+      ? "codex exec" : recoveredCommandLabel(current.runner);
     const nextRunner = current.runner === "qoder-cli-print" ? defaultStructuredRunner("qoder") : current.runner;
     const interruptedForQuestion = processor.stopReason === "ask-user-question";
     // 退出码/信号是 CLI 的权威结论：daemon 的 replay 日志被截断只说明我们重建不出
@@ -1030,7 +1042,7 @@ export class StructuredSessionManager {
     const interruptPrompt = this.interruptedWith.get(sessionId);
     if ((processor.primaryError || failedExit) && !interruptedForQuestion && !interruptPrompt) {
       const errorText = outcome.lost
-        ? "服务重启后运行进程已丢失，本轮未能完成。"
+        ? "运行进程已丢失，退出状态未能保存；本轮结果未知，已保留历史，请核对后继续。"
         : this.formatStructuredExitError(commandLabel, outcome.exitCode, outcome.signal, {
             stderr: outcome.stderr.slice(-4096),
             primary: processor.primaryError,
@@ -1042,7 +1054,7 @@ export class StructuredSessionManager {
         typeof outcome.exitCode === "number" ? outcome.exitCode : 1,
         errorText,
         processor.state,
-        { keepTranscript: replayTruncated },
+        { keepTranscript: replayTruncated || outcome.lost },
       );
       failed.runner = nextRunner;
       if (failed.structuredState && nextRunner) failed.structuredState.runner = nextRunner;
@@ -1418,7 +1430,7 @@ export class StructuredSessionManager {
       runner,
       command:
         provider === "codex"
-          ? "codex exec --json"
+          ? "codex app-server"
           : provider === "opencode"
             ? "opencode run --format json"
           : provider === "grok"
@@ -1646,11 +1658,22 @@ export class StructuredSessionManager {
     const signature = createHash("sha256").update(JSON.stringify(opts?.promotion
       ? { v: 1, action: "promote", index: opts.promotion.index, expectedText: opts.promotion.expectedText ?? null }
       : { v: 1, action: "message", input: input.trim(), interrupt: !!opts?.interrupt,
-        preserveQueue: !!opts?.interrupt && !!opts?.preserveQueue, source: opts?.source ?? "task" })).digest("hex");
+        preserveQueue: !!opts?.interrupt && !!opts?.preserveQueue, source: opts?.source ?? "task",
+        ...(opts?.expectedQuestionId !== undefined ? { expectedQuestionId: opts.expectedQuestionId } : {}) })).digest("hex");
     const previous = key ? this.storage.getStructuredInputReceipt(id, key, signature) : null;
     if (previous) {
       opts?.onAccepted?.(previous);
       return session;
+    }
+    if (opts?.expectedQuestionId !== undefined) {
+      const expected = opts.expectedQuestionId;
+      const live = this.codexInputs.get(id);
+      const questionId = session.provider === "codex"
+        ? live?.requestId === session.structuredState?.activeRequestId ? live?.questionId : undefined
+        : findUnpairedAskUserQuestion(session.messages ?? [])?.id;
+      if (typeof expected !== "string" || !expected || expected.length > 1024 || expected !== questionId) {
+        throw Object.assign(new Error("该问题已结束或已变化，回答未发送；请刷新后核对。"), { code: "question_changed" });
+      }
     }
     let prompt = input.trim();
     if (opts?.promotion) {
@@ -1676,12 +1699,19 @@ export class StructuredSessionManager {
     const scheduling: EmployeeInputScheduling = { ...(opts?.scheduling
       ?? { source: opts?.source ?? "task", enqueuedAt: acceptedAt, sequence: ++this.inputSequence,
         teamRequestStarted: opts?.teamRequestStarted }), ...(opts?.origin ? { origin: opts.origin } : {}), acceptanceId };
+    if (session.runner === "qoder-cli-acp" && opts?.interrupt) scheduling.nativeSteeringRequested = true;
     if (session.runner === "qoder-cli-acp" && session.structuredState?.inFlight && !opts?.promotion) {
       scheduling.nativeQuestionId = findUnpairedAskUserQuestion(session.messages ?? [])?.id;
     }
+    const codexLive = this.codexInputs.get(id);
+    if (session.provider === "codex" && scheduling.source === "user" && !opts?.promotion
+      && codexLive?.requestId === session.structuredState?.activeRequestId) {
+      scheduling.nativeQuestionId = codexLive?.questionId;
+    }
     const relay = this.relayHandlerFor(session);
     const childActive = this.pendingRunnerExecutions.has(id) || this.pendingRecoveryIds.includes(id) || this.nativeProcessExits.has(id);
-    const nativeSteering = session.runner === "qoder-cli-acp" && childActive && session.structuredState?.inFlight;
+    const nativeSteering = (session.runner === "qoder-cli-acp"
+      || (session.provider === "codex" && session.command === "codex app-server")) && childActive && session.structuredState?.inFlight;
     const interrupt = !nativeSteering && !!opts?.interrupt && !!session.structuredState?.inFlight && childActive;
     if (interrupt) {
       this.requireRecoveryControl(id);
@@ -1728,7 +1758,8 @@ export class StructuredSessionManager {
         this.dispatchQoderInputs(id, accepted.structuredState.activeRequestId);
       }
       if (accepted.employeeId) this.employeeInputAdmission?.schedule(accepted.employeeId);
-      return accepted;
+      if (accepted.provider === "codex") void this.flushCodexInput(id);
+      return this.requireSession(id);
     }
     return this.sendAcceptedMessage(id, prompt, { ...opts, scheduling, queueAlreadyRemoved: true,
       // Accepted replacement is now itself a durable queue item; the original
@@ -1806,8 +1837,9 @@ export class StructuredSessionManager {
     // a durable transcript identity. Team startup correlation IDs are private
     // lifecycle tokens and must never be copied into persisted/public messages.
     const transcriptRequestId = session.automationId?.startsWith("wand-task-comment:") ? requestId : undefined;
-    const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt, transcriptRequestId,
-      (session.provider === "pi" && session.structuredState?.engine !== "core") || session.provider === "qoder" ? randomUUID() : undefined,
+    const foregroundRequestId = session.provider === "qoder" ? transcriptRequestId ?? randomUUID() : undefined;
+    const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt, foregroundRequestId ?? transcriptRequestId,
+      (session.provider === "pi" && session.structuredState?.engine !== "core") || session.provider === "qoder" || session.provider === "codex" ? randomUUID() : undefined,
       userTurnAt, opts?.origin ?? opts?.scheduling?.origin);
     this.unacceptedTeamStarts.delete(id);
     if (this.unsupportedStructuredProviders.has(id)) {
@@ -1820,6 +1852,7 @@ export class StructuredSessionManager {
     const updated: SessionSnapshot = {
       ...session,
       runner,
+      ...(session.provider === "codex" ? { command: "codex app-server" } : {}),
       status: "running",
       exitCode: null,
       endedAt: null,
@@ -1829,6 +1862,7 @@ export class StructuredSessionManager {
         ...(runner ? { runner } : {}),
         inFlight: true,
         activeRequestId: requestId,
+        foregroundRequestId,
         lastError: null,
       }),
     };
@@ -1855,7 +1889,18 @@ export class StructuredSessionManager {
       if (!isStructuredRunnerForProvider(provider, runner)) {
         throw new Error(`会话 runner ${String(runner)} 与 provider ${provider} 不匹配。`);
       }
-      await this.runProviderTurn(id, updated, prompt, cliClaudePrompt, requestId);
+      if (provider === "qoder" && !isSystemAiCall(updated)) {
+        // Callers wait for the foreground reply; the owned process continues to
+        // receive notifications. Keep its existing cleanup path until actual exit.
+        let replied = false;
+        const foreground = new Promise<void>(resolve => this.qoderForegroundWaiters.set(requestId, () => { replied = true; resolve(); }));
+        const run = this.runProviderTurn(id, updated, prompt, cliClaudePrompt, requestId);
+        void run.finally(() => this.qoderForegroundWaiters.delete(requestId)).catch(() => {});
+        void run.catch(error => {
+          if (replied && this.isCurrentRequest(id, requestId)) console.error("[wand] Resident Qoder execution failed", getErrorMessage(error));
+        });
+        await Promise.race([run, foreground]);
+      } else await this.runProviderTurn(id, updated, prompt, cliClaudePrompt, requestId);
       const finished = this.requireSession(id);
       return finished;
     } catch (error) {
@@ -2009,7 +2054,7 @@ export class StructuredSessionManager {
     const provider = updated.provider ?? updated.structuredState?.provider ?? "claude";
     if (provider === "codex") {
       await this.runStructuredStreaming(id, updated, prompt, requestId, {
-        runner: this.codexRunner, provider: "codex", commandLabel: "codex exec", logKind: "codex-exec",
+        runner: this.codexRunner, provider: "codex", commandLabel: "codex app-server", logKind: "codex-app-server",
       });
     } else if (provider === "opencode") {
       await this.runStructuredStreaming(id, updated, prompt, requestId, {
@@ -2190,11 +2235,19 @@ export class StructuredSessionManager {
     if (!trimmed) throw new Error("排队消息不能为空。");
     const next = queue.slice();
     next[index] = trimmed;
-    const updated = { ...session, queuedMessages: next };
+    const updated = { ...session, queuedMessages: next,
+      ...(session.provider === "codex" ? { queuedInputScheduling: queuedInputScheduling(session).map((item, at) => {
+        if (at !== index) return item;
+        const { nativeInputError: _error, nativeQuestionId: _question, ...rest } = item;
+        const live = this.codexInputs.get(sessionId);
+        const questionId = live?.requestId === session.structuredState?.activeRequestId ? live?.questionId : undefined;
+        return { ...rest, ...(questionId ? { nativeQuestionId: questionId } : {}) };
+      }) } : {}) };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
-    return updated;
+    if (session.provider === "codex") void this.flushCodexInput(sessionId);
+    return this.requireSession(sessionId);
   }
 
   /** Remove a single queued message only while index and text still identify the same item. */
@@ -2705,6 +2758,9 @@ export class StructuredSessionManager {
   }
 
   nativeHistoryCleanupBarrier(id: string): Promise<void> | null {
+    // A pending adoption has no confirmed exit signal yet. Refuse destructive
+    // cleanup synchronously, before the registry registers a deletion barrier.
+    this.requireRecoveryControl(id);
     const existing = this.nativeCleanupBarriers.get(id);
     if (existing) return existing;
     const execution = this.pendingRunnerExecutions.get(id);
@@ -2783,6 +2839,15 @@ export class StructuredSessionManager {
       return false;
     }
     this.pendingRunnerExecutions.delete(sessionId);
+    const codex = this.codexInputs.get(sessionId);
+    if (forgetRun && !this.disposed && codex) {
+      // OS exit is confirmed. Let completion reconcile receipts before cleanup;
+      // stop/delete have already settled unknown delivery and invalidated callbacks.
+      setImmediate(() => {
+        if (this.codexInputs.get(sessionId) === codex) this.codexInputs.delete(sessionId);
+        if (codex.bridgeRequestId) forgetCodexControl(sessionId, codex.bridgeRequestId);
+      });
+    }
     const current = this.sessions.get(sessionId);
     if (forgetRun && !this.disposed && current?.status === "idle" && !current.structuredState?.inFlight) {
       setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
@@ -2828,6 +2893,7 @@ export class StructuredSessionManager {
    * turnStartedAt 保持不变，客户端才算是「这一轮已经跑了多久」而不是「距离上一条输出多久」。
    */
   private noteTurnActivity(sessionId: string, state: StructuredSessionState): StructuredSessionState {
+    if (!state.inFlight) return { ...state, turnStartedAt: null, lastActivityAt: null };
     this.turnHeartbeat.observe(sessionId);
     return { ...state, lastActivityAt: isoNow() };
   }
@@ -2879,7 +2945,7 @@ export class StructuredSessionManager {
   private settleTurn(sessionId: string, state: StructuredSessionState): StructuredSessionState {
     this.turnHeartbeat.cancel(sessionId);
     this.qoderReadyRequests.delete(sessionId);
-    return { ...state, inputMode: "turn-end", turnStartedAt: null, lastActivityAt: null };
+    return { ...state, resident: undefined, inputMode: "turn-end", turnStartedAt: null, lastActivityAt: null };
   }
 
   /**
@@ -2918,6 +2984,8 @@ export class StructuredSessionManager {
     const payload = buildStructuredOutputPayload(session) as Record<string, unknown>;
     const data = {
       ...payload,
+      pendingEscalation: session.pendingEscalation ?? null,
+      permissionBlocked: !!session.pendingEscalation || session.permissionBlocked === true,
       status: session.status,
       exitCode: session.exitCode,
       ...outcome,
@@ -2961,7 +3029,7 @@ export class StructuredSessionManager {
       queuedMessages: current.queuedMessages?.filter((_, at) => at !== index),
       queuedInputScheduling: scheduling.filter((_, at) => at !== index),
       messages: preceding.some(turn => turn.messageId === offer.id) ? preceding
-        : [...preceding, buildUserTurn(offer.text, questionId ? { id: questionId } : undefined, isoNow(), undefined, offer.id, undefined, scheduling[index]?.origin)],
+        : [...preceding, buildUserTurn(offer.text, questionId ? { id: questionId } : undefined, isoNow(), current.runner === "qoder-cli-acp" ? current.structuredState?.foregroundRequestId ?? requestId : requestId, offer.id, undefined, scheduling[index]?.origin)],
     };
     this.saveAuthoritativeSession(committed);
     state.blocks = [];
@@ -2978,6 +3046,26 @@ export class StructuredSessionManager {
     let current = this.currentSessionForRequest(sessionId, requestId);
     if (!current || current.runner !== "qoder-cli-acp") return;
     if (dispatch) this.qoderReadyRequests.set(sessionId, requestId);
+    if (event.type === "wand_qoder_phase" && (event.phase === "idle" || event.phase === "responding")) {
+      const inFlight = event.phase === "responding";
+      state.phase = inFlight ? "responding" : undefined;
+      const updated: SessionSnapshot = { ...current,
+        status: inFlight ? "running" : "idle",
+        messages: inFlight ? current.messages : this.buildCompletedAssistantMessages(current, state),
+        structuredState: { ...current.structuredState!, resident: true, inFlight, phase: state.phase,
+          foregroundRequestId: typeof event.foregroundRequestId === "string" ? event.foregroundRequestId : current.structuredState?.foregroundRequestId ?? requestId,
+          turnStartedAt: inFlight ? (typeof event.at === "string" ? event.at : current.structuredState?.turnStartedAt ?? isoNow()) : null,
+          lastActivityAt: inFlight ? (typeof event.at === "string" ? event.at : current.structuredState?.lastActivityAt ?? isoNow()) : null },
+      };
+      if (inFlight) this.turnHeartbeat.observe(sessionId);
+      else this.turnHeartbeat.cancel(sessionId);
+      this.sessions.set(sessionId, updated);
+      this.saveAuthoritativeSession(updated);
+      if (!inFlight && !(typeof event.pendingBackgroundTasks === "number" && event.pendingBackgroundTasks > 0)) this.qoderForegroundWaiters.get(requestId)?.();
+      if (dispatch) this.emitStructuredSnapshot(updated, inFlight ? "output" : "ended",
+        inFlight ? {} : this.commentTerminalEvent(updated, updated.structuredState?.foregroundRequestId ?? requestId, "done"));
+      return;
+    }
     if (event.type === "wand_input_ready" && typeof event.id === "string") state.inputMessageId = event.id;
     if (event.type === "wand_input_boundary" && current.structuredState?.inputMode !== "steer") {
       current = { ...current, structuredState: { ...current.structuredState!, inputMode: "steer" } };
@@ -2996,10 +3084,12 @@ export class StructuredSessionManager {
       const pending = { requestId: event.id, scope: escalation.scope, runner: "json" as const,
         source: "tool_permission_request" as const, reason: escalation.reason,
         ...(escalation.target ? { target: escalation.target } : {}) };
-      const updated: SessionSnapshot = { ...current, pendingEscalation: pending, permissionBlocked: false };
+      const updated: SessionSnapshot = { ...current, pendingEscalation: pending, permissionBlocked: true };
       this.sessions.set(sessionId, updated);
       this.storage.updateSessionRuntimeMetadata(updated);
       this.emitStructuredSnapshot(updated);
+      if (dispatch) this.emit({ type: "status", sessionId,
+        data: { sessionKind: "structured", pendingEscalation: pending, permissionBlocked: true } });
     }
     if (event.type === "wand_qoder_permission_resolved" && typeof event.id === "string") {
       const resolution = event.resolution;
@@ -3043,13 +3133,16 @@ export class StructuredSessionManager {
     const dispatchKey = `${sessionId}:${requestId}`;
     if (this.qoderInputDispatches.has(dispatchKey) || this.qoderReadyRequests.get(sessionId) !== requestId) return;
     const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current || current.runner !== "qoder-cli-acp" || !current.structuredState?.inFlight
+    if (!current || current.runner !== "qoder-cli-acp" || (!current.structuredState?.inFlight && !current.structuredState?.resident)
       || this.interruptedWith.has(sessionId)) return;
     const metadata = queuedInputScheduling(current);
     if (metadata.some(item => item.handoff)) return;
     const questionId = findUnpairedAskUserQuestion(current.messages ?? [])?.id;
     if (!questionId && current.structuredState.inputMode !== "steer") return;
-    const index = metadata.findIndex(item => item.source === "user" && !item.nativeSteeringRejected && item.nativeQuestionId === questionId);
+    const inFlight = current.structuredState.inFlight;
+    const index = metadata.findIndex(item => (!inFlight || item.source === "user"
+      && (item.nativeSteeringRequested === true || !!questionId) && !item.nativeSteeringRejected)
+      && item.nativeQuestionId === questionId);
     const text = index >= 0 ? current.queuedMessages?.[index] : undefined;
     if (!text) return;
     const handoff = { id: randomUUID(), boundaryId: questionId ?? requestId, incarnationId: requestId };
@@ -3062,7 +3155,9 @@ export class StructuredSessionManager {
     this.qoderInputDispatches.add(dispatchKey);
     void sendQoderControl(sessionId, requestId, questionId
       ? { type: "question_answer", id: handoff.id, toolUseId: questionId, text }
-      : { type: "steer", id: handoff.id, text }).catch((error) => {
+      : { type: "steer", id: handoff.id, text, config: { mode: qoderAcpMode(current),
+        model: current.selectedModel ?? undefined, thinkingEffort: thinkingEffortToQoderEffort(current.thinkingEffort),
+        autoApprovePermissions: current.autoApprovePermissions === true } }).catch((error) => {
       const latest = this.currentSessionForRequest(sessionId, requestId);
       if (!latest) return;
       const scheduling = queuedInputScheduling(latest);
@@ -3122,6 +3217,7 @@ export class StructuredSessionManager {
       let resolution: import("./pi-native-input.js").PiInputResolution | undefined;
       try { resolution = forceUnknown ? undefined : current.runner === "qoder-cli-acp"
         ? resolveQoderInput(sessionId, requestId, handoff)
+        : current.provider === "codex" ? resolveCodexInput(sessionId, handoff.boundaryId, handoff)
         : this.execHost?.resolvePiInput?.(structuredRunId(sessionId), handoff); }
       catch { /* An unreadable receipt is unknown delivery, never permission to replay. */ }
       if (resolution?.state === "committed" && resolution.offer) {
@@ -3138,7 +3234,8 @@ export class StructuredSessionManager {
         queuedMessages: unclaimed ? current.queuedMessages : current.queuedMessages?.filter((_, at) => at !== index),
         queuedInputScheduling: unclaimed ? scheduling.map((meta, at) => {
           if (at !== index) return meta;
-          const { handoff: _handoff, ...rest } = meta; return rest;
+          const { handoff: _handoff, ...rest } = meta;
+          return current!.provider === "codex" ? { ...rest, nativeInputError: "Codex 明确拒绝了输入；请编辑或取回后再发送。" } : rest;
         }) : scheduling.filter((_, at) => at !== index),
         messages: unclaimed ? current.messages : appendNoticeTurn(
           state.blocks.length || state.result ? this.buildCompletedAssistantMessages(current, state) : current.messages,
@@ -3149,6 +3246,123 @@ export class StructuredSessionManager {
       this.sessions.set(sessionId, updated);
       this.emitStructuredSnapshot(updated);
     }
+  }
+
+  private handleCodexInputEvent(sessionId: string, requestId: string, event: Record<string, unknown>, state: StructuredRunnerTurnState, dispatch = true): void {
+    if (!this.currentSessionForRequest(sessionId, requestId) || typeof event.type !== "string" || !event.type.startsWith("wand_")) return;
+    let live = this.codexInputs.get(sessionId);
+    if (!live || live.requestId !== requestId) {
+      live = { requestId, bridgeRequestId: "", ready: false, busy: false };
+      this.codexInputs.set(sessionId, live);
+    }
+    if (typeof event.requestId === "string") live.bridgeRequestId = event.requestId;
+    if (event.type === "wand_input_boundary" && typeof event.id === "string") {
+      live.bridgeRequestId = event.id;
+      live.ready = true;
+      const current = this.currentSessionForRequest(sessionId, requestId)!;
+      const updated = { ...current, structuredState: { ...current.structuredState!, inputMode: "steer" as const } };
+      this.sessions.set(sessionId, updated);
+      this.storage.updateSessionRuntimeMetadata(updated);
+      this.emitStructuredSnapshot(updated);
+    }
+    if (event.type === "wand_codex_question" && typeof event.id === "string") {
+      live.questionId = event.id;
+      live.ready = true;
+    }
+    if (event.type === "wand_codex_question_resolved" && live.questionId === event.id) {
+      live.questionId = undefined;
+      const current = this.currentSessionForRequest(sessionId, requestId)!;
+      const metadata = queuedInputScheduling(current);
+      const expired = new Set(metadata.flatMap((item, index) => item.nativeQuestionId === event.id && !item.handoff ? [index] : []));
+      if (expired.size) {
+        const text = current.queuedMessages?.filter((_, index) => expired.has(index)).join("\n\n");
+        const updated: SessionSnapshot = { ...current,
+          queuedMessages: current.queuedMessages?.filter((_, index) => !expired.has(index)),
+          queuedInputScheduling: metadata.filter((_, index) => !expired.has(index)),
+          messages: appendNoticeTurn(current.messages, { role: "assistant", notice: true,
+            content: [{ type: "text", text: `Codex 问题已处理，以下回答未再次提交，仅供核对：\n\n${text}` }] }),
+        };
+        this.saveAuthoritativeSession(updated);
+        this.sessions.set(sessionId, updated);
+        this.emitStructuredSnapshot(updated);
+      }
+    }
+    if (event.type === "wand_codex_event") {
+      const nativeEvent = asRecord(event.event);
+      if (asRecord(nativeEvent?.params)?.turnId) live.ready = true;
+      if (nativeEvent?.method === "turn/completed") live.ready = false;
+    }
+    if (event.type === "wand_input_committed") {
+      const offer = event.message as PiInputOffer | undefined;
+      if (offer && typeof offer.id === "string" && typeof offer.text === "string") {
+        const metadata = queuedInputScheduling(this.currentSessionForRequest(sessionId, requestId)!);
+        const questionId = metadata.find(item => item.handoff?.id === offer.id)?.nativeQuestionId;
+        this.commitNativeInput(sessionId, requestId, offer, state, questionId);
+      }
+    }
+    // The reducer must finish its segment transition before another input can be offered.
+    if (dispatch) queueMicrotask(() => { void this.flushCodexInput(sessionId); });
+  }
+
+  private async flushCodexInput(sessionId: string): Promise<void> {
+    const live = this.codexInputs.get(sessionId);
+    if (!live?.ready || !live.bridgeRequestId || live.busy || this.disposed || this.pendingRecoveryIds.includes(sessionId) || this.interruptedWith.has(sessionId)) return;
+    const current = this.currentSessionForRequest(sessionId, live.requestId);
+    if (!current?.structuredState?.inFlight) return;
+    const scheduling = queuedInputScheduling(current);
+    if (scheduling.some(item => item.handoff)) return;
+    const index = scheduling.findIndex(item => item.source === "user" && !item.nativeInputError
+      && (live.questionId ? item.nativeQuestionId === live.questionId : !item.nativeQuestionId));
+    const text = current.queuedMessages?.[index];
+    if (text === undefined) return;
+    const handoff = { id: randomUUID(), boundaryId: live.bridgeRequestId, incarnationId: live.bridgeRequestId };
+    const reserved = { ...current, queuedInputScheduling: scheduling.map((item, at) => at === index ? { ...item, handoff } : item) };
+    live.busy = true;
+    let persisted = false;
+    try {
+      this.storage.updateSessionRuntimeMetadata(reserved);
+      persisted = true;
+      this.sessions.set(sessionId, reserved);
+      this.emitStructuredSnapshot(reserved);
+      await sendCodexControl(sessionId, live.bridgeRequestId, { id: handoff.id, text,
+        questionId: live.questionId, images: nativeImagePaths(text) });
+    } catch (error) {
+      if (!persisted) {
+        live.ready = false;
+        console.error("[StructuredSessionManager] Codex input reservation failed:", getErrorMessage(error));
+        return;
+      }
+      const latest = this.currentSessionForRequest(sessionId, live.requestId);
+      const metadata = latest && queuedInputScheduling(latest);
+      const at = metadata?.findIndex(item => item.handoff?.id === handoff.id) ?? -1;
+      if (latest && metadata && at >= 0) {
+        const definite = (error as { definiteRejection?: boolean }).definiteRejection === true;
+        const message = definite ? `Codex 拒绝了插入输入，已保留在队列；请编辑或取回后再发送。${getErrorMessage(error)}`
+          : "Codex 插入输入的送达结果未知，正在等待原执行回执；不会自动重发。";
+        const updated = { ...latest,
+          queuedInputScheduling: definite ? metadata.map((item, i) => {
+            if (i !== at) return item;
+            const { handoff: _handoff, ...rest } = item;
+            return { ...rest, nativeInputError: getErrorMessage(error) };
+          }) : metadata,
+          messages: appendNoticeTurn(latest.messages, { role: "assistant", notice: true, content: [{ type: "text", text: message }] }),
+        };
+        this.saveAuthoritativeSession(updated);
+        this.sessions.set(sessionId, updated);
+        this.emitStructuredSnapshot(updated);
+      }
+    } finally {
+      live.busy = false;
+    }
+    // A committed event removes only its own reservation; subsequent user inputs can then proceed.
+    if (this.codexInputs.get(sessionId) === live) queueMicrotask(() => { void this.flushCodexInput(sessionId); });
+  }
+
+  private finishCodexInput(sessionId: string, requestId: string): void {
+    const live = this.codexInputs.get(sessionId);
+    if (live?.requestId !== requestId) return;
+    this.codexInputs.delete(sessionId);
+    if (live.bridgeRequestId) forgetCodexControl(sessionId, live.bridgeRequestId);
   }
 
   private assertNativeInputMutable(session: SessionSnapshot): void {
@@ -3188,10 +3402,15 @@ export class StructuredSessionManager {
       this.employeeInputAdmission.schedule(current.employeeId);
       return;
     }
+    if (!fromEmployeeScheduler) {
+      index = queuedInputScheduling(current).findIndex(item => !item.nativeInputError
+        && !(current.provider === "codex" && item.nativeQuestionId));
+      if (index < 0) return;
+    }
     const nextInput = current.queuedMessages?.[index];
     const scheduling: EmployeeInputScheduling = { ...queuedInputScheduling(current)[index]!,
       acceptanceId: queuedInputScheduling(current)[index]?.acceptanceId ?? randomUUID() };
-    if (!nextInput) return;
+    if (!nextInput || scheduling.nativeInputError || (current.provider === "codex" && scheduling.nativeQuestionId)) return;
     // Legacy queues acquire an identity before dispatch too. The queue item stays
     // durable until its user turn and removal commit together.
     const identified = { ...current, queuedInputScheduling: queuedInputScheduling(current).map((item, at) => at === index ? scheduling : item) };
@@ -3318,6 +3537,11 @@ export class StructuredSessionManager {
     let startupTimedOut = false;
     let turnCompleted = false;
     const disarmStartupWatchdog = (): void => this.disarmCandidateStartupWatchdog(sessionId);
+    if (provider === "codex") {
+      // Startup can be cancelled before the first protocol event. Keep the
+      // immutable bridge identity so confirmed exit can still clean it up.
+      this.codexInputs.set(sessionId, { requestId, bridgeRequestId: requestId, ready: false, busy: false });
+    }
     const execution = startEmployeeKnowledgeRunner(this.storage, runner, {
       session,
       prompt,
@@ -3325,6 +3549,10 @@ export class StructuredSessionManager {
       ...(provider === "qoder" ? {
         onQoderInputEvent: (event: Record<string, unknown>, state: StructuredRunnerTurnState) =>
           this.handleQoderInputEvent(sessionId, requestId, event, state),
+      } : {}),
+      ...(provider === "codex" ? {
+        onCodexInputEvent: (event: Record<string, unknown>, state: StructuredRunnerTurnState) =>
+          this.handleCodexInputEvent(sessionId, requestId, event, state),
       } : {}),
       ...(provider === "pi" && session.structuredState?.engine !== "core" ? {
         onPiInputEvent: (event: Record<string, unknown>, state: StructuredRunnerTurnState) =>
@@ -3422,6 +3650,10 @@ export class StructuredSessionManager {
       };
     }
 
+    if (provider === "codex") {
+      this.settleNativeInputs(sessionId, requestId, result.state);
+      if (result.processExited !== false) this.finishCodexInput(sessionId, requestId);
+    }
     if (provider === "qoder") {
       this.settleNativeInputs(sessionId, requestId, result.state);
       if (result.processExited !== false) forgetQoderControl(sessionId, requestId);

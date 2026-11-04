@@ -521,7 +521,8 @@ export class RenderDaemonClient implements TerminalHost {
     const states: TerminalSessionState[] = [];
     for (const entry of raw) {
       const state = normalizeRenderSessionState(entry);
-      if (state) states.push(state);
+      if (!state) throw new Error("Render list contains an unusable session; refusing an incomplete inventory");
+      states.push(state);
     }
     return states;
   }
@@ -1107,7 +1108,10 @@ export function normalizeRenderSessionState(value: unknown): TerminalSessionStat
   const rows = asNumber(record.rows, 24, problems, "rows");
   const seq = asNumber(record.seq, 0, problems, "seq");
   const status = record.status === "exited" ? "exited" : record.status === "running" ? "running" : null;
-  if (status === null) problems.push(`status=${JSON.stringify(record.status)}`);
+  if (status === null) {
+    warnStateIssue(`unknown status for ${sessionId}: ${JSON.stringify(record.status)}`);
+    return null;
+  }
   const exitCode = typeof record.exitCode === "number" ? record.exitCode : null;
   const output = typeof record.output === "string" ? record.output : "";
   if (typeof record.output !== "string") problems.push(`output=${typeof record.output}`);
@@ -1122,7 +1126,7 @@ export function normalizeRenderSessionState(value: unknown): TerminalSessionStat
     sessionId,
     incarnationId,
     pid,
-    status: status ?? "exited",
+    status,
     exitCode,
     cols,
     rows,

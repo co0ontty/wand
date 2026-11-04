@@ -1,3 +1,4 @@
+import { registerWorkspaceDirectoryRoutes } from "./server-workspace-directory-routes.js";
 import { sessionExecutionStatus, taskExecutionProjection } from "./execution-state.js";
 import { canArchiveTask } from "./task-archive-policy.js";
 import { TaskReadModel } from "./task-read-model.js";
@@ -7,7 +8,7 @@ import crypto from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import type { Express } from "express";
 import { asyncRoute } from "./express-async.js";
-import { sendRouteError } from "./server-request.js";
+import { boundedText, sendRouteError } from "./server-request.js";
 import { getErrorMessage } from "./error-utils.js";
 import { expandHomePath } from "./middleware/path-safety.js";
 import {
@@ -398,6 +399,7 @@ export function registerWorkspaceRoutes(
   titleOptions: AutoTaskTitleOptions = {},
   organize: { judge?: TitleJudge; conversationJudge?: ConversationGroupingJudge; summarize?: (text: string, index: number, total: number, signal: AbortSignal) => Promise<string> } = {},
 ): void {
+  registerWorkspaceDirectoryRoutes(app, storage, sessions);
   taskTitleService(storage, titleOptions);
   registerConversationOrganizeRoutes(app, storage, {
     titleOptions, judge: organize.conversationJudge, summarize: organize.summarize,
@@ -631,8 +633,7 @@ export function registerWorkspaceRoutes(
   // Sections are layout containers, independent of task-board metadata.
   app.post("/api/workspace-sections", (req, res) => {
     try {
-      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
-      if (!name) throw badRequest("请输入分区名称。");
+      const name = boundedText(req.body?.name, "分区名称", 1, 80);
       const cwd = resolveWorkspaceCwd(req.body?.cwd);
       const workspaceId = typeof req.body?.workspaceId === "string" ? req.body.workspaceId : "";
       const workspace = workspaceId ? storage.getWorkspace(workspaceId)

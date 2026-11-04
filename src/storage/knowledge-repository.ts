@@ -37,7 +37,7 @@ export class KnowledgeRepository {
   }
 
   knowledgeOwners(): { global: { id: string; name: string }; employees: Array<{ id: string; name: string }>; projects: Array<{ id: string; name: string; readOnly: boolean }> } {
-    const projects = this.s.listWorkspaces().filter(workspace => !isGlobalWorkspace(workspace))
+    const projects = this.s.listWorkspaces().filter(workspace => workspace.userAdded && !isGlobalWorkspace(workspace))
       .map(workspace => ({ id: workspace.id, name: workspace.name, readOnly: false }));
     const orphans = this.db.prepare(`SELECT workspace_id, MAX(project_name) AS project_name FROM project_knowledge
       WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = workspace_id) GROUP BY workspace_id`).all();

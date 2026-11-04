@@ -71,13 +71,11 @@ export function OverlayHost({ portalContainer, settingsPresentation = "workspace
           actions={dialog.options.actions}
           input={dialog.options.input}
           dismissable={dialog.options.dismissable}
+          busy={dialog.busy}
+          error={dialog.options.onAction ? dialog.error : undefined}
           focusTriggerAfterClose={dialog.options.focusTriggerAfterClose}
           onAction={(action, inputValue) => {
-            overlayStore.completeDialog(dialog.id, {
-              dismissed: false,
-              action,
-              inputValue,
-            });
+            void overlayStore.submitDialog(dialog.id, action, inputValue);
           }}
           onDismiss={() => {
             overlayStore.completeDialog(dialog.id, { dismissed: true });

@@ -273,7 +273,7 @@ function ArchivedSessionsFold({
           {sessions.map((session, index) => (
             <TaskSessionItem
               key={session.id}
-              session={session}
+              session={{ ...session, archived: true }}
               index={index}
               liveTitle={liveTitles?.[session.id]}
               active={activeSessionId === session.id}
@@ -1055,8 +1055,11 @@ function TaskGroupSection({
             ...(group.synthetic || group.global ? {} : { workspaceId: group.workspaceId }) });
         } else if (key === "new-section") {
           setMenuOpen(false);
-          void createWorkspaceSection(group).then(async created => { if (created) await onTasksChanged(); })
-            .catch(cause => toast(describeError(cause, "无法创建分区。"), "danger"));
+          void createWorkspaceSection(group).then(async created => {
+            if (!created) return;
+            try { await onTasksChanged(); }
+            catch (cause) { toast(`分区已创建，但列表刷新失败：${describeError(cause, "请刷新列表。")}`, "danger"); }
+          }).catch(cause => toast(describeError(cause, "无法创建分区。"), "danger"));
         } else if (key === "new-directory") {
           setMenuOpen(false); onOpenDialog?.();
           newSessionController.open({

@@ -644,34 +644,49 @@ function fileHoldsValue(filePath: string, expected: string): boolean {
 }
 
 export function readTerminalDaemonPid(configPath: string, uidOverride?: number): number | null {
+  let value: string;
   try {
-    const value = Number(readFileSync(terminalDaemonPaths(configPath, uidOverride).pidPath, "utf8").trim());
-    return Number.isSafeInteger(value) && value > 0 ? value : null;
-  } catch {
-    return null;
+    value = readFileSync(terminalDaemonPaths(configPath, uidOverride).pidPath, "utf8").trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
+  const pid = Number(value);
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(pid)) {
+    throw new Error("Terminal daemon PID evidence is invalid; refusing unknown ownership");
+  }
+  return pid;
 }
 
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
   }
 }
 
 function waitForProcessExit(pid: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setInterval(() => {
-      if (isProcessAlive(pid)) return;
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
       clearInterval(timer);
       process.off("SIGINT", stopWaiting);
       process.off("SIGTERM", stopWaiting);
-      resolve();
+    };
+    const timer = setInterval(() => {
+      try {
+        if (isProcessAlive(pid)) return;
+        cleanup();
+        resolve();
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
     }, 500);
     const stopWaiting = () => {
-      clearInterval(timer);
+      cleanup();
       process.exit(0);
     };
     process.once("SIGINT", stopWaiting);

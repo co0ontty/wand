@@ -31,6 +31,16 @@ Pi native 使用原有 TUI 和同进程事件文件桥。其他结构化 CLI 保
 
 通用 structured CLI 由独立 supervisor 持有；tmux I/O worker 异常消失时，supervisor 终止并确认整个 CLI 进程组退出。每条 stdout/stderr 日志上限为 64 MiB，超限明确失败并停止执行，不静默截掉协议数据。
 
+## `wand-st` 执行监视面板
+
+通用结构化执行的 tmux 会话名以 `wand-st-` 开头。用 `tmux attach -t <名称>` 连接后，pane 显示「结构化执行监视」、执行 ID、操作说明及正在启动／运行中／正在停止／退出或失败状态；运行期间每 10 秒显示 CLI PID、已运行时长、stdout/stderr 字节数和距最近输出的时间。即使 CLI 暂时没有输出，也能确认 pane 的用途与状态。
+
+面板实时镜像 stdout/stderr，并标注输出来源；JSON 仍按原始文本显示，终端控制字符会被过滤，UTF-8 跨块解码。监视器只投影显示内容：原始 stdout/stderr 字节继续直接写入各自的协议日志，provider 解析与恢复仍读取日志，不读取 pane。
+
+终端显示独立使用最多 64 Ki 字符待写缓冲，每次最多刷新 16 Ki 字符，并遵守终端 backpressure。输出超过显示容量时，恢复刷新后会明确提示省略的字符数；省略只影响面板，协议日志仍按原有 64 MiB 单路上限处理。终端写入失败会关闭本次监视，不影响 CLI 执行或原始日志。
+
+面板用于观察执行，消息、问答与权限处理仍通过 Wand 提交。`Ctrl-b d` 只分离 attach client；`Ctrl-C` 会转发给当前 CLI 进程组并显示正在停止。pane 仍随 worker 退出而关闭，完成结果保留在 Wand 中，不增加退出后常驻面板。新代码只对更新后的新执行回合生效，既有 worker 不注入、不替换、不重启。
+
 ## PTY 与空白终端
 
 新 PTY、provider 终端和空白 login shell 通过 tmux-aware Node terminald 连接默认 tmux server（配置目录内 `tmux-terminald.json` 对应的是 Wand 内部通信端点，不是另一个 tmux server）。旧 Render／legacy 会话仍交给原宿主，不在线迁移，也不把 tmux attach client 交给不认识 pane 所有权的旧 Render。
@@ -57,3 +67,15 @@ PTY 原始输出保留最近 8 × 1 MiB 的环形日志，provider 退出标记�
 ## 开发验证
 
 使用 `.nvmrc` 指定的 Node 和隔离配置，不调用真实付费模型。生命周期变更还需全量 `npm run check`、`npm run build`。Render 源码测试、随包产物能力与已安装服务验收是三个独立结果，不互相替代；验收不得强停用户已有执行。
+
+## Qoder ACP 会话与回合
+
+普通 Qoder ACP 会话由持久宿主持有独立 CLI 进程；同一会话的后续回合复用原生 session，不同会话不共享进程。`end_turn` 只结束前台回合，投影为空闲；`resident` 表示 owner 仍在，不能用 UI 空闲判断进程退出。系统内部的一次性 AI 调用仍在完成后释放进程。明确停止、删除或原生进程退出才收尾常驻 owner，Server 重启接管原 owner，不重放提示词。
+
+`activeRequestId` 标识宿主执行；`foregroundRequestId` 标识常驻进程内的逻辑回合。运行中普通发送保留在队列，当前轮结束后再交付；只有明确插话或队列提升才立即提交原生输入（原生提问的回答除外）。插话沿用逻辑回合，空闲后的新输入建立新边界，Todo 不借用旧计划。下一轮发送前确认原生模型/模式配置；审批只映射原生单次允许/拒绝，“本轮允许”仅在当前回合缓存，不建立永久允许规则。
+
+Qoder CLI CN 1.1.82 的原生后台通知在 ACP 中不能可靠回传；实测补发 `session/prompt` 也可能卡在内部通知处理中。因此采用兼容等待，不伪造跨轮通知：通过官方 `--settings` 注入当前进程专属 PostToolUse Hook，使用官方 shell-prefix 包装已批准命令，按原生 taskId/toolCallId/PID 与包装进程的唯一执行 ID 关联。Hook 等待实际子进程 close 回执，向当前回合返回退出码、信号和原生输出路径，再由模型读取结果。读取到输出、PID 消失或超时均不作为成功证据；不重复执行命令，不修改用户/项目的 Qoder 配置或放宽权限。已有 shell-prefix 保留在包装链中。
+
+该兜底有明确取舍：Bash 的原生后台请求在 ACP 中等待完成后才收尾，长期不退出的服务也会持续等待，用户可停止；它不是完整的跨轮后台对话支持。等待由持久 worker 持有，Server 重启不打断；停止取消等待并使迟到回执失效。普通回合仍可插话、排队、审批；其它客户端沿用既有 tool/result 和运行状态投影。详情及验证记录在 TASK-419。
+
+来源：[Qoder Tools](https://docs.qoder.com/cli/tools)、[Hooks](https://docs.qoder.com/cli/hooks)、[ACP](https://docs.qoder.com/cli/acp)。这是基于官方扩展点的 Wand 兼容处理，不宣称官方已修复 ACP 后台消息投递。

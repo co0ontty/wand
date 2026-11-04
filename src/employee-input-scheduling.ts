@@ -12,6 +12,10 @@ export interface EmployeeInputScheduling {
   nativeQuestionId?: string;
   /** An explicit refusal waits for the next turn instead of retrying the same control RPC. */
   nativeSteeringRejected?: boolean;
+  /** Only an explicit immediate/promotion action may steer a running Qoder turn. */
+  nativeSteeringRequested?: boolean;
+  /** Explicit Codex rejection stays queued until the user edits or retrieves it. */
+  nativeInputError?: string;
   /** Private native reservation; retained in the durable queue until commit. */
   handoff?: import("./pi-native-input.js").PiInputHandoff;
   /** Durable identity used to remove exactly the accepted queue item at dispatch. */

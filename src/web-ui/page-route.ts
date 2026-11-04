@@ -3,7 +3,7 @@ export const PAGE_ROUTE_EVENT = "wand:page-route";
 export const PAGE_ROUTE_KEYS = new Set([
   "view", "session", "workspace", "workspaceTask", "window", "tab", "task", "comment", "run", "team", "settings", "range",
   "sidebar", "sidebarQuery", "workspaceView", "conversation", "conversationTask", "conversationRun",
-  "chatFilter", "chatActivity", "chatQuery", "chatTaskStage", "chatWorkspace", "chatRuntime", "directoryTab", "directoryQuery",
+  "chatFilter", "chatActivity", "chatQuery", "chatTaskStage", "chatWorkspace", "chatEmployee", "chatWorktree", "chatRuntime", "directoryTab", "directoryQuery",
   "boardView", "q", "directory", "sort", "filters",
   "scheduleView", "scheduleQuery", "scheduleFilter", "scheduleRange", "scheduleDate",
   "teamQuery", "teamFilter", "teamPage", "settingsNested",

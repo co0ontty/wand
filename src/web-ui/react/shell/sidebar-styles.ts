@@ -10,6 +10,8 @@ export function installSidebarStyles(): void {
 .sidebar-rail-scroll > .sidebar-brand-mark { display:block; margin:8px auto 16px; }
 .sidebar-list-panel { flex:1; min-width:0; min-height:0; }
 .sidebar-list-panel[hidden] { display:none; }
+.sidebar .sidebar-expand-tab { position:absolute; inset-inline-start:100%; top:14px; width:20px; min-width:20px; height:32px; padding:0; border:1px solid var(--border-subtle); border-inline-start:0; border-radius:0 6px 6px 0; background:var(--sidebar-surface); color:var(--text-secondary); z-index:3; }
+.sidebar .sidebar-expand-tab:hover { color:var(--sidebar-accent); background:var(--sidebar-selected); }
 .sidebar.context-rail .sidebar-navigation-rail { border-inline-end:1px solid var(--border-subtle); }
 .sidebar-navigation-rail :is(.wand-ui-icon-button,.sidebar-list-error,[data-daemon-update-status]) { width:44px; min-width:44px; height:44px; padding:0; flex:none; }
 .sidebar .conversation-navigation .wand-ui-icon-button { height:48px; display:flex; flex-direction:column; gap:3px; border-radius:var(--control-radius); color:var(--text-secondary); }

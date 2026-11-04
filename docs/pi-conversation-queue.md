@@ -1,6 +1,6 @@
 # Pi 对话排队与安全边界插话
 
-本次工作对应会话 `cd187f57-6745-419f-840d-dc660c6a9e75`。用户确认实施后，已在原生 TUI/tmux 路径接通安全边界插话，并通过已安装服务验收。下文先保留改造前的链路分析，再说明本次实际实现。
+实施工作对应会话 `cd187f57-6745-419f-840d-dc660c6a9e75`。用户确认实施后，已在原生 TUI/tmux 路径接通安全边界插话，历史本地 fixture 曾通过已安装服务流程。TASK-252 仍有设备与旧宿主验证缺口；2026-11-02 补证状态见文末，不能将历史流程通过视为本卡四端验收完成。下文保留改造前的链路分析与实施记录。
 
 ## 结论
 
@@ -111,10 +111,24 @@
 - `DaemonAdmission` 透传新控制接口，并修复恢复 checkpoint 参数透传。Web/macOS/iOS/Android 读取 `structuredState.inputMode`；旧原生桥或旧 CLI 不报插话能力时，继续显示整轮后发送。
 - 旧进程已经加载旧桥，保持原行为；新启动的 Pi 原生回合使用新桥。无需重启 Render、terminald 或已有 Pi 会话。
 
-本机已通过 `~/start.sh --no-build` 安装本次构建并重启 Server，保留 Render/terminald。`scripts/verify-pi-steering-delivery.mjs` 经已安装服务真实 HTTP 输入接口，使用临时本地零费用 fixture provider 验收：三次模型请求、同一 Pi PID、两次安全边界插话、队列归零、六条用户/助手消息严格交替。临时 provider 已移除；没有真实付费模型调用、设备安装或源码 push。
+2026-10-30 实施轮次曾通过 `~/start.sh --no-build` 安装构建并重启 Server，保留 Render/terminald。`scripts/verify-pi-steering-delivery.mjs` 经已安装服务真实 HTTP 输入接口，使用临时本地零费用 fixture provider 验收：三次模型请求、同一 Pi PID、两次安全边界插话、队列归零、六条用户/助手消息严格交替。临时 provider 已移除；没有真实付费模型调用、设备安装或源码 push。
 
-最终验收会话 `5f3273f4-4fad-4077-8141-c116ab6df0a1`；此前一次通过会话 `1f94fe23-0fc2-45ac-983a-6bae40de2ee6` 保留历史；结果 `output/pi-steering/installed-acceptance.json`。独立集成测试还覆盖中途 dispose 并重建 Server 管理器后续跑。故障用例覆盖未领取超时、已领取未确认、事件丢失对账、重复回执、取回编辑竞争及停止。
+当时最终日志对应会话 `5f3273f4-4fad-4077-8141-c116ab6df0a1`；此前一次通过会话 `1f94fe23-0fc2-45ac-983a-6bae40de2ee6` 保留历史。旧的固定路径 `output/pi-steering/installed-acceptance.json` 后来被会话 `93734b1f-02e3-488a-b1cb-ce7c32a18e0f` 的成功结果覆盖，不能再用该 JSON 作为 `5f3273f4` 的原始证据；两次记录现已分别追加留档，见文末。独立集成测试还覆盖中途 dispose 并重建 Server 管理器后续跑。故障用例覆盖未领取超时、已领取未确认、事件丢失对账、重复回执、取回编辑竞争及停止。
 
 Web 的专用 Chrome 验收在桌面、390px、320px、native-shell、reactUi=0、reduce-motion 六种模式通过，能力提示正确、Portal 和关闭路径正常、发送按钮不位移；结果 `output/pi-steering/browser-focused.json`。广域旧面板脚本另有超时，不将专用通过冒充广域全绿。
 
-本轮 `check`、服务端 `build` 与预算门禁通过。默认全量：4110 项，3994 passed、114 skipped、2 failed；两项为日志回放时间门限和 150ms 子进程 stdout 时序，独立重跑 11/11 通过。受控并发全量：4112 项，3996 passed、115 skipped、1 failed（独立钉钉浏览器用例 35s 超时），该用例单独重跑通过。不能把这些结果写成全量一次全绿。原生构建与分发进度、最终证据在 `output/pi-steering/REPORT.md` 和对应任务面板记录。
+实施轮次的 `check`、服务端 `build` 与预算门禁通过。默认全量：4110 项，3994 passed、114 skipped、2 failed；两项为日志回放时间门限和 150ms 子进程 stdout 时序，独立重跑 11/11 通过。受控并发全量：4112 项，3996 passed、115 skipped、1 failed（独立钉钉浏览器用例 35s 超时），该用例单独重跑通过。不能把这些结果写成全量一次全绿。这些是历史结果，旧 tests 框架已退役，当前不恢复或重跑。历史原生构建与分发记录在 `output/pi-steering/REPORT.md` 和对应任务面板记录。
+
+## 2026-11-02 补证状态
+
+本轮执行会话 `370a84de-494c-48f4-9266-8b88b6596218`，只修补证据归属，不重做插话机制。主仓基线 `82b8523`；改动隔离在 `/private/tmp/wand-task-252-evidence-20261102`，未合入或部署。已安装服务及全局包均为 `4.107.2`。本轮只读观察已有会话，没有新执行模型任务，不能称为该版本的新一轮端到端验收。
+
+追加证据目录为 `output/pi-steering/runs/2026-11-02T06-03-14-291Z-task252-eylY9c/`。`historical-sources.json` 记录旧文件路径、时间与 SHA，旧 JSON 和最终日志分别复制留档；`receipt-attribution-final.json` 分开记录两次会话的消息 ID、时序与现存原生资料。`5f3273f4` 的首条消息时间为 `2026-10-30T04:15:16.427Z`，`93734b1f` 为 `2026-10-30T04:56:35.456Z`，各有六条按 first/second/third 排列的用户/助手消息，均为空队列、空闲、`inputMode=steer`。对应私有邮箱目录已不存在，在当前默认 Pi 会话目录按精确原生 session ID 未找到原始文件，因此本轮未重新证明历史 claim/commit；不能从会话显示正常推定所有历史回执都已核验。
+
+`scripts/verify-pi-steering-delivery.mjs` 现在为每次运行原子创建独立 `runs/<UTC时间>-fixture-<随机后缀>/`，输出目录在开始时打印。每次保存 `run.json`、会话 ID、完整 fixture 消息、输入回执及其 SHA、执行 incarnation/PID 和精确原生 `inputId` 对应记录，并记录观察时服务版本。后续运行不再写旧的固定证据文件。完整夹具会临时修改模型配置，且失败清理会停止其创建的夹具会话；本轮授权禁止这些操作，因此只验证语法与证据目录隔离，未执行完整夹具，也不以新脚本代替缺失的历史回执。
+
+`current-distributions.json` 分开保存当前更新接口选择与本地现存产物：Android 选择 GitHub 的 `4.107.2+202611021108`，其 SHA 仅为接口公布的远端 digest，本轮未重新下载；macOS 选择本地 `4.107.2-debug.11021356`，iOS 选择本地 `4.106.3-debug.11020946`，两包均实际计算本地 SHA 与大小。旧 `4.106.0` 安装包已不在当前分发目录，原记录保留为历史资料，不冒充当前可核验产物。当前包不等于本卡原始构建，也没有重新证明其设备触控行为。
+
+仍待验证：Android/iOS/macOS 的真实输入与队列交互；旧原生桥或旧 CLI 宿主在 `inputMode=turn-end` 下整轮后发送的实际表现；两次历史 fixture 的原始回执因文件不可用仍不能重核。旧宿主仅核对默认 `turn-end`、收到 capability 才升级 `steer` 的源码与已安装代码，不能把静态核对写成实测通过。本轮禁止设备/模拟器安装启动、额外真实付费模型与服务重启，故保留阻塞，不提交完成或自验通过。TASK-262/TASK-263 按当前用户指令取消其旧 tests 门禁，不再作为本卡前置条件；不修改这两张卡，也不恢复退役框架。
+
+2026-11-04 工作区归并：上述补证文档与每次运行独立保存证据的脚本已移入主工作区；历史设备验证缺口仍按任务面板跟踪，不据此宣称四端验收通过。

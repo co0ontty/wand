@@ -35,6 +35,8 @@ interface WorktreeOperationOptions {
 
 interface WorktreeMergeOptions extends WorktreeOperationOptions {
   targetBranch?: string;
+  expectedSourceHead?: string;
+  expectedTargetHead?: string;
 }
 
 
@@ -447,6 +449,17 @@ export async function mergeSessionWorktreeAsync(options: WorktreeMergeOptions): 
     });
   }
 
+  if (options.expectedSourceHead || options.expectedTargetHead) {
+    const sourceHead = await runWorktreeGitAsync(["rev-parse", context.sourceBranch], context.repoRoot, context.gitTimeoutMs);
+    const currentTargetHead = await runWorktreeGitAsync(["rev-parse", context.targetBranch], context.repoRoot, context.gitTimeoutMs);
+    const currentBranch = await runWorktreeGitAsync(["branch", "--show-current"], context.repoRoot, context.gitTimeoutMs);
+    if (sourceHead !== options.expectedSourceHead || currentTargetHead !== options.expectedTargetHead || currentBranch !== context.targetBranch) {
+      throw new WorktreeMergeError(WORKTREE_MERGE_ERROR_CODES.CONFLICT, "来源或目标分支已变化，请重新检查后确认。", { cleanupDone: false, conflict: false });
+    }
+    if (await runWorktreeGitAsync(["status", "--porcelain", "--untracked-files=all"], context.repoRoot, context.gitTimeoutMs)) {
+      throw new WorktreeMergeError(WORKTREE_MERGE_ERROR_CODES.DIRTY, "目标工作区出现未提交改动，请重新检查。", { cleanupDone: false, conflict: false });
+    }
+  }
   const originalState = await captureCheckoutStateAsync(context);
   const targetHead = await runWorktreeGitAsync(["rev-parse", context.targetBranch], context.repoRoot, context.gitTimeoutMs);
   if (await isMergeInProgressAsync(context.repoRoot, context.gitTimeoutMs)) {
@@ -456,7 +469,7 @@ export async function mergeSessionWorktreeAsync(options: WorktreeMergeOptions): 
   }
   try {
     await runWorktreeGitAsync(["checkout", context.targetBranch], context.repoRoot, context.gitTimeoutMs);
-    await runWorktreeGitAsync(["merge", "--no-ff", "--no-edit", "--no-gpg-sign", context.sourceBranch], context.repoRoot, context.gitTimeoutMs);
+    await runWorktreeGitAsync(["merge", "--no-ff", "--no-edit", "--no-gpg-sign", options.expectedSourceHead || context.sourceBranch], context.repoRoot, context.gitTimeoutMs);
   } catch (error) {
     const rollbackErrors = await rollbackFailedMergeAsync(context, originalState, targetHead);
     const rollbackMessage = rollbackErrors.length > 0

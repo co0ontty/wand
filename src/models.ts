@@ -4,6 +4,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { forgetQoderControl } from "./qoder-acp-control.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { resolveChildEnv } from "./env-utils.js";
 import { discoverPiEndpointModels, type PiModelEndpointDiscoveryOptions } from "./pi-model-discovery.js";
@@ -217,13 +221,18 @@ function defaultCommandRunner(
   args: string[],
   options: ModelCommandOptions,
 ): Promise<ModelCommandResult> {
-  return execFileAsync(file, args, {
+  const result = execFileAsync(file, args, {
     env: options.env,
     timeout: options.timeout,
     signal: options.signal,
     maxBuffer: 4 * 1024 * 1024,
-    ...(options.input !== undefined ? { input: options.input } : {}),
-  }).then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }));
+  });
+  // Async execFile does not consume an `input` option (only sync APIs do).
+  if (options.input !== undefined) {
+    result.child.stdin?.on("error", () => {});
+    result.child.stdin?.end(options.input);
+  }
+  return result.then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }));
 }
 
 function normalizeClaudeModelId(value: unknown): string | null {
@@ -466,11 +475,24 @@ async function probeQoderModels(
   runner: ModelCommandRunner,
   env: NodeJS.ProcessEnv,
 ): Promise<ProbeResult<ClaudeModelInfo[]>> {
+  const sessionId = randomUUID();
+  const requestId = randomUUID();
   try {
-    const { stdout } = await runner("qodercli", ["--list-models"], { env, timeout: 8000 });
-    return { ok: true, value: parseQoderModels(stdout) };
+    const worker = fileURLToPath(new URL("./qoder-acp-worker.js", import.meta.url));
+    const args = existsSync(worker) ? [worker] : ["--import", import.meta.resolve("tsx"), worker.replace(/\.js$/, ".ts")];
+    const { stdout } = await runner(process.execPath, args, { env, timeout: 20_000,
+      input: JSON.stringify({ file: "qodercli", sessionId, requestId, cwd: tmpdir(), prompt: "", mode: "", catalogOnly: true }) + "\n" });
+    const catalog = stdout.split("\n").filter(Boolean).map(line => JSON.parse(line))
+      .find(record => record.type === "wand_qoder_catalog");
+    if (!Array.isArray(catalog?.models) || !catalog.models.length) return { ok: false };
+    const models = catalog.models as ClaudeModelInfo[];
+    const defaultModel = models.find(model => model.id === catalog.defaultModel);
+    return { ok: true, value: [{ id: "default", label: "跟随 Qoder 默认", alias: true,
+      ...(defaultModel?.reasoningEfforts ? { reasoningEfforts: defaultModel.reasoningEfforts } : {}) }, ...models] };
   } catch {
     return { ok: false };
+  } finally {
+    forgetQoderControl(sessionId, requestId);
   }
 }
 
@@ -853,7 +875,6 @@ async function discoverModelCache(
     apiProbe,
     claudeEffortProbe,
     grokEffortProbe,
-    qoderEffortProbe,
     piEffortProbe,
   ] = await Promise.all([
     probeClaudeVersion(runner, env),
@@ -865,7 +886,6 @@ async function discoverModelCache(
     listClaudeModelsFromApi(options, env),
     probeEffortList(runner, env, "claude", ["--effort", "__wand_probe__", "--help"]),
     probeEffortList(runner, env, "grok", ["--effort", "__wand_probe__", "-p", "x", "--output-format", "streaming-json", "--max-turns", "1"]),
-    probeEffortList(runner, env, "qodercli", ["-p", "x", "--reasoning-effort", "__wand_probe__"]),
     probeEffortList(runner, env, "pi", ["--help"]),
   ]);
   options.signal?.throwIfAborted();
@@ -906,7 +926,7 @@ async function discoverModelCache(
         ? unionModelEfforts(opencodeProbe.models.value)
         : cloneThinkingEfforts(previous.thinkingEfforts).opencode,
       grok: grokEffortProbe.ok ? grokEffortProbe.value : cloneThinkingEfforts(previous.thinkingEfforts).grok,
-      qoder: qoderEffortProbe.ok ? qoderEffortProbe.value : cloneThinkingEfforts(previous.thinkingEfforts).qoder,
+      qoder: qoderProbe.ok ? unionModelEfforts(qoderProbe.value) : cloneThinkingEfforts(previous.thinkingEfforts).qoder,
       pi: piProbe.ok && unionModelEfforts(piProbe.value).length
         ? unionModelEfforts(piProbe.value)
         : piEffortProbe.ok

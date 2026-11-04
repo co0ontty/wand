@@ -16,7 +16,7 @@ export interface TodoTurnSession {
   permissionBlocked?: boolean;
   pendingEscalation?: unknown;
   ptyBusy?: boolean;
-  structuredState?: { inFlight?: boolean; activeRequestId?: string | null } | null;
+  structuredState?: { inFlight?: boolean; activeRequestId?: string | null; foregroundRequestId?: string } | null;
 }
 export interface TodoTurnSource {
   key: string;
@@ -37,11 +37,15 @@ export function findTodoTurnSource(session: TodoTurnSession): TodoTurnSource | n
     if (blocks.some(block => (block as any).__queued)) continue;
     if (latestRequest === null && turn.requestId) latestRequest = turn.requestId;
     if (blocks.length && blocks.every(block => block.type === "tool_result")) continue;
+    // Native steering adds accepted inputs inside the same execution. Its
+    // request identity, not the newest text message, owns the plan boundary.
+    if (latestRequest && messages.slice(0, i).some(previous => previous.role === "user"
+      && !previous.notice && previous.requestId === latestRequest)) continue;
     // A truncated/unknown user boundary must not borrow an older round's Todo.
     const identity = turn.requestId || turn.messageId || turn.createdAt;
     if (!identity || i === 0 && (session.leadingBlockOffset ?? 0) > 0
       || !blocks.some(block => block.type === "text" && !!block.text.trim() || (block as any).type === "image")) return null;
-    const activeRequest = session.structuredState?.inFlight ? session.structuredState.activeRequestId : null;
+    const activeRequest = session.structuredState?.inFlight ? (session.structuredState.foregroundRequestId ?? session.structuredState.activeRequestId) : null;
     if (activeRequest && activeRequest !== latestRequest) return null;
     const results = new Set<string>();
     const questions: string[] = [];
@@ -73,7 +77,7 @@ export function observeTodoTurn(
   let evidence = previous?.sourceKey === source.key && previous.requestId === source.requestId ? previous : undefined;
   if (!event) return evidence;
   if (event.type === "init") evidence = undefined; // Reconnect/subscription cannot reconstruct missed terminal reasons.
-  const request = event.data?.structuredState?.activeRequestId;
+  const request = event.data?.structuredState?.foregroundRequestId ?? event.data?.structuredState?.activeRequestId;
   if (event.data?.structuredState?.inFlight === true && typeof request === "string" && request === source.requestId) {
     return { sourceKey: source.key, requestId: request };
   }

@@ -1,3 +1,4 @@
+import { DirectorySessionGroups } from "./directory-session-groups";
 import { updatePageRoute } from "../../page-route";
 import { isSessionAttention } from "../workspaces/sidebar-display-mode";
 import { agentToolDisplayName } from "../../provider-identity";
@@ -26,6 +27,7 @@ import { DEFAULT_CONVERSATION_FILTERS,
 import { cachedSiliconEmployee } from "../agents/employee-repository";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { ConversationListFilterSummary } from "./list-filter-controls";
+import { revealUnifiedSidebarEntry } from "./unified-sidebar-filters";
 import { conversationsRepository } from "./repository";
 import { SidebarRowMenu } from "../workspaces/sidebar-row-menu";
 import { employeeProfile } from "../agents/employee-profile-state";
@@ -231,7 +233,7 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
 }) {
   const ui = useConversationUi();
   const list = React.useRef<HTMLDivElement>(null);
-  const scope = `${ui.listWorktree}:${model.facets.runtime}:${model.facets.taskStage}:${model.facets.workspace}:${model.facets.archive}:${model.facets.activityOnly}:${model.query}`;
+  const scope = `${ui.listWorktree}:${model.facets.runtime}:${model.facets.taskStage}:${model.facets.workspace}:${model.facets.employee}:${model.facets.archive}:${model.facets.activityOnly}:${model.query}`;
   const scrolls = React.useRef<Record<string, number>>({});
   React.useLayoutEffect(() => {
     const node = list.current;
@@ -262,7 +264,7 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
       <Typography.Text type="secondary" role="status">{model.loading ? "正在读取会话…" : `${model.rows.length + historyCount} 个会话${model.queuedTasks.length ? ` · ${model.queuedTasks.reduce((sum, entry) => sum + entry.count, 0)} 条任务派发排队中` : ""}`}</Typography.Text>
       {model.error ? <Flex vertical><Typography.Text type="danger" role="alert">{model.error}</Typography.Text><WandButton onClick={model.refresh}>重新读取</WandButton></Flex> : null}
       {outside ? <div className="unified-sidebar-current" role="status"><span>当前会话不在筛选结果中</span><WandButton kind="ghost" size="small" onClick={() => {
-        conversationUi.listFacets(DEFAULT_CONVERSATION_FILTERS); conversationUi.clearWorktree(); conversationUi.filter("list-query", ""); setLocate(true);
+        conversationUi.revealList(revealUnifiedSidebarEntry(current, model.facets, ui.listWorktree, model.query, titles[current.session.id])); setLocate(true);
       }}>定位当前会话</WandButton></div> : null}
     </div>
     <div className="unified-sidebar-rows" ref={list}>
@@ -275,7 +277,7 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
             onClick={() => updatePageRoute({ view: "issues", task: task.boardTaskId!, directory: group.workspaceId })}/>
         </div>)}
       </details> : null}
-      {orderedRows.map((entry, index) => {
+      {<DirectorySessionGroups model={model} selectedId={selectedSessionId} renderRow={entry => {
         const session = entry.session;
         const title = sidebarSessionLabel(session, model.entries.indexOf(entry), titles[session.id]);
         const tree = sessionWorktree(entry.group, entry.task, session);
@@ -284,7 +286,7 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
         const summary = [session.employeeName || entry.conversation?.title || (workspaceSessionProvider(session) ? agentToolDisplayName(workspaceSessionProvider(session), session.engine) : session.sessionKind === "pty" ? "空白终端" : "执行工具未知"), workspace,
           entry.archived ? "已归档" : sidebarSessionState(session).label].filter(Boolean).join(" · ");
         const row = <div data-unified-session={session.id} className={`unified-sidebar-row${selected(entry) ? " is-selected" : ""}`}><ImSidebarItem id={session.id} title={title} titleGenerating={session.titleGenerating}
-          avatarNode={<SessionProviderMark session={session} size={13}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)} summary={summary}
+          avatarNode={<SessionProviderMark session={session} size={13}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus({ ...session, archived: entry.archived })} summary={summary}
           active={selected(entry)} onClick={() => onOpen(entry)}/>
           {tree ? <WandButton kind={ui.listWorktree === tree.path ? "soft" : "ghost"} size="small" className="session-worktree-tag"
             aria-pressed={ui.listWorktree === tree.path} aria-label={`筛选 Worktree ${tree.name}`} title={`${tree.path}\n分支：${tree.branch || "detached HEAD"}`}
@@ -293,12 +295,8 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
         const content = entry.conversation ? <UnifiedConversationMenu key={session.id} item={entry.conversation} row={row} onOpen={() => onOpen(entry)} onChanged={model.refresh}/> : <SidebarSessionMenu key={session.id} session={{ ...session, archived: entry.archived }} label={title}
           intoNewTask={session.workspaceTaskId ? undefined : entry.group} onOpen={() => onOpen(entry)}
           onArchive={async archived => { await archiveSidebarSession(session.id, archived); await taskGroupsStore.reload(); }} row={row}/>;
-        return <React.Fragment key={session.id}>
-          {attentionRows.length && index === 0 ? <div className="unified-sidebar-section">我需要关注 <span>{attentionRows.length}</span></div> : null}
-          {attentionRows.length && index === attentionRows.length ? <div className="unified-sidebar-section">其他会话 <span>{otherRows.length}</span></div> : null}
-          {content}
-        </React.Fragment>;
-      })}
+        return <React.Fragment key={session.id}>{content}</React.Fragment>;
+      }}/>}
       {historyRows}
       {!model.loading && !model.rows.length && !model.queuedTasks.length && !historyCount && !model.error ? <Flex vertical gap={8} className="unified-sidebar-empty" role="status"><Typography.Text type="secondary">{model.entries.length ? "没有符合条件的会话" : "还没有会话"}</Typography.Text>
         <WandButton kind="ghost" onClick={() => { conversationUi.listFacets(DEFAULT_CONVERSATION_FILTERS); conversationUi.clearWorktree(); conversationUi.filter("list-query", ""); }}>清除筛选与搜索</WandButton>

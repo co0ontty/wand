@@ -61,8 +61,6 @@ export interface PublicUpdateRoutesDependencies {
   pruneAndroidApkDirectory?(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }>;
   /** macOS Beta 包下发时清理分发目录，保留最新一整套 zip/dmg/update.json。 */
   pruneMacosBetaDirectory?(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }>;
-  /** iOS IPA 下发时清理分发目录，保留最新一个包。 */
-  pruneIosIpaDirectory?(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }>;
   /** 计算本地分发文件的 SHA-256（hex）；失败返回 null，下载响应不带哈希头。 */
   computeAssetSha256(asset: DownloadAsset): Promise<string | null>;
   resolveLatestDmg(): Promise<ResolvedUpdateAsset | null>;
@@ -370,8 +368,7 @@ export function registerPublicUpdateRoutes(
       res.status(404).json({ error: "当前没有可下载的 IPA 文件。" });
       return;
     }
-    // iOS 每次 debug 构建产出独立时间戳的 IPA，不清理会按构建次数堆积。
-    if (!appId) await pruneQuietly(deps.pruneIosIpaDirectory?.bind(deps), asset.fileName, " iOS 构建包");
+    // 下载只负责传输，历史 IPA 的清理由独立维护流程处理。
     streamFileWithRange(req, res, {
       filePath: asset.filePath,
       size: asset.size,

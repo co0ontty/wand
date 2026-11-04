@@ -22,9 +22,10 @@ export function qoderControlDirectory(sessionId: string, requestId: string): str
 }
 
 export type QoderControlCommand =
+  | { type: "background"; event: Record<string, unknown> }
   | { type: "permission_resolution"; escalationId: string; resolution: StructuredPermissionDecision }
   | { type: "question_answer"; id: string; toolUseId: string; text: string }
-  | { type: "steer"; id: string; text: string; images?: string[] }
+  | { type: "steer"; id: string; text: string; images?: string[]; config?: { model?: string; mode: string; thinkingEffort?: string | null; autoApprovePermissions: boolean } }
   | { type: "interrupt" };
 
 export function sendQoderControl(sessionId: string, requestId: string, command: QoderControlCommand): Promise<void> {

@@ -20,6 +20,7 @@ export function nextGitStatusRequestTime(): number {
 interface CacheEntry<T> {
   status: T;
   requestedAt: number;
+  receivedAt: number;
 }
 
 export interface GitStatusCache<T> {
@@ -28,7 +29,7 @@ export interface GitStatusCache<T> {
    */
   accept(sessionId: string, status: T, requestedAt: number): boolean;
   /** 某个会话当前缓存的状态；没有则 null。 */
-  peek(sessionId: string | null): T | null;
+  peek(sessionId: string | null, maxAgeMs?: number): T | null;
   forget(sessionId: string): void;
 }
 
@@ -40,12 +41,14 @@ export function createGitStatusCache<T>(): GitStatusCache<T> {
       const previous = entries.get(sessionId);
       // 相等时刻按「后到的算」处理：同一次请求重复落地不必丢弃。
       if (previous && requestedAt < previous.requestedAt) return false;
-      entries.set(sessionId, { status, requestedAt });
+      entries.set(sessionId, { status, requestedAt, receivedAt: Date.now() });
       return true;
     },
-    peek(sessionId) {
+    peek(sessionId, maxAgeMs) {
       if (!sessionId) return null;
-      return entries.get(sessionId)?.status ?? null;
+      const entry = entries.get(sessionId);
+      if (!entry || maxAgeMs !== undefined && Date.now() - entry.receivedAt >= maxAgeMs) return null;
+      return entry.status;
     },
     forget(sessionId) {
       entries.delete(sessionId);

@@ -121,46 +121,80 @@ export function inferProviderFromRunner(runner: unknown): SessionProvider | unde
   return normalizeProviderId(runner) ?? undefined;
 }
 
-/** 这些是包管理器式的启动前缀：`npx claude`、`pnpm dlx codex` 等要看到后面的真实可执行名。 */
-const PACKAGE_RUNNER_PREFIXES: ReadonlySet<string> = new Set(["npx", "pnpx", "bunx", "yarn", "pnpm", "corepack"]);
+/** A literal shell word and its original span; resume edits must not re-quote argument data. */
+export type ProviderCommandToken = { value: string; start: number; end: number };
 
-/** 包管理器的子命令（没有它们时，`pnpm dlx codex` 会误把 `dlx` 当可执行名）。 */
-const PACKAGE_RUNNER_SUBCOMMANDS: ReadonlySet<string> = new Set(["dlx", "exec", "x"]);
-
-/** 拆出命令行第一个可执行 token，去掉引号、目录前缀与 Windows 可执行后缀。 */
-function commandExecutableName(command: string): string {
-  const match = command.match(/^(?:"([^"]+)"|'([^']+)'|(\S+))/);
-  const executablePath = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
-  return executablePath.split(/[\\/]/).pop()?.replace(/\.(?:cmd|exe)$/i, "") ?? "";
+/** Parse one simple command. Shell pipelines/substitutions cannot be safely rewritten as a resume. */
+function commandTokens(command: string): ProviderCommandToken[] | null {
+  const tokens: ProviderCommandToken[] = [];
+  let index = 0;
+  while (index < command.length) {
+    if (/[ \t]/.test(command[index])) { index += 1; continue; }
+    const start = index;
+    let value = "";
+    let quote = "";
+    while (index < command.length) {
+      const char = command[index];
+      if (!quote && /[ \t]/.test(char)) break;
+      if (char === quote) { quote = ""; index += 1; continue; }
+      if (quote !== "'" && char === "\\") {
+        const next = command[index + 1];
+        if (next === undefined || /[\r\n]/.test(next)) return null;
+        value += quote === '"' && !/[$`"\\]/.test(next) ? `\\${next}` : next;
+        index += 2;
+        continue;
+      }
+      if (!quote && (char === "'" || char === '"')) { quote = char; index += 1; continue; }
+      if ((!quote && /[;|&<>()\r\n]/.test(char))
+        || (quote !== "'" && (char === "`" || (char === "$" && command[index + 1] === "(")))
+        || (!quote && char === "#" && index === start)) return null;
+      value += char;
+      index += 1;
+    }
+    if (quote) return null;
+    tokens.push({ value, start, end: index });
+  }
+  return tokens;
 }
 
-/**
- * 从启动命令推断 provider；识别的是命令行里真正的可执行名。
- *
- * - `/opt/homebrew/bin/claude --resume abc` → claude
- * - `open-code run` / `qodercli --print` → opencode / qoder
- * - `npx claude` / `pnpm dlx codex` → 看包管理器后面的真实 CLI
- *
- * 参数与父目录名不能冒充别的 provider（`claude -p codex` 仍是 claude）。
- */
-export function inferProviderFromCommand(command: unknown): SessionProvider | undefined {
-  if (typeof command !== "string") return undefined;
-  const value = command.trim();
-  if (!value) return undefined;
+const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx", "yarn", "pnpm", "corepack"]);
+const PACKAGE_RUNNER_SUBCOMMANDS = new Set(["dlx", "exec", "x"]);
+const PACKAGE_RUNNER_VALUE_OPTIONS = new Set([
+  "-p", "--package", "--cache", "--userconfig", "--registry", "--prefix", "--cwd", "--dir", "-C", "--filter", "-F",
+]);
 
-  // 先把命令行按空白切成 token，跳过包管理器前缀与它自己的 flag（--yes 之类）。
-  const tokens = value.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+function commandExecutableName(value: string): string {
+  return value.split(/[\\/]/).pop()?.replace(/\.(?:cmd|exe)$/i, "").toLowerCase() ?? "";
+}
+
+/** Startup inference and PTY resume share the same executable and argument boundaries. */
+export function parseProviderCommand(command: string): {
+  provider: SessionProvider;
+  tokens: ProviderCommandToken[];
+  executableIndex: number;
+} | null {
+  const tokens = commandTokens(command);
+  if (!tokens?.length) return null;
   let index = 0;
-  if (PACKAGE_RUNNER_PREFIXES.has(commandExecutableName(tokens[0] ?? "").toLowerCase())) {
-    index = 1;
+  while (PACKAGE_RUNNERS.has(commandExecutableName(tokens[index]?.value ?? ""))) {
+    index += 1;
     while (index < tokens.length) {
-      const token = tokens[index];
-      if (token.startsWith("-")) { index += 1; continue; }
-      if (PACKAGE_RUNNER_SUBCOMMANDS.has(commandExecutableName(token).toLowerCase())) { index += 1; continue; }
-      break;
+      const value = tokens[index].value;
+      // npx --call/-c executes shell source, not a following executable token.
+      if (value === "-c" || value === "--call" || value.startsWith("--call=")) return null;
+      if (PACKAGE_RUNNER_SUBCOMMANDS.has(value) || value === "--") { index += 1; continue; }
+      if (!value.startsWith("-")) break;
+      index += PACKAGE_RUNNER_VALUE_OPTIONS.has(value) ? 2 : 1;
     }
   }
-  return normalizeProviderId(commandExecutableName(tokens[index] ?? "")) ?? undefined;
+  const executable = commandExecutableName(tokens[index]?.value ?? "");
+  const provider = normalizeProviderId(executable);
+  return provider ? { provider, tokens, executableIndex: index } : null;
+}
+
+/** Infer the actual CLI, including quoted paths and package runners, never an argument or name prefix. */
+export function inferProviderFromCommand(command: unknown): SessionProvider | undefined {
+  return typeof command === "string" ? parseProviderCommand(command)?.provider : undefined;
 }
 
 /** 每个 provider 在自由文本里可能出现的写法，用于把命令名收敛成可读标签。 */

@@ -185,6 +185,10 @@ export function installChatComposerStyles(): void {
 .input-composer[data-composer-expanded] .composer-input-wrap { grid-row:1; grid-column:1 / -1; }
 .input-composer[data-composer-expanded] .composer-actions-left { grid-row:2; grid-column:1; }
 .input-composer[data-composer-expanded] .composer-actions-right { grid-row:2; grid-column:2; flex-wrap:nowrap; }
+.composer-permission-row:not(:has([data-composer-badge-host="permissions"]:not(.hidden))) { display:none; }
+.composer-permission-row { min-width:0; padding:8px; border-bottom:1px solid var(--border); }
+.composer-permission-row #permission-actions { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.composer-permission-row #permission-actions-label { flex:1 1 180px; min-width:0; overflow-wrap:anywhere; white-space:normal; }
 .input-composer[data-composer-expanded] .composer-status-row > :not(#composer-status-line):not([data-composer-config-host="mode"]) { display:none; }
 .input-composer .composer-status-row .wand-composer-select-trigger-mode { padding:0 4px; font-size:var(--font-size-xs); background:transparent; border:0; box-shadow:none; }
 .input-composer:not([data-pty-input-mode]) .composer-input-wrap { min-height:60px; }

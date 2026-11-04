@@ -70,7 +70,9 @@ export function useSessionMove({ sessionId, taskId, intoNewTask, open, onMoved }
       const created = await createWorkspaceSection(group, sessionId);
       if (!created) return;
       onMoved?.();
-      await workspacesStore.getRuntime()?.refreshSessions();
+      const runtime = workspacesStore.getRuntime();
+      try { await runtime?.refreshSessions(); }
+      catch (cause) { runtime?.toast(`分区已创建并移入，但列表刷新失败：${describeError(cause, "请刷新列表。")}`, "danger"); }
     } catch (cause) { setError(describeError(cause, "无法创建分区。")); }
     finally { running.current = false; setBusy(false); }
   };

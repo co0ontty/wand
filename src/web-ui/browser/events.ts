@@ -337,7 +337,7 @@ import { setupVisualViewportHandlers } from "./viewport";
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Wand-Tool-Projection": "compact" },
           credentials: "same-origin",
-          body: JSON.stringify({ input: answerText + "\n", view: state.currentView })
+          body: JSON.stringify({ input: answerText + "\n", expectedQuestionId: toolUseId, view: state.currentView })
         }).catch(function(err) {
           console.error("[wand] Error sending answer:", err);
           sel.submitted = false;

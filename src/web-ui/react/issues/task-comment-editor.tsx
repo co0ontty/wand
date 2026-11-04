@@ -86,7 +86,7 @@ export const TaskCommentEditor = React.forwardRef<TaskCommentEditorHandle, {
     {mount && employee && createPortal(<WandPopover open={open} onOpenChange={next => { setOpen(next); if (next) setChoice(selected); }} side="top" align="start" popupOwner={popupOwner}
       ariaLabel="本次指派配置" trigger={<button type="button" className="task-comment-inline-mention" disabled={disabled}>@{employee.name}{agent ? ` · ${agent.provider} / ${agent.model}` : " · 员工默认"}</button>}>
       <div style={{ width: "min(340px, calc(100vw - 48px))" }}><Typography.Text strong>本次执行配置</Typography.Text>
-        {choice ? <AgentFields agent={choice} catalog={catalog} providerOptions={AGENT_TOOL_OPTIONS.filter(option => option.engine === "cli").map(option => ({ value: option.id, label: option.label }))} ariaPrefix="评论指派" onChange={setChoice}/>
+        {choice ? <AgentFields agent={choice} catalog={catalog} providerOptions={AGENT_TOOL_OPTIONS.filter(option => option.engine !== "sdk").map(option => ({ value: option.id, label: option.label }))} ariaPrefix="评论指派" onChange={setChoice}/>
           : <Typography.Paragraph type="secondary">员工没有可用的默认配置，请先检查员工定义。</Typography.Paragraph>}
         <Flex gap="small" justify="end"><WandButton onClick={() => setOpen(false)}>取消</WandButton><WandButton onClick={() => { onAgent(null); setOpen(false); }}>恢复员工默认</WandButton><WandButton kind="primary" disabled={!choice} onClick={() => { onAgent(choice); setOpen(false); }}>应用</WandButton></Flex>
       </div>

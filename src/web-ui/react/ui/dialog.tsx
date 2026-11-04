@@ -1,4 +1,4 @@
-import { Flex, Typography, type ModalProps } from "antd";
+import { Flex, Spin, Typography, type ModalProps } from "antd";
 import * as React from "react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { WandButton, type WandButtonKind } from "./button";
@@ -34,6 +34,8 @@ export interface WandDialogProps<T> {
   actions: ReadonlyArray<WandDialogAction<T>>;
   input?: WandDialogInput;
   dismissable?: boolean;
+  busy?: boolean;
+  error?: string;
   focusTriggerAfterClose?: boolean;
   onAction(value: T, inputValue?: string): void;
   onDismiss(): void;
@@ -134,7 +136,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
 }
 
 export function WandDialog<T>({ open, title, description, tone = "info", icon, actions, input,
-  dismissable = true, focusTriggerAfterClose, onAction, onDismiss }: WandDialogProps<T>) {
+  dismissable = true, busy = false, error, focusTriggerAfterClose, onAction, onDismiss }: WandDialogProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
   const [inputValue, setInputValue] = useState(input?.value ?? "");
@@ -143,23 +145,32 @@ export function WandDialog<T>({ open, title, description, tone = "info", icon, a
     const frame = requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
     return () => cancelAnimationFrame(frame);
   }, [open, Boolean(input)]);
+  useEffect(() => { if (open && error && !busy) inputRef.current?.focus({ preventScroll: true }); }, [open, error, busy]);
   const primary = actions.find(action => action.kind === "primary" || action.kind === "danger") ?? actions.at(-1);
   const submit = (event: KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key !== "Enter" || !primary || composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    if (busy || event.key !== "Enter" || !primary || composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     event.preventDefault(); onAction(primary.value, inputValue);
   };
   const resolvedIcon = icon == null || ["", "i", "!", "✓", "?"].includes(String(icon))
     ? <WandIcon name={defaultIcons[tone]} size={18}/> : icon;
-  return <WandDialogSurface open={open} title={title} description={description} dismissable={dismissable} showClose={false}
+  return <WandDialogSurface open={open} title={title} description={description} dismissable={dismissable && !busy} showClose={false}
     focusTriggerAfterClose={focusTriggerAfterClose}
     onOpenChange={shown => { if (!shown) onDismiss(); }}>
     <div aria-hidden="true" className="wand-ui-dialog-icon">{resolvedIcon}</div>
     {input && <WandInput ref={inputRef} data-wand-autofocus="true" aria-label={input.label ?? title}
-      autoComplete="off" spellCheck={false} placeholder={input.placeholder} value={inputValue}
+      autoComplete="off" spellCheck={false} placeholder={input.placeholder} value={inputValue} disabled={busy} aria-invalid={!!error}
       onChange={event => setInputValue(event.currentTarget.value)} onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }} onKeyDown={submit}/>}
+    {error !== undefined ? <Typography.Paragraph role={error ? "alert" : undefined} type="danger"
+      style={{ blockSize: "2lh", overflow: "auto", marginBlock: 0 }}>{error}</Typography.Paragraph> : null}
     <div className="wand-ui-dialog-actions">{actions.map((action, index) => <WandButton
       key={`${action.label}:${index}`} kind={action.kind} data-wand-autofocus={action.autoFocus ? "true" : undefined}
-      onClick={() => onAction(action.value, input ? inputValue : undefined)}>{action.label}</WandButton>)}</div>
+      disabled={busy} aria-label={action.label} aria-busy={busy && action === primary}
+      onClick={() => onAction(action.value, input ? inputValue : undefined)}>
+      {error !== undefined || busy ? <span style={{ display: "inline-grid", placeItems: "center" }}>
+        <span style={{ gridArea: "1 / 1", visibility: busy && action === primary ? "hidden" : undefined }}>{action.label}</span>
+        {busy && action === primary ? <Spin size="small" style={{ gridArea: "1 / 1" }}/> : null}
+      </span> : action.label}
+    </WandButton>)}</div>
   </WandDialogSurface>;
 }

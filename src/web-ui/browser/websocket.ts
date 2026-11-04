@@ -28,7 +28,7 @@ import {
 } from "./terminal-pool";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import { bindForegroundSyncListeners } from "./render";
-import { scheduleGitStatusRefresh, startGitStatusPolling, stopGitStatusPolling } from "./git-commit";
+import { loadGitStatus, scheduleGitStatusRefresh, stopGitStatusRefresh } from "./git-commit";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { recordTerminalHistoryChunk } from "./terminal-history";
 import { notifyTasksChanged } from "../react/task-changes";
@@ -52,7 +52,7 @@ function noteTurnActivity(sessionId: string, active: boolean): void {
   if (!state.turnActiveBySession) state.turnActiveBySession = {};
   var previous = state.turnActiveBySession[sessionId];
   state.turnActiveBySession[sessionId] = active;
-  if (previous === true && !active) scheduleGitStatusRefresh();
+  if (previous === true && !active) scheduleGitStatusRefresh(sessionId);
 }
 
 function requestChatResync(sessionId: string): void {
@@ -81,7 +81,7 @@ function projectSelectedChat(sessionId: string): any {
       export function startPolling() {
         stopPolling();
         bindForegroundSyncListeners();
-        startGitStatusPolling();
+        if (state.selectedId) void loadGitStatus(state.selectedId, { force: true });
         startSessionTimePolling();
         // Use WebSocket if available, fallback to polling
         if (initWebSocket()) {
@@ -383,6 +383,9 @@ function projectSelectedChat(sessionId: string): any {
               if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
                 snapshot.permissionBlocked = !!msg.data.permissionBlocked;
               }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'pendingEscalation')) {
+                snapshot.pendingEscalation = msg.data.pendingEscalation;
+              }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'queuedMessages')) {
                 snapshot.queuedMessages = msg.data.queuedMessages || [];
                 composerQueue.advance(msg.sessionId, "server");
@@ -547,7 +550,7 @@ function projectSelectedChat(sessionId: string): any {
             break;
           case 'ended': {
             // 进程退出前最后一轮改动也要落到徽章上。
-            scheduleGitStatusRefresh();
+            scheduleGitStatusRefresh(msg.sessionId);
             // Build snapshot from server data; use updateSessionSnapshot so the
             // local update is not lost when loadSessions() later replaces
             // state.sessions entirely.
@@ -1029,8 +1032,8 @@ function projectSelectedChat(sessionId: string): any {
           clearInterval(state.pollTimer);
           state.pollTimer = null;
         }
-        // 登出/拆壳：兜底轮询与相对时间节拍器都归零，不要在未登录状态下继续打接口。
-        stopGitStatusPolling();
+        // 登出/拆壳：取消尚未发出的 Git 刷新与相对时间节拍器。
+        stopGitStatusRefresh();
         stopSessionTimePolling();
       }
 

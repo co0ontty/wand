@@ -470,6 +470,8 @@ export interface InputRequest {
   input?: string;
   /** Structured input acceptance identity; same key must preserve the same intent. */
   idempotencyKey?: string;
+  /** Bind a question-card answer to the exact question shown by the client. */
+  expectedQuestionId?: string;
   /** Interrupt the current structured turn; optionally keep its remaining queue. */
   interrupt?: boolean;
   preserveQueue?: boolean;
@@ -763,6 +765,10 @@ export interface StructuredSessionState {
   lastError: string | null;
   inFlight: boolean;
   activeRequestId: string | null;
+  /** Qoder ACP owner is alive between turns; activeRequestId identifies that owner even while inFlight is false. */
+  resident?: boolean;
+  /** Logical foreground round within a resident owner; steering retains this identity. */
+  foregroundRequestId?: string;
   /**
    * 本轮（一次用户输入触发的 assistant 回合）开始时刻。客户端据此算「这一轮已经跑了
    * 多久」，刷新页面后依旧可读（随 structured_state 落库，不依赖本地挂载时刻）。

@@ -95,6 +95,12 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   const revision = React.useCallback(() => teamChatComposer.revision(key), [key]);
   React.useSyncExternalStore(teamChatComposer.subscribe, revision, revision);
   const draft = teamChatComposer.read(key);
+  React.useEffect(() => {
+    const current = teamChatComposer.read(key);
+    if (controller.initialText && !current.text && !current.attachments.length) {
+      teamChatComposer.edit(key, { text: controller.initialText, expectedRevision: current.revision });
+    }
+  }, [key, controller.initialText]);
   const editor = useEditorExpansion(key, () => sender.current?.inputElement as HTMLTextAreaElement | null);
   React.useLayoutEffect(() => { installChatComposerStyles(); installConversationHomeStyles(); installNewWorkStyles(); }, []);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);

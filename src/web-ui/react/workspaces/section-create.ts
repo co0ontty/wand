@@ -8,12 +8,14 @@ export async function createWorkspaceSection(group: TaskDirectoryGroup, sessionI
     description: `在 ${group.workspaceName} 中整理会话，不创建任务卡。`,
     input: { label: "分区名称", placeholder: "例如：功能开发" },
     actions: [{ label: "取消", value: false }, { label: "创建", value: true, autoFocus: true }],
+    onAction: async (create, inputValue) => {
+      if (!create) return;
+      const name = inputValue?.trim();
+      if (!name) throw new Error("请输入分区名称。");
+      if (name.length > 80) throw new Error("分区名称不能超过 80 个字符。");
+      await httpWorkspacesRepository.createSection({ name, cwd: group.workspaceCwd,
+        ...(!group.synthetic && !group.global ? { workspaceId: group.workspaceId } : {}), sessionId });
+    },
   });
-  if (answer.dismissed === true) return false;
-  if (!answer.action) return false;
-  const name = answer.inputValue?.trim();
-  if (!name) throw new Error("请输入分区名称。");
-  await httpWorkspacesRepository.createSection({ name, cwd: group.workspaceCwd,
-    ...(!group.synthetic && !group.global ? { workspaceId: group.workspaceId } : {}), sessionId });
-  return true;
+  return answer.dismissed === false && answer.action;
 }
