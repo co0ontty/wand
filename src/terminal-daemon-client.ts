@@ -15,6 +15,7 @@ import {
 } from "./terminal-daemon-protocol.js";
 import {
   appendTerminalChunkWindow,
+  DaemonUnavailableError,
   InProcessTerminalHost,
   type TerminalAttachResult,
   type TerminalDataEvent,
@@ -538,7 +539,8 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
 
   async request(method: TerminalDaemonRequest["method"], params?: Record<string, unknown>): Promise<unknown> {
     const socket = this.socket;
-    if (!socket || socket.destroyed || !socket.writable) throw new Error("Terminal daemon is unavailable");
+    // Pre-send failure: nothing was written, so callers may safely retry.
+    if (!socket || socket.destroyed || !socket.writable) throw new DaemonUnavailableError("Terminal daemon is unavailable");
     const id = this.nextRequestId++;
     const request: TerminalDaemonRequest = {
       kind: "request",

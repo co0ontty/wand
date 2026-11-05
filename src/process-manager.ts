@@ -42,7 +42,7 @@ import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from 
 import { isPtySubmitInput } from "./pty-turn-activity.js";
 import { samplePtyForegrounds } from "./pty-foreground.js";
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "./pty-shell-launch.js";
-import { InProcessTerminalHost, type TerminalAttachResult, type TerminalDataEvent, type TerminalHost, type TerminalProcess, type TerminalSessionState } from "./terminal-host.js";
+import { InProcessTerminalHost, DaemonUnavailableError, type TerminalAttachResult, type TerminalDataEvent, type TerminalHost, type TerminalProcess, type TerminalSessionState } from "./terminal-host.js";
 import { ProviderHistoryScanner, type ClaudeHistorySession, type CodexHistorySession, type OpenCodeHistorySession, type QoderHistorySession } from "./provider-history-scanner.js";
 import { logInfo } from "./runtime-log.js";
 
@@ -77,6 +77,19 @@ export class PtyInputDeliveryError extends Error {
   constructor(readonly sessionId: string, cause: unknown) {
     super("PTY input delivery could not be confirmed.", { cause });
     this.name = "PtyInputDeliveryError";
+  }
+}
+
+/**
+ * The daemon was unreachable before any byte was written, so nothing was
+ * delivered and the input is safe to retry once connected. This must stay
+ * distinct from PtyInputDeliveryError (unknown outcome, never replay).
+ */
+export class PtyInputNotSentError extends Error {
+  readonly code = "PTY_INPUT_NOT_SENT" as const;
+  constructor(readonly sessionId: string, cause: unknown) {
+    super("PTY input was not sent; the daemon was unavailable.", { cause });
+    this.name = "PtyInputNotSentError";
   }
 }
 
@@ -1367,6 +1380,7 @@ export class ProcessManager extends EventEmitter {
       if (terminal.writeConfirmed) await terminal.writeConfirmed(input);
       else terminal.write(input);
     } catch (cause) {
+      if (cause instanceof DaemonUnavailableError) throw new PtyInputNotSentError(id, cause);
       throw new PtyInputDeliveryError(id, cause);
     }
     const current = this.sessions.get(id);
@@ -1809,7 +1823,7 @@ export class ProcessManager extends EventEmitter {
     return record.ptyPermissionBlocked || record.pendingEscalation !== null;
   }
 
-  setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId">): void {
+  setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId"> & Partial<Pick<SessionSnapshot, "archived" | "archivedAt">>): void {
     Object.assign(this.mustGet(id), membership);
     this.emitEvent({ type: "status", sessionId: id, data: membership });
   }

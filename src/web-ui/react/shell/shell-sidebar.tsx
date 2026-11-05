@@ -21,6 +21,8 @@ import { useUserProfile } from "../user-profile-repository";
 import { DEFAULT_USER_DISPLAY_NAME } from "../../../user-profile.js";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { DaemonUpdateNotice } from "./daemon-update-notice";
+import { WandSelect } from "../ui/select";
+import { CONVERSATION_TASK_STAGES, normalizeConversationTaskStage } from "../conversations/list-filters";
 import { WandButton, WandIconButton } from "../ui/button";
 import { WandDropdownMenu, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator, WandDropdownMenuTrigger } from "../ui/dropdown-menu";
 import { WandIcon, type WandIconName } from "../ui/icons";
@@ -715,6 +717,11 @@ export function ShellSidebar() {
               </svg>
             </WandIconButton>}
             <WandSearchField className="conversation-search-input sidebar-list-search" label="搜索会话" value={model.query} onValueChange={query => conversationUi.filter("list-query", query)}/>
+            <WandSelect ariaLabel="任务状态筛选" className="sidebar-task-stage-filter" value={model.facets.taskStage}
+              options={CONVERSATION_TASK_STAGES} displayValue="" displayTitle={`任务状态：${CONVERSATION_TASK_STAGES.find(option => option.value === model.facets.taskStage)?.label ?? "全部状态"}`}
+              startSlot={<WandIcon name="sliders" size={16}/>} triggerKind={model.facets.taskStage === "all" ? "ghost" : "soft"} align="end"
+              onValueChange={value => conversationUi.listFacets({ ...model.facets, taskStage: normalizeConversationTaskStage(value),
+                runtime: value === "archived" ? "archived" : model.facets.taskStage === "archived" && model.facets.runtime === "archived" ? "all" : model.facets.runtime })}/>
             {snapshot.layout.sidebarDrawer && <WandIconButton id="close-drawer-button" aria-label="关闭侧栏" onClick={() => void dispatch({ type: "layout.drawer.close" })}><SidebarToggleIcon open/></WandIconButton>}
           </Flex>
           <UnifiedSidebarList model={model} titles={sessionTitles} enabled={visible && (!contextRail || isListPeek)} selectedSessionId={snapshot.selected?.id ?? null}

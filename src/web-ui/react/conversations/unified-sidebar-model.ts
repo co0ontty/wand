@@ -89,6 +89,7 @@ export function useUnifiedSidebar(enabled: boolean, titles: Readonly<Record<stri
     ...DEFAULT_CONVERSATION_FILTERS,
     workspace: ui.listWorkspace,
     employee: ui.listEmployee,
+    taskStage: ui.listTaskStage,
     runtime: ui.listRuntime,
   };
   const entries = React.useMemo(() => collectUnifiedSessions(groups.groups, conversations.items), [groups.groups, conversations.items]);

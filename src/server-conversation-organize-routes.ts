@@ -24,7 +24,9 @@ function scopeFrom(body: Record<string, unknown>, storage: WandStorage): Convers
     else throw badRequest("会话归类目录无效。");
   }
   if (!target && !taskIds?.length && !sessionIds?.length) throw badRequest("请选择会话、任务或目录范围。");
-  return { mode: body.mode === "all" ? "all" : "auto", target, taskIds, sessionIds };
+  if (body.review !== undefined && typeof body.review !== "boolean") throw badRequest("预览参数无效。");
+  if (body.review && (target?.kind === "all" || taskIds?.length)) throw badRequest("未分组整理只能选择当前目录或会话。");
+  return { mode: body.mode === "all" ? "all" : "auto", target, taskIds, sessionIds, review: body.review === true };
 }
 
 export function registerConversationOrganizeRoutes(app: Express, storage: WandStorage, deps: ConversationOrganizationDependencies): void {
@@ -41,6 +43,14 @@ export function registerConversationOrganizeRoutes(app: Express, storage: WandSt
     try { res.json({ kind: "preview", preview: service.prepare(scopeFrom(body, storage)) }); }
     catch (error) { throw badRequest(error instanceof Error ? error.message : "无法读取会话归类范围。"); }
   }));
+  app.post("/api/sessions/auto-organize/:id/apply", (req, res) => {
+    try { res.json({ job: service.applyReview(req.params.id, req.body?.choices) }); }
+    catch (error) { throw conflict(error instanceof Error ? error.message : "整理未保存。"); }
+  });
+  app.post("/api/sessions/auto-organize/:id/undo", (req, res) => {
+    try { res.json({ job: service.undoReview(req.params.id) }); }
+    catch (error) { throw conflict(error instanceof Error ? error.message : "无法撤销整理。"); }
+  });
   app.get("/api/sessions/auto-organize/by-token/:token", (req, res) => {
     const job = storage.getConversationOrganizationJobByToken(req.params.token);
     if (!job) throw notFound("尚未找到该确认请求的已接受作业；不会自动重发。");

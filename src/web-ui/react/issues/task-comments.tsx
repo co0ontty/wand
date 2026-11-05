@@ -48,6 +48,8 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
   // 正文里已经写入的引用编号，按出现顺序展示；合法性由服务端最终判定。
   const referencedIdentifiers = React.useMemo(() => parseTaskReferenceIds(draft.body), [draft.body]);
   const [streamExpanded, setStreamExpanded] = React.useState<Record<string, boolean>>({});
+  // 长讨论默认只露出最近几条，最新进展与输入框留在首屏附近；更早的按需展开。
+  const [showAllComments, setShowAllComments] = React.useState(false);
   const [resultPages, setResultPages] = React.useState<Record<string, { taskId: string; messages: import("../../../types.js").ConversationTurn[]; offset: number; total: number; outcome: string; unavailable?: string; loading: boolean; failed?: boolean; retryOffset?: number; truncatedBlocks?: Array<{ turnOffset: number; blockIndex: number }> }>>({});
   const resultRequests = React.useRef(new Map<string, { id: number; controller: AbortController }>());
   const [loadingOlder, setLoadingOlder] = React.useState(false);
@@ -152,7 +154,9 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
   React.useEffect(() => {
     if (!replyRequest) return;
     const current = commentDraft(taskId);
-    const body = `${current.body}${current.body ? "\n" : ""}${replyRequest.body}\n@`;
+    // 空 body 是「@员工 派发」入口：只在草稿末尾补一个 @，不插入空行。
+    const prefix = [current.body, replyRequest.body].filter(Boolean).join("\n");
+    const body = `${prefix}${prefix ? "\n" : ""}@`;
     edit({ body, employeeId: "", sourceCommentId: replyRequest.commentId, agent: null });
     setReplyLabel(replyRequest.commentId ? "当前阻塞的原执行记录" : ""); setCaret(body.length); setDismissed("");
     requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(body.length, body.length); });
@@ -320,6 +324,11 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
   const mentionTop = mentionRect ? Math.max(8, Math.min(overlapsComposerActions || mentionBelow + mentionHeight > window.innerHeight - 8 ? mentionRect.top - mentionHeight - 6 : mentionBelow, window.innerHeight - mentionHeight - 8)) : 0;
   const dispatchComments = comments.filter(comment => Boolean(comment.dispatch));
   const ordinaryComments = comments;
+  const RECENT_COMMENTS = 4;
+  // 定位到指定评论时不折叠，免得目标被藏起来。
+  const folded = !showAllComments && !referenceTarget && ordinaryComments.length > RECENT_COMMENTS + 1;
+  const hiddenCount = folded ? ordinaryComments.length - RECENT_COMMENTS : 0;
+  const visibleComments = folded ? ordinaryComments.slice(-RECENT_COMMENTS) : ordinaryComments;
   const dispatchedSessionIds = new Set(dispatchComments.map(comment => comment.dispatch?.sessionId).filter((id): id is string => Boolean(id)));
   // These sessions have a server-owned comment dispatch correlation, independent of comment pagination.
   const dispatchCommentBySessionId = new Map(dispatchComments.map(comment => [comment.dispatch?.sessionId, comment.id]));
@@ -333,7 +342,10 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
       <Flex vertical gap="small" className="task-board-detail-content">
       {failed ? <Alert type="warning" title="评论暂时加载失败" action={<WandButton kind="ghost" size="small" onClick={retry}>重试</WandButton>}/> : null}
       {!ordinaryComments.length && !failed ? <Typography.Text type="secondary" role="status">{loading ? "正在加载评论…" : "还没有评论。在正文里 @员工 并提交即可派发；不 @ 只是普通评论。"}</Typography.Text> : null}
-      {ordinaryComments.map(comment => <TaskCommentBubble key={comment.id} ref={node => { if (node) rowRefs.current.set(`comment-${comment.id}`, node); else rowRefs.current.delete(`comment-${comment.id}`); }}
+      {hiddenCount > 0 && <WandButton kind="ghost" size="small" className="task-comment-fold" onClick={() => setShowAllComments(true)}>
+        显示更早的 {hiddenCount + (totalCount > ordinaryComments.length ? totalCount - ordinaryComments.length : 0)} 条
+      </WandButton>}
+      {visibleComments.map(comment => <TaskCommentBubble key={comment.id} ref={node => { if (node) rowRefs.current.set(`comment-${comment.id}`, node); else rowRefs.current.delete(`comment-${comment.id}`); }}
         comment={comment} sourceComment={comment.sourceCommentId ? commentById.get(comment.sourceCommentId) ?? sourceComments[comment.sourceCommentId]?.comment ?? undefined : undefined}
         expanded={streamExpanded[comment.id]} onExpanded={value => setStreamExpanded(current => ({ ...current, [comment.id]: value }))}
         onOpenTask={openReferencedTask} onOpenOriginTask={onOpenTask} onReply={replyTo} onOpenSession={onOpenSession} onViewResult={() => void loadResult(comment.id)}>
@@ -341,7 +353,7 @@ export function TaskComments({ taskId, updatedAt, replyRequest, dispatchPurpose 
         {comment.dispatch?.executionTaskId && childTasks.find(child => child.id === comment.dispatch?.executionTaskId) ? <WandButton size="small" kind="ghost" onClick={() => onOpenTask?.(comment.dispatch!.executionTaskId!)}>{childTasks.find(child => child.id === comment.dispatch?.executionTaskId)!.identifier} · 查看子任务</WandButton> : null}
       </TaskCommentBubble>)}
       {legacySessions.length > 0 && <details><summary>历史关联会话 · {legacySessions.length}</summary>{legacySessions.map(session => <TaskLegacySessionStreamRow key={session.id} session={session} onOpen={onOpenSession}/>)}</details>}
-      {nextCursor && <WandButton kind="ghost" size="small" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "正在加载更早评论…" : "加载更早评论"}</WandButton>}
+      {nextCursor && !folded && <WandButton kind="ghost" size="small" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "正在加载更早评论…" : "加载更早评论"}</WandButton>}
       {draft.sourceCommentId && <Flex align="center" gap="small" className="task-comment-reply-context"><Typography.Text type="secondary">回复「{replyLabel || draft.sourceCommentId.slice(0, 8)}」</Typography.Text><WandButton kind="ghost" size="small" onClick={() => { edit({ sourceCommentId: null }); setReplyLabel(""); }}>取消回复</WandButton></Flex>}
       {menuOpen && portal && mentionRect ? createPortal(<div id="task-comment-mention" role="listbox" aria-label="提及员工" className="task-comment-mention" data-wand-popup-owner={`task-comment-${taskId}`}
         style={{ position: "fixed", zIndex: token.zIndexPopupBase + 100, left: Math.max(8, Math.min(mentionRect.left, window.innerWidth - 280)), top: mentionTop, width: Math.min(280, window.innerWidth - 16), maxHeight: mentionHeight, pointerEvents: "auto" }}>

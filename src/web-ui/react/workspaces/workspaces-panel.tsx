@@ -1037,6 +1037,7 @@ function TaskGroupSection({
       </Flex>} menu={{ multiple: true, items: [
         // Ant keeps this non-selectable submenu open across preview/confirm/progress.
         { key: "new", disabled: deleting || group.global, icon: <WandIcon name="plus"/>, label: "在此新建会话" },
+        { key: "new-directory", disabled: deleting || group.global, icon: <WandIcon name="folder"/>, label: "创建目录" },
         { key: "new-section", disabled: deleting, icon: <WandIcon name="folder"/>, label: "新建分区" },
         ...(!group.global && group.workspaceCwd.trim() ? [{ key: "copy-cwd", disabled: deleting, icon: <WandIcon name="copy"/>, label: "复制工作目录" }] : []),
         { key: "organize", disabled: deleting, icon: <WandIcon name="folder"/>, label: organization.label, children: organization.items },

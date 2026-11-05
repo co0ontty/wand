@@ -627,12 +627,23 @@ try {
     }
   };
 
+  const applyEffort = async (requested: string | null | undefined): Promise<void> => {
+    const option = configOptions.find(option => option.id === "reasoning_effort");
+    const values = (option?.options ?? []).flatMap(value => typeof value.value === "string" ? [value.value] : []);
+    // Unsupported preferences use the provider-confirmed current/default value.
+    // No reasoning option means no override, rather than a fabricated native level.
+    const selected = requested && requested !== "auto" && values.includes(requested) ? requested
+      : typeof option?.currentValue === "string" && values.includes(option.currentValue) ? option.currentValue : values[0];
+    if (selected && selected !== option?.currentValue) await setConfig("reasoning_effort", selected);
+    emit({ type: "wand_qoder_effort", requested: requested ?? null, effort: selected ?? null });
+  };
+
   const defaultModel = configOptions.find(option => option.id === "model")?.currentValue;
   applyNextConfig = async (selection) => {
     await setConfig("mode", selection.mode);
     const model = selection.model && selection.model !== "default" ? selection.model : defaultModel;
     if (typeof model === "string") await setConfig("model", model);
-    if (selection.thinkingEffort && selection.thinkingEffort !== "auto") await setConfig("reasoning_effort", selection.thinkingEffort);
+    await applyEffort(selection.thinkingEffort);
     config.mode = selection.mode;
     config.autoApprovePermissions = selection.autoApprovePermissions;
     emit({ method: "session/update", params: { sessionId: nativeSessionId,
@@ -661,7 +672,7 @@ try {
   } else {
     if (config.mode) await setConfig("mode", config.mode);
     if (config.model && config.model !== "default") await setConfig("model", config.model);
-    if (config.thinkingEffort && config.thinkingEffort !== "auto") await setConfig("reasoning_effort", config.thinkingEffort);
+    await applyEffort(config.thinkingEffort);
     emit({ method: "session/update", params: { sessionId: nativeSessionId,
       update: { sessionUpdate: "config_option_update", configOptions } } });
     promptRpcId = ++sequence;

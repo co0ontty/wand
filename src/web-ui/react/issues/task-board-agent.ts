@@ -594,13 +594,14 @@ export function issueWorkspaceIdFromSelect(value: string): string | null {
 }
 
 
-export type IssueBoardView = "dashboard" | "board" | "list" | "gantt" | "archive";
+export type IssueBoardView = "dashboard" | "board" | "list" | "gantt" | "auto-flow" | "archive";
 
 export const ISSUE_BOARD_VIEWS: ReadonlyArray<{ value: IssueBoardView; label: string }> = [
   { value: "dashboard", label: "概览" },
   { value: "board", label: "看板" },
   { value: "list", label: "列表" },
   { value: "gantt", label: "日历" },
+  { value: "auto-flow", label: "巡检设置" },
 ];
 
 export type IssueGanttZoom = "day" | "week" | "month";

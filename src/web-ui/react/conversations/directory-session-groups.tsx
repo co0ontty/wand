@@ -1,3 +1,4 @@
+import { DirectoryTaskCards } from "./directory-task-cards";
 import * as React from "react";
 import { Alert, Flex, Spin, Typography } from "antd";
 import { WandButton, WandIcon } from "../ui";
@@ -7,7 +8,7 @@ import { newSessionController } from "../new-session/controller";
 import { readDirectory, inspectDirectoryMerge, mergeDirectory, type WorkspaceDirectory, type DirectoryMergeInspection } from "../workspaces/directory-repository";
 import { describeError } from "../errors";
 import type { UnifiedSidebarEntry, UnifiedSidebarModel } from "./unified-sidebar-model";
-import { isSessionAttention } from "../workspaces/sidebar-display-mode";
+import { isSessionAttention, isSessionRunning } from "../workspaces/sidebar-display-mode";
 import { isSessionNeedsConfirmation } from "./runtime-filter";
 
 function DirectoryHeading({ title, detail, count, open, onToggle, onMerge, branch = false }: {
@@ -106,13 +107,24 @@ export function DirectorySessionGroups({ model, renderRow, selectedId }: {
     const project = owner(selectedOwner);
     if (project) setCollapsed(current => new Set([...current].filter(id => !id.startsWith(project.workspaceId))));
   }, [selectedId]);
+  const runningPaths = model.orderedRows.filter(entry => isSessionRunning(entry.session)).flatMap(entry => {
+    const project = owner(entry);
+    return project ? [project.workspaceId, `${project.workspaceId}:main`, `${project.workspaceId}:${entry.session.worktree?.path || entry.task?.worktree?.path || entry.session.cwd}`] : ["other"];
+  });
+  const runningKey = [...new Set(runningPaths)].sort().join("|");
+  React.useEffect(() => {
+    const paths = new Set(runningPaths);
+    setCollapsed(current => new Set([...current].filter(id => !paths.has(id))));
+  }, [runningKey]);
   const searching = Boolean(model.query.trim());
   const unassigned = model.orderedRows.filter(entry => !owner(entry));
   return <>
-    {projects.map(project => {
+    {[...projects].sort((a, b) => Number(runningPaths.includes(b.workspaceId)) - Number(runningPaths.includes(a.workspaceId))).map(project => {
       const directory = directories[project.workspaceId];
       const rows = model.orderedRows.filter(entry => owner(entry)?.workspaceId === project.workspaceId);
-      if (!rows.length && (searching || model.facets.workspace !== "all" || model.facets.employee !== "all" || model.facets.runtime !== "all")) return null;
+      const allRows = model.entries.filter(entry => owner(entry)?.workspaceId === project.workspaceId);
+      const queued = model.queuedTasks.filter(entry => entry.group.workspaceId === project.workspaceId).map(entry => entry.task);
+      if (!rows.length && !queued.length && (searching || model.facets.taskStage !== "all" || model.facets.workspace !== "all" || model.facets.employee !== "all" || model.facets.runtime !== "all")) return null;
       const open = searching || !collapsed.has(project.workspaceId);
       const attention = rows.filter(entry => isSessionAttention(entry.session) || isSessionNeedsConfirmation(entry.session)).length;
       const trees = directory?.worktrees ?? [];
@@ -125,20 +137,20 @@ export function DirectorySessionGroups({ model, renderRow, selectedId }: {
         {open ? <div className="session-directory-children">
           {trees.length ? <DirectoryHeading branch title="主分支" detail={directory?.branch || "detached HEAD"} open={!collapsed.has(`${project.workspaceId}:main`) || searching}
             onToggle={() => toggle(`${project.workspaceId}:main`)} count={`${rows.filter(entry => !treeFor(entry)).length} 个会话`}/> : null}
-          {(!trees.length || searching || !collapsed.has(`${project.workspaceId}:main`)) ? <div className={`session-directory-sessions${trees.length ? "" : " session-directory-sessions-direct"}`}>{rows.filter(entry => !treeFor(entry)).map(renderRow)}</div> : null}
+          {(!trees.length || searching || !collapsed.has(`${project.workspaceId}:main`)) ? <div className={`session-directory-sessions${trees.length ? "" : " session-directory-sessions-direct"}`}><DirectoryTaskCards rows={rows.filter(entry => !treeFor(entry))} allRows={allRows.filter(entry => !treeFor(entry))} queued={queued.filter(task => !task.worktree)} model={model} directory={project.workspaceCwd} renderRow={renderRow} selectedId={selectedId}/></div> : null}
           {trees.map(tree => {
             const matches = rows.filter(entry => treeFor(entry)?.path === tree.path);
             if (searching && !matches.length && !`${tree.name} ${tree.branch}`.toLowerCase().includes(model.query.trim().toLowerCase())) return null;
             const id = `${project.workspaceId}:${tree.path}`, expanded = searching || !collapsed.has(id);
             return <section key={tree.path} className="session-worktree-group"><DirectoryHeading title={tree.name} detail={tree.branch || "detached HEAD"} count={`${matches.length} 个会话`} open={expanded}
               onToggle={() => toggle(id)} onMerge={() => setMerge({ workspaceId: project.workspaceId, path: tree.path })}/>
-              {expanded ? <div className="session-directory-sessions">{matches.length ? matches.map(renderRow) : <Typography.Text type="secondary">暂无匹配会话</Typography.Text>}</div> : null}</section>;
+              {expanded ? <div className="session-directory-sessions"><DirectoryTaskCards rows={matches} allRows={allRows.filter(entry => treeFor(entry)?.path === tree.path)} queued={queued.filter(task => task.worktree?.path === tree.path)} model={model} directory={tree.path} renderRow={renderRow} selectedId={selectedId}/></div> : null}</section>;
           })}
         </div> : null}
       </section>;
     })}
     {unassigned.length ? <section><DirectoryHeading title="其他会话" open={searching || !collapsed.has("other")} count={`${unassigned.length} 个会话`} onToggle={() => toggle("other")}/>
-      {searching || !collapsed.has("other") ? <div className="session-directory-sessions">{unassigned.map(renderRow)}</div> : null}</section> : null}
+      {searching || !collapsed.has("other") ? <div className="session-directory-sessions">{[...new Set(unassigned.map(entry => entry.session.cwd || entry.group.workspaceCwd))].map(cwd => <DirectoryTaskCards key={cwd} rows={unassigned.filter(entry => (entry.session.cwd || entry.group.workspaceCwd) === cwd)} allRows={model.entries.filter(entry => !owner(entry) && (entry.session.cwd || entry.group.workspaceCwd) === cwd)} model={model} directory={cwd || "未记录目录"} renderRow={renderRow} selectedId={selectedId}/>)}</div> : null}</section> : null}
     {merge ? <DirectoryMergeDialog {...merge} onClose={() => setMerge(null)} onChanged={() => { setRefresh(value => value + 1); model.refresh(); }}/ > : null}
   </>;
 }

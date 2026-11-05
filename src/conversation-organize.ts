@@ -14,10 +14,12 @@ export interface ConversationGroupingTask { id: string; title: string; descripti
 export interface ConversationGroupingInput {
   sessions: readonly ConversationGroupingSession[];
   tasks: readonly ConversationGroupingTask[];
+  review?: boolean;
 }
 export interface ConversationGroupingPlan {
   groups: Array<{ existingTaskId: string | null; title: string; description: string; sessionIds: string[] }>;
   unassigned: string[];
+  archive?: Array<{ sessionId: string; reason: string }>;
 }
 export type ConversationGroupingJudge = (input: ConversationGroupingInput, signal?: AbortSignal) => Promise<ConversationGroupingPlan>;
 
@@ -73,9 +75,13 @@ export function parseConversationGrouping(raw: string, input: ConversationGroupi
     if (description.length > 2000) throw new Error("任务描述过长。");
     return { existingTaskId: group.existingTaskId as string | null, title, description, sessionIds: group.sessionIds.map(claim) };
   });
+  const archive = input.review && Array.isArray(body.archive) ? body.archive.map(value => {
+    if (!value || typeof value !== "object" || typeof value.reason !== "string" || !value.reason.trim() || value.reason.length > 300) throw new Error("归档建议缺少具体原因。");
+    return { sessionId: claim(value.sessionId), reason: value.reason.trim() };
+  }) : [];
   const unassigned = body.unassigned.map(claim);
   if (seen.size !== sessions.size) throw new Error("归类结果遗漏会话，必须分组或明确列入 unassigned。");
-  return { groups, unassigned };
+  return { groups, unassigned, ...(input.review ? { archive } : {}) };
 }
 export function conversationGroupingPrompt(input: ConversationGroupingInput): AiTextRequest {
   return {
@@ -86,6 +92,7 @@ export function conversationGroupingPrompt(input: ConversationGroupingInput): Ai
       "有合适的既有任务就优先填existingTaskId，保留其名字。没有就给出新任务标题和简短描述，系统会创建；单个会话也可以独立成任务。",
       "当前归属只作参考；内容仍适合原任务时保留。无法识别实际工作或不确定的列入unassigned，不强行归组。",
       "一个会话只放一个任务；有多个话题时按当前主要工作或共同目标判断。每个给出的会话必须恰好出现一次，不能添加未给出的会话或任务ID。不要输出推理过程。",
+      ...(input.review ? ["可以增加archive数组，每项{sessionId,reason}：仅建议归档明确无工作内容的寒暄、试发、空白或无待办的重复历史。短、单条、失败不等于无意义；存在待解决问题、未完成工作、权限或送达不明时必须unassigned。归档不意味着任务完成。新任务只建议等待认领，不推断验收状态。"] : []),
       '只输出JSON：{"groups":[{"existingTaskId":null,"title":"具体任务名","description":"任务范围摘要","sessionIds":["..."]}],"unassigned":[]}',
     ].join("\n"),
     prompt: JSON.stringify(input),

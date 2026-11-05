@@ -5,6 +5,7 @@ export interface ConversationOrganizationScope {
   taskIds?: readonly string[];
   sessionIds?: readonly string[];
   mode: TaskOrganizeMode;
+  review?: boolean;
 }
 export interface ConversationOrganizationPreview {
   token: string;
@@ -42,6 +43,32 @@ export interface ConversationOrganizationJob {
   totalSessions: number;
   modelRequests: number;
   result: ConversationOrganizationResult;
+  review?: OrganizationReview;
   logSessionId?: string;
   error?: string;
+}
+
+export interface OrganizationSuggestion {
+  id: string;
+  action: "group" | "archive" | "keep";
+  title: string;
+  reason: string;
+  existingTaskId: string | null;
+  sessionIds: string[];
+}
+export interface OrganizationChoice {
+  id: string;
+  sessionIds: string[];
+  existingTaskId: string | null;
+  title: string;
+}
+export interface OrganizationReview {
+  state: "analyzing" | "prepared" | "applied" | "undone";
+  suggestions: OrganizationSuggestion[];
+  sessions: Array<{ id: string; title: string; revision: string; workspaceId: string | null; directory: string; targetWorkspaceId: string | null }>;
+  targets: Array<{ id: string; title: string; status: string; revision: string }>;
+  receipt?: Array<{ sessionId: string; taskId: string; workspaceId: string | null; archived: boolean; revision: string }>;
+  createdTaskIds?: string[];
+  createdTaskRevisions?: Record<string, string>;
+  appliedKey?: string;
 }

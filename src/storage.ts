@@ -1,3 +1,4 @@
+import type { WandTask } from "./task-types.js";
 import crypto from "node:crypto";
 import { chmodSync,mkdirSync } from "node:fs";
 import path from "node:path";
@@ -79,7 +80,8 @@ export class WandStorage {
   readonly uploads: UploadRepository;
   readonly feedback: FeedbackRepository;
   private readonly closeListeners = new Set<() => void>();
-  private readonly taskTitleListeners = new Set<() => void>();
+  private readonly taskTitleListeners = new Set<(descriptionIds: readonly Pick<WandTask, "id" | "description" | "title" | "titleSource">[]) => void>();
+  private readonly titleDescriptionIds = new Map<string, Pick<WandTask, "id" | "description" | "title" | "titleSource">>();
   private titleNoticePending = false;
   private closed = false;
   private readonly projectionEpoch = crypto.randomUUID();
@@ -100,20 +102,24 @@ export class WandStorage {
     return () => { this.closeListeners.delete(listener); };
   }
 
-  onTaskTitleChange(listener: () => void): () => void {
+  onTaskTitleChange(listener: (descriptionIds: readonly Pick<WandTask, "id" | "description" | "title" | "titleSource">[]) => void): () => void {
     this.taskTitleListeners.add(listener);
     return () => { this.taskTitleListeners.delete(listener); };
   }
 
   /** Coalesce synchronous writes; observers read only after the transaction settles. */
-  notifyTaskTitleChange(): void {
-    if (this.closed || this.titleNoticePending || !this.taskTitleListeners.size) return;
+  notifyTaskTitleChange(description?: Pick<WandTask, "id" | "description" | "title" | "titleSource">): void {
+    if (this.closed || !this.taskTitleListeners.size) return;
+    if (description) this.titleDescriptionIds.set(description.id, { id: description.id, description: description.description, title: description.title, titleSource: description.titleSource });
+    if (this.titleNoticePending) return;
     this.titleNoticePending = true;
     queueMicrotask(() => {
       this.titleNoticePending = false;
       if (this.closed) return;
+      const descriptionIds = [...this.titleDescriptionIds.values()];
+      this.titleDescriptionIds.clear();
       for (const listener of this.taskTitleListeners) {
-        try { listener(); } catch { console.error("[WandTask] title change observer failed"); }
+        try { listener(descriptionIds); } catch { console.error("[WandTask] title change observer failed"); }
       }
     });
   }

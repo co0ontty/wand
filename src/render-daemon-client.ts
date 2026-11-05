@@ -21,6 +21,7 @@ import {
 import {
   appendTerminalChunkBatch,
   appendTerminalChunkWindow,
+  DaemonUnavailableError,
   type TerminalAttachResult,
   type TerminalDataEvent,
   type TerminalExitEvent,
@@ -590,7 +591,8 @@ export class RenderDaemonClient implements TerminalHost {
   ): Promise<unknown> {
     if (this.fatalProtocolError && bypassFatalGuard !== "hello") throw this.fatalProtocolError;
     const socket = this.socket;
-    if (!socket || socket.destroyed || !socket.writable) throw new Error("Render is unavailable");
+    // Pre-send failure: nothing was written, so callers may safely retry.
+    if (!socket || socket.destroyed || !socket.writable) throw new DaemonUnavailableError("Render is unavailable");
     const id = this.nextRequestId++;
     const request: RenderRequest = {
       id,

@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { isBrowserStyleFile, minifyStringRawCssTemplates } from "./browser-style-minification.js";
 
@@ -22,12 +22,24 @@ export async function createBrowserModuleImportsPlugin(root, production, cssCand
     }
     libraries.set(name, exports);
   }
+  // esbuild resolves symlinks to real paths: when node_modules is linked to
+  // another checkout, onLoad args.path uses the real location, not
+  // root/node_modules. Accept both literal and real roots for the gate so
+  // component-entry rewriting (and splitting) still applies.
+  const rootReal = await realpath(root).catch(() => root);
+  const xDirLiteral = path.join(root, "node_modules/@ant-design/x/es");
+  const xDirReal = await realpath(xDirLiteral).catch(() => xDirLiteral);
+  const onLoadPrefixes = [
+    path.join(root, "src") + path.sep,
+    path.join(rootReal, "src") + path.sep,
+    xDirLiteral + path.sep,
+    xDirReal + path.sep,
+  ];
   return {
     name: "wand-browser-component-imports",
     setup(build) {
       build.onLoad({ filter: /\.[jt]sx?$/ }, async args => {
-        if (!args.path.startsWith(path.join(root, "src") + path.sep)
-          && !args.path.startsWith(path.join(root, "node_modules/@ant-design/x/es") + path.sep)) return;
+        if (!onLoadPrefixes.some(prefix => args.path.startsWith(prefix))) return;
         let source = await readFile(args.path, "utf8");
         if (production && isBrowserStyleFile(args.path)) {
           const result = minifyStringRawCssTemplates(source, args.path);

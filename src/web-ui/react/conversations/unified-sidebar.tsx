@@ -244,6 +244,7 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
   const attentionRows = model.orderedRows.filter(entry => isSessionAttention(entry.session) || isSessionNeedsConfirmation(entry.session));
   const otherRows = model.orderedRows.filter(entry => !isSessionAttention(entry.session) && !isSessionNeedsConfirmation(entry.session));
   const orderedRows = model.orderedRows;
+  const looseQueuedTasks = model.queuedTasks.filter(entry => !model.groups.some(group => group.userAdded && !group.synthetic && !group.global && group.workspaceId === entry.group.workspaceId));
   const selected = (entry: UnifiedSidebarEntry): boolean => selectedConversationId
     ? entry.conversation?.id === selectedConversationId : entry.session.id === selectedSessionId;
   const current = model.entries.find(selected);
@@ -268,9 +269,9 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
       }}>定位当前会话</WandButton></div> : null}
     </div>
     <div className="unified-sidebar-rows" ref={list}>
-      {model.queuedTasks.length ? <details key={model.facets.runtime} open={runtimeSelections(model.facets.runtime).includes("queued") || undefined}>
-        <summary className="unified-sidebar-section">排队任务 <span>{model.queuedTasks.length}</span></summary>
-        {model.queuedTasks.map(({ group, task, count }) => <div className="unified-sidebar-row" data-queued-task={task.boardTaskId} key={`queued-task:${task.id}`}>
+      {looseQueuedTasks.length ? <details key={model.facets.runtime} open={runtimeSelections(model.facets.runtime).includes("queued") || undefined}>
+        <summary className="unified-sidebar-section">排队任务 <span>{looseQueuedTasks.length}</span></summary>
+        {looseQueuedTasks.map(({ group, task, count }) => <div className="unified-sidebar-row" data-queued-task={task.boardTaskId} key={`queued-task:${task.id}`}>
           <ImSidebarItem id={`queued-task:${task.id}`} title={task.name} avatarNode={<WandIcon name="task" size={13}/>}
             state={{ label: "排队中", icon: "clock", tone: "muted" }} glow="queued"
             summary={[task.boardTaskIdentifier, task.assignedExecutor?.name, group.workspaceName, `${count} 条派发排队中`].filter(Boolean).join(" · ")}

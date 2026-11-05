@@ -3,7 +3,7 @@ import type { AiTextRequest } from "./types.js";
 import { clipAtWordBoundary } from "./text-utils.js";
 
 /** 任务标题留空时由描述自动生成；面板上显示得下，也不至于截断成半句话。 */
-export const TASK_TITLE_MAX_LENGTH = 40;
+export const TASK_TITLE_MAX_LENGTH = 20;
 
 const DESCRIPTION_HINT_MAX = 2_000;
 

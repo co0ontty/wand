@@ -27,7 +27,10 @@ export class TaskTitleService {
 
   constructor(private storage: WandStorage, options: AutoTaskTitleOptions = {}) {
     this.options = options;
-    this.unsubscribe = storage.onTaskTitleChange(() => this.refresh());
+    this.unsubscribe = storage.onTaskTitleChange(changes => this.refresh({}, new Set(changes.filter(change => {
+      const current = storage.getWandTask(change.id);
+      return current?.description === change.description && current.title === change.title && current.titleSource === change.titleSource;
+    }).map(change => change.id))));
     storage.onClose(() => this.dispose());
   }
 
@@ -42,16 +45,17 @@ export class TaskTitleService {
     this.options = { ...this.options, ...options };
   }
 
-  refresh(options: AutoTaskTitleOptions = {}): void {
+  refresh(options: AutoTaskTitleOptions = {}, descriptionIds: ReadonlySet<string> = new Set()): void {
     if (this.disposed) return;
     this.configure(options);
     for (const card of this.storage.listWandTasks()) {
-      if (!isAutoNameableBoardTask(card)) continue;
+      const descriptionUpdated = descriptionIds.has(card.id);
+      if (!descriptionUpdated && !isAutoNameableBoardTask(card)) continue;
       const source = taskAutoNameSourceText(this.storage, card);
       if (!source) continue;
-      // Planning must not spend model calls, even when the user leaves the title blank.
-      // Once an execution is explicitly bound, normal execution-driven naming may resume.
-      if (this.storage.listWandTaskSessionIds(card.id).length === 0) continue;
+      // An explicit prompt edit refreshes only that task, including before its first execution.
+      // Unrelated notifications must not summarize the historical backlog.
+      if (!descriptionUpdated && this.storage.listWandTaskSessionIds(card.id).length === 0) continue;
       const signature = taskAutoNameSignature(source);
       if (card.autoTitleSignature === signature) continue;
       const title = provisionalTaskTitleFromDescription(source);
@@ -73,7 +77,7 @@ export class TaskTitleService {
       try {
         const current = this.storage.getWandTask(id);
         if (!current || current.titleSource !== "auto" || current.autoTitleSignature !== input.signature
-          || !taskAutoNameSourceText(this.storage, current)) continue;
+          || taskAutoNameSignature(taskAutoNameSourceText(this.storage, current)) !== input.signature) continue;
         const { config, free, generateTitle = generateWandTaskTitle } = this.options;
         const provider = config?.defaultProvider ?? "claude";
         const ai = config ? resolveSystemAiContext({ provider, structuredState: undefined, runner: undefined,
@@ -85,7 +89,7 @@ export class TaskTitleService {
         if (this.disposed) return;
         const latest = this.storage.getWandTask(id);
         if (!latest || latest.titleSource !== "auto" || latest.autoTitleSignature !== input.signature
-          || !taskAutoNameSourceText(this.storage, latest)) continue;
+          || taskAutoNameSignature(taskAutoNameSourceText(this.storage, latest)) !== input.signature) continue;
         const clipped = title.slice(0, TASK_TITLE_MAX_LENGTH);
         if (clipped && clipped !== latest.title) this.storage.updateWandTask(id, { title: clipped });
       } catch (error) {

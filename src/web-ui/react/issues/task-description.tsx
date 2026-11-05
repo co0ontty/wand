@@ -49,7 +49,7 @@ export function TaskDescription({ description, busy, onSave }: {
     </Flex> : <div className="task-board-detail-content">
       {description.trim()
         // 长描述默认只露出前面一段，首屏留给结论与评论；展开后看全文。
-        ? <TaskExpandableText lines={10}><DeferredMarkdownPreview content={description} variant="inline" wrap/></TaskExpandableText>
+        ? <TaskExpandableText lines={6}><DeferredMarkdownPreview content={description} variant="inline" wrap/></TaskExpandableText>
         : <Typography.Text type="secondary">暂无描述，可补充背景、验收标准或复现步骤。</Typography.Text>}
     </div>}
   </Card>;

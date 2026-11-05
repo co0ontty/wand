@@ -43,9 +43,10 @@ export class TaskWorkflowRepository {
         }
       }
       if (input.action === "close") {
-        const queuedIds = (this.db.prepare("SELECT comment_id FROM wand_task_comment_dispatches WHERE task_id = ? AND state IN ('queued', 'paused') ORDER BY comment_id").all(taskId) as Array<{ comment_id: string }>).map(row => row.comment_id);
+        // 父卡评论可派发到子卡执行：按实际执行归属（task_id 与 execution_task_id）双向核对。
+        const queuedIds = (this.db.prepare("SELECT comment_id FROM wand_task_comment_dispatches WHERE (task_id = ? OR execution_task_id = ?) AND state IN ('queued', 'paused') ORDER BY comment_id").all(taskId, taskId) as Array<{ comment_id: string }>).map(row => row.comment_id);
         if (JSON.stringify(queuedIds) !== JSON.stringify(input.expectedQueuedCommentIds)) throw new HttpError(409, "conflict", "排队指令已变化，请重新核对，未取消新增派发。");
-        if (this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE task_id = ? AND employee_id IS NOT NULL AND (state IN ('pending', 'unknown') OR (state = 'accepted' AND session_id IS NULL)) LIMIT 1").get(taskId)) throw new HttpError(409, "busy", "派发已领取或送达未知，不能取消归档。");
+        if (this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE (task_id = ? OR execution_task_id = ?) AND employee_id IS NOT NULL AND (state IN ('pending', 'unknown') OR (state = 'accepted' AND session_id IS NULL)) LIMIT 1").get(taskId, taskId)) throw new HttpError(409, "busy", "派发已领取或送达未知，不能取消归档。");
         for (const member of [task, ...children]) {
           for (const id of this.s.listWandTaskSessionIds(member.id)) {
             const session = registry?.getSlim(id) ?? this.s.getSessionSlim(id);
@@ -56,10 +57,10 @@ export class TaskWorkflowRepository {
       }
       const cancelReason = `用户取消（尚未执行）：${input.reason}`;
       const cancelled = this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'failed', execution_status = 'stopped', error = ?
-        WHERE task_id = ? AND state IN ('queued', 'paused') AND session_id IS NULL${input.action === "cancel" ? " AND comment_id = ?" : ""} RETURNING comment_id`)
-        .all(cancelReason, taskId, ...(input.action === "cancel" ? [input.commentId!] : []));
+        WHERE (task_id = ? OR execution_task_id = ?) AND state IN ('queued', 'paused') AND session_id IS NULL${input.action === "cancel" ? " AND comment_id = ?" : ""} RETURNING comment_id`)
+        .all(cancelReason, taskId, taskId, ...(input.action === "cancel" ? [input.commentId!] : []));
       if (input.action === "cancel" && cancelled.length !== 1) throw new HttpError(409, "conflict", "该派发已领取、已取消或不属于此任务，未改变运行状态。");
-      if (input.action === "close" && this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE task_id = ? AND state IN ('queued', 'paused') LIMIT 1").get(taskId)) throw new HttpError(409, "busy", "队列存在已绑定会话的派发，未关闭任务。");
+      if (input.action === "close" && this.db.prepare("SELECT 1 FROM wand_task_comment_dispatches WHERE (task_id = ? OR execution_task_id = ?) AND state IN ('queued', 'paused') LIMIT 1").get(taskId, taskId)) throw new HttpError(409, "busy", "队列存在已绑定会话的派发，未关闭任务。");
       const result = this.s.tasks.writeWandTask(task, { ...(input.action === "close" ? { status: "archived" as const } : {}) }, true);
       // Cancellation must preserve history, not opt it into acceptance-based auto-deletion.
       if (input.action === "close") this.db.prepare("UPDATE wand_tasks SET retention_archive_version = NULL WHERE id = ?").run(taskId);
@@ -126,6 +127,32 @@ export class TaskWorkflowRepository {
     return this.s.listWandTaskChildren(task.id).some(child => child.status !== "archived" && this.taskHasPendingWork(child, registry, seen));
   }
 
+  /** A missing terminal receipt is unknown delivery, including historical accepted rows. */
+  taskHasUnsettledDispatch(taskId: string): boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM wand_task_comment_dispatches
+      WHERE (task_id = ? OR execution_task_id = ?) AND employee_id IS NOT NULL
+        AND (state IN ('queued', 'paused', 'pending', 'unknown')
+          OR (state = 'accepted' AND (session_id IS NULL OR result_end_index IS NULL)
+            AND NOT EXISTS (SELECT 1 FROM task_workflow_events e WHERE e.source_session_id = wand_task_comment_dispatches.session_id
+              AND e.task_id = COALESCE(wand_task_comment_dispatches.execution_task_id, wand_task_comment_dispatches.task_id)
+              AND e.action IN ('submit', 'pass', 'fail')))) LIMIT 1`).get(taskId, taskId));
+  }
+
+  taskDeliverySubmitter(taskId: string, revision: number): { employeeId: string | null; sessionId: string | null } | null {
+    const row = this.db.prepare(`SELECT actor_id, source_session_id FROM task_workflow_events
+      WHERE task_id = ? AND action = 'submit' AND json_extract(result_json, '$.deliveryRevision') = ?
+      ORDER BY rowid DESC LIMIT 1`).get(taskId, revision) as { actor_id: string | null; source_session_id: string | null } | undefined;
+    return row ? { employeeId: row.actor_id, sessionId: row.source_session_id } : null;
+  }
+
+  countTaskReviewFailures(taskId: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM task_workflow_events
+      WHERE task_id = ? AND action = 'fail' AND created_at > COALESCE((
+        SELECT MAX(created_at) FROM task_workflow_events WHERE task_id = ? AND action IN ('pass', 'accept', 'return')
+      ), '')`).get(taskId, taskId) as { count: number };
+    return row.count;
+  }
+
   /** Called only by an active runner; never grants the project or arbitrary task IDs. */
   issueTaskWorkflowAccess(sessionId: string): { token: string; taskId: string; revision: number } | null {
     const session = this.s.getSessionSlim(sessionId);
@@ -180,6 +207,13 @@ export class TaskWorkflowRepository {
       if (!task) throw new HttpError(404, "not_found", "任务已删除。");
       if (task.updatedAt !== input.expectedUpdatedAt) throw new HttpError(409, "conflict", "任务已变化，请刷新并核对当前交付后再操作；草稿不会自动重发。");
       const children = this.s.listWandTaskChildren(taskId);
+      if (actor.kind === "employee" && (input.action === "pass" || input.action === "fail")) {
+        for (const member of input.action === "pass" ? [task, ...children] : [task]) {
+          const submitter = this.taskDeliverySubmitter(member.id, member.deliveryRevision ?? 0);
+          if (submitter && (submitter.employeeId && submitter.employeeId === actor.employeeId || submitter.sessionId === actor.sessionId))
+            throw new HttpError(409, "conflict", "本轮交付者不能验收自己的交付，请指派独立员工。");
+        }
+      }
       const ownedSession = actor.kind === "employee" ? actor.sessionId : null;
       const family = [task, ...children];
       for (const member of input.action === "progress" ? [] : family) {

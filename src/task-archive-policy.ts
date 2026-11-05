@@ -2,15 +2,19 @@ import { isArchiveBlocked } from "./archive-policy.js";
 import { AI_TEAM_ACTIVE_RUN_STATUSES } from "./ai-team-types.js";
 import type { WandStorage } from "./storage.js";
 import type { SessionRegistry } from "./session-registry.js";
-import { taskHumanAccepted, type WandTask } from "./task-types.js";
+import type { WandTask } from "./task-types.js";
 
-/** Shared eligibility rule; callers supply either request snapshots or fresh mutation facts. */
-export function taskArchiveEligible(task: WandTask, facts: {
+/**
+ * 用户主动归档的唯一规则：不要求验收或人工确认（归档只是收起，可随时恢复），
+ * 只挡住仍在执行、待答、排队或团队运行的工作，避免把进行中的执行藏进归档。
+ * 自动归档（retention）另有更严的保护规则，不走这里。
+ */
+export function taskArchiveEligible(_task: WandTask, facts: {
   queuedComments: number;
   hasBlockedSession(): boolean;
   hasActiveTeam(): boolean;
 }): boolean {
-  return taskHumanAccepted(task) && facts.queuedComments === 0
+  return facts.queuedComments === 0
     && !facts.hasBlockedSession() && !facts.hasActiveTeam();
 }
 

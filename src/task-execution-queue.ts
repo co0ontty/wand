@@ -1,3 +1,4 @@
+import { taskDispatchFence } from "./task-execution-fence.js";
 import { AgentDispatchPreflightError, dispatchAgentForTask } from "./agent-dispatch.js";
 import { agentKey } from "./ai-team-types.js";
 import { DEFAULT_MAX_CONCURRENT_TASKS } from "./employee-types.js";
@@ -29,6 +30,8 @@ export interface EmployeeTaskCommentSubmission {
   instruction: string;
   sourceCommentId: string | null;
   taskVersion: string;
+  guardTaskVersion?: boolean;
+  assignAgent?: WandTaskAgent;
   purpose?: "execution" | "review";
   reviewRevision?: number | null;
   referencedTaskIds: readonly string[];
@@ -67,6 +70,7 @@ export class TaskExecutionQueue {
     return this.exclusive(employee.id, async () => {
       const task = this.deps.storage.getWandTask(input.taskId);
       if (!task) throw new Error("未找到该任务。");
+      if (taskDispatchFence(this.deps.storage, task.id).blocked) throw new HttpError(409, "conflict", "任务正在停止旧执行，暂不接受派发。");
       if (task.status === "archived") throw new HttpError(409, "conflict", "任务已归档，本次派发未接受；请先刷新核对。");
       const latest = this.deps.storage.getSiliconEmployee(input.employeeId);
       if (!latest || latest.archivedAt) throw new Error("硅基员工不存在或已归档。");
@@ -76,6 +80,8 @@ export class TaskExecutionQueue {
         instruction: input.instruction, sourceCommentId: input.sourceCommentId, employeeId: input.employeeId,
         employeeName: input.employeeName, taskVersion: input.taskVersion, referencedTaskIds: input.referencedTaskIds,
         submissionSource: input.submissionSource,
+        guardTaskVersion: input.guardTaskVersion,
+        assignAgent: input.assignAgent,
         agent: input.agent, executionTaskId: input.executionTaskId, createChild: input.createChild, queued: true, purpose: input.purpose, reviewRevision: input.reviewRevision,
       });
       this.promoteTask(task, input.purpose);
@@ -270,6 +276,7 @@ export class TaskExecutionQueue {
   }
 
   private hasCapacity(employee: NonNullable<ReturnType<WandStorage["getSiliconEmployee"]>>, taskId: string): boolean {
+    if (taskDispatchFence(this.deps.storage, taskId).blocked) return false;
     const limit = employee.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS;
     const running = this.runningTaskIds(employee.id);
     for (const reserved of this.reservations.get(employee.id)?.keys() ?? []) running.add(reserved);

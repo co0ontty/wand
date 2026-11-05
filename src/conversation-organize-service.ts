@@ -1,3 +1,5 @@
+import { isArchiveBlocked } from "./archive-policy.js";
+import { applyOrganizationReview, undoOrganizationReview, organizationRevision, organizationArchiveBlocked } from "./conversation-organize-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { WandStorage } from "./storage.js";
 import { getDefaultModelForProvider } from "./config.js";
@@ -34,6 +36,7 @@ export interface ConversationOrganizationDependencies {
   listSessions?(): SessionSnapshot[];
   getSession?(id: string): SessionSnapshot | null;
   refreshSession?(id: string): void;
+  refreshArchive?(id: string): void;
 }
 function emptyResult(scan: Scan): ConversationOrganizationResult {
   return { ok: true, foundSessions: scan.found, eligibleSessions: scan.items.length, skippedManualSessions: scan.manual,
@@ -102,6 +105,7 @@ export class ConversationOrganizationService {
       const task = slim.workspaceTaskId ? byId.get(slim.workspaceTaskId) : undefined;
       const directory = task?.directory || projectCwdForSession(slim);
       if (!this.inScope(scope, slim, task, directory)) continue;
+      if (scope.review && slim.workspaceTaskId) continue;
       found++;
       if (slim.archived || task?.container.archived || task?.card.status === "archived" || isSystemAiCall(slim)
         || slim.automationId || slim.sessionSource && slim.sessionSource !== "interactive") { skipped++; continue; }
@@ -109,7 +113,7 @@ export class ConversationOrganizationService {
       const full = this.getSession(slim.id);
       if (!full) { skipped++; continue; }
       const content = conversationContent(full);
-      if (!content.text || !directory) { skipped++; continue; }
+      if ((!content.text && !scope.review) || !directory) { skipped++; continue; }
       let workspaceId: string | null = null;
       const direct = task ? this.storage.getWorkspace(task.container.workspaceId) : slim.workspaceId ? this.storage.getWorkspace(slim.workspaceId) : null;
       if (direct && !isGlobalWorkspace(direct)) workspaceId = direct.id;
@@ -118,13 +122,13 @@ export class ConversationOrganizationService {
         if (matches.length > 1 && scope.target?.kind !== "workspace") { skipped++; continue; }
         workspaceId = scope.target?.kind === "workspace" ? scope.target.workspaceId : matches[0]?.id ?? null;
       }
-      const safeText = redactSystemAiText(content.text);
+      const safeText = redactSystemAiText(content.text || "[没有可读取的正文；不能据此判断无意义，请保留待确认]");
       chars += safeText.length;
       if (chars > 2_000_000) throw new Error("本次正文超过200万字符，请按目录或多选会话分批整理；未截断或调用模型。");
       items.push({ session: full, text: safeText, userRevision: hash(content.userRevision), directory, workspaceId });
     }
     if (items.length > MAX_SESSIONS) throw new Error(`本次有 ${items.length} 个工作会话，超过单次 ${MAX_SESSIONS} 个上限；请按目录或多选会话分批，未处理任何会话。`);
-    const eligibleTasks = tasks.filter(task => !task.container.archived && task.card.status !== "archived" && (scope.mode === "all" || task.card.titleSource === "auto")
+    const eligibleTasks = tasks.filter(task => (scope.review || !task.container.archived && task.card.status !== "archived") && (scope.review || scope.mode === "all" || task.card.titleSource === "auto")
       && (scope.target || !scope.taskIds?.length || scope.taskIds.includes(task.container.id)));
     const groupingBatches = new Map<string, number>();
     for (const item of items) { const key = item.directory + ":" + item.workspaceId; groupingBatches.set(key, (groupingBatches.get(key) ?? 0) + 1); }
@@ -132,7 +136,8 @@ export class ConversationOrganizationService {
     if (estimated > MAX_MODEL_REQUESTS) throw new Error(`本次正文预计需要 ${estimated} 个系统模型请求，超过单次 ${MAX_MODEL_REQUESTS} 个保护上限；请缩小到单个目录或多选会话，未发起模型调用。`);
     const taskCounts = new Map<string, number>();
     for (const task of eligibleTasks) if (items.some(item => item.directory === task.directory)) taskCounts.set(task.directory, (taskCounts.get(task.directory) ?? 0) + 1);
-    if ([...taskCounts.values()].some(count => count > MAX_REFERENCE_TASKS)) throw new Error(`某个目录有超过 ${MAX_REFERENCE_TASKS} 个候选任务；请缩小多选任务范围或先归档旧任务，未截断会话内容或发起模型。`);
+    if (!scope.review && [...taskCounts.values()].some(count => count > MAX_REFERENCE_TASKS)) throw new Error(`某个目录有超过 ${MAX_REFERENCE_TASKS} 个候选任务；请缩小多选任务范围或先归档旧任务，未截断会话内容或发起模型。`);
+    if (scope.review && new Set(items.map(item => item.directory + ":" + item.workspaceId)).size > 1) throw new Error("请在一个目录内整理未分组会话。");
     const fingerprint = this.fingerprint(items, eligibleTasks);
     const confirmationFingerprint = this.fingerprint(items, eligibleTasks, true);
     return { scope, items, tasks: eligibleTasks, found, manual, skipped, fingerprint, confirmationFingerprint, estimated, chars };
@@ -149,7 +154,7 @@ export class ConversationOrganizationService {
     while (this.previews.size >= 20) this.previews.delete(this.previews.keys().next().value!);
     this.previews.set(token, { scan, createdAt: Date.now() });
     return { token, sessionCount: scan.items.length, manualSessionCount: scan.manual, skippedSessionCount: scan.skipped,
-      existingTaskCount: scan.tasks.filter(task => scan.items.some(item => item.directory === task.directory)).length,
+      existingTaskCount: scan.tasks.filter(task => scan.items.some(item => item.directory === task.directory && (task.card.workspaceId === item.workspaceId || task.card.workspaceId === null && item.workspaceId === null))).length,
       contentCharacters: scan.chars, estimatedModelRequests: scan.estimated,
       activeJobId: this.scopeJobs.has(this.scopeKey(scope)) && this.get(this.scopeJobs.get(this.scopeKey(scope))!)?.status === "running" ? this.scopeJobs.get(this.scopeKey(scope)) : undefined,
       unchanged: this.storage.getConversationOrganizationFingerprint(this.scopeKey(scope)) === scan.fingerprint };
@@ -166,8 +171,11 @@ export class ConversationOrganizationService {
     if (current.confirmationFingerprint !== scan.confirmationFingerprint) throw new Error("预览后会话内容或归属已变化，请重新预览确认。");
     const job: ConversationOrganizationJob = { id: randomUUID(), status: "running", stage: "等待开始会话内容整理", processedSessions: 0,
       totalSessions: scan.items.length, modelRequests: 0, result: emptyResult(scan) };
-    if (!scan.items.length || !force && this.storage.getConversationOrganizationFingerprint(scopeKey) === scan.fingerprint) {
-      job.status = "completed"; job.result.unchanged = !!scan.items.length; job.stage = scan.items.length ? "内容和归属未变化，没有重复建任务或调用模型。" : "没有符合范围且有正文的工作会话。";
+    if (scan.scope.review) job.review = { state: "analyzing", suggestions: [],
+      sessions: scan.items.map(item => ({ id: item.session.id, title: item.session.title || "未命名会话", revision: organizationRevision(item.session), workspaceId: item.session.workspaceId ?? null, targetWorkspaceId: item.workspaceId, directory: item.directory })),
+      targets: scan.tasks.filter(task => scan.items.some(item => item.directory === task.directory && (task.card.workspaceId === item.workspaceId || task.card.workspaceId === null && item.workspaceId === null))).map(task => ({ id: task.container.id, title: task.card.title, status: task.card.status, revision: task.card.updatedAt })) };
+    if (!scan.items.length || !scan.scope.review && !force && this.storage.getConversationOrganizationFingerprint(scopeKey) === scan.fingerprint) {
+      job.status = "completed"; if (job.review) job.review.state = "prepared"; job.result.unchanged = !!scan.items.length; job.stage = scan.items.length ? "内容和归属未变化，没有重复建任务或调用模型。" : "没有符合范围且有正文的工作会话。";
       this.storage.saveConversationOrganizationJob(job, token, scopeKey); return job;
     }
     if ([...this.active.keys()].filter(id => this.jobs.get(id)?.status === "running").length >= 10) throw new Error("已有10个归类作业在执行或等待，请先完成或取消后再确认；未发起新模型请求。");
@@ -206,6 +214,18 @@ export class ConversationOrganizationService {
     return job;
   }
 
+  applyReview(id: string, choices: import("./conversation-organize-contract.js").OrganizationChoice[]): ConversationOrganizationJob {
+    const job = this.get(id);
+    if (!job) throw new Error("整理建议不存在，请重新分析。");
+    const result = applyOrganizationReview(this.storage, this.deps, job, choices);
+    return result;
+  }
+  undoReview(id: string): ConversationOrganizationJob {
+    const job = this.get(id);
+    if (!job) throw new Error("整理记录不存在。");
+    return undoOrganizationReview(this.storage, this.deps, job);
+  }
+
   private ai(purpose: "conversation-summary" | "conversation-organize", sourceId: string | undefined, onCall: (id: string) => void) {
     const config = this.deps.titleOptions?.config;
     if (!config) throw new Error("服务端未启用系统 AI 配置。");
@@ -232,7 +252,7 @@ export class ConversationOrganizationService {
   }
   private taskCandidates(scan: Scan, item: Item): Task[] {
     const normalMatches = this.storage.listWorkspaces().filter(workspace => !isGlobalWorkspace(workspace) && normalizeProjectCwd(workspace.cwd) === item.directory).length;
-    return scan.tasks.filter(task => task.directory === item.directory
+    return scan.tasks.filter(task => task.card.status !== "archived" && !task.container.archived && task.directory === item.directory
       && (task.card.workspaceId === item.workspaceId || task.card.workspaceId === null && normalMatches <= 1)
       && (scan.scope.target?.kind !== "workspace" || task.container.workspaceId === scan.scope.target.workspaceId));
   }
@@ -267,7 +287,7 @@ export class ConversationOrganizationService {
           }
           // Refresh target candidates after previous batches created tasks; later batches can reuse them.
           const candidates = this.taskCandidates(scan, batch[0]!);
-          const input: ConversationGroupingInput = { sessions: summarized, tasks: candidates.map(task => ({ id: task.container.id, title: redactSystemAiText(task.card.title.slice(0, 80)), titleTruncated: task.card.title.length > 80, description: redactSystemAiText(task.card.description.slice(0, 240)), descriptionTruncated: task.card.description.length > 240 })) };
+          const input: ConversationGroupingInput = { review: scan.scope.review, sessions: summarized, tasks: candidates.map(task => ({ id: task.container.id, title: redactSystemAiText(task.card.title.slice(0, 80)), titleTruncated: task.card.title.length > 80, description: redactSystemAiText(task.card.description.slice(0, 240)), descriptionTruncated: task.card.description.length > 240 })) };
           job.stage = `按正文语义规划任务（已处理 ${job.processedSessions}/${scan.items.length}）`; this.save(job);
           this.countModelRequest(job);
           const plan = this.deps.judge ? await this.deps.judge(input, signal)
@@ -276,7 +296,25 @@ export class ConversationOrganizationService {
           // Test adapters and production share the same complete-membership/domain validator.
           const checked = parseConversationGrouping(JSON.stringify(plan), input);
           signal.throwIfAborted();
-          this.apply(job, batch, candidates, checked, scan.scope.mode);
+          if (job.review) {
+            for (const group of checked.groups) job.review.suggestions.push({ id: randomUUID(), action: "group", title: group.title || candidates.find(task => task.container.id === group.existingTaskId)?.card.title || "待整理任务",
+              reason: group.description || "正文指向同一项具体工作。", existingTaskId: group.existingTaskId, sessionIds: group.sessionIds });
+            for (const item of checked.archive ?? []) {
+              const session = batch.find(source => source.session.id === item.sessionId)!.session;
+              const blocked = organizationArchiveBlocked(session);
+              job.review.suggestions.push({ id: randomUUID(), action: blocked ? "keep" : "archive", title: session.title || "未命名会话",
+                reason: blocked ? "存在执行、失败或未答复记录，缺少安全归档证据，保留待确认。" : item.reason, existingTaskId: null, sessionIds: [session.id] });
+            }
+            for (const id of checked.unassigned) job.review.suggestions.push({ id: randomUUID(), action: "keep", title: batch.find(item => item.session.id === id)?.session.title || "未命名会话",
+              reason: "缺少足够的工作主题或结束证据，请查看原会话后确认。", existingTaskId: null, sessionIds: [id] });
+            const busyIds = new Set(batch.filter(item => isArchiveBlocked(item.session)).map(item => item.session.id));
+            for (const suggestion of job.review.suggestions) if (suggestion.action !== "keep") suggestion.sessionIds = suggestion.sessionIds.filter(id => !busyIds.has(id));
+            job.review.suggestions = job.review.suggestions.filter(item => item.sessionIds.length);
+            const kept = new Set(job.review.suggestions.filter(item => item.action === "keep").flatMap(item => item.sessionIds));
+            for (const id of busyIds) if (!kept.has(id)) job.review.suggestions.push({ id: randomUUID(), action: "keep", title: batch.find(item => item.session.id === id)?.session.title || "未命名会话", reason: "会话仍在执行或等待处理，完成后再整理。", existingTaskId: null, sessionIds: [id] });
+            job.processedSessions += batch.length;
+            this.save(job);
+          } else this.apply(job, batch, candidates, checked, scan.scope.mode);
           for (const created of job.result.createdTasks) {
             if (scan.tasks.some(task => task.container.id === created.taskId)) continue;
             const container = this.storage.getWorkspaceTask(created.taskId), card = this.storage.getWandTask(created.cardId);
@@ -289,8 +327,9 @@ export class ConversationOrganizationService {
           }
         }
       }
-      job.status = "completed"; job.stage = "会话自动归类完成";
-      if (!job.result.refused.length && !job.result.unassignedSessions.length)
+      job.status = "completed"; job.stage = job.review ? "建议已生成，等待确认；会话归属未改动。" : "会话自动归类完成";
+      if (job.review) job.review.state = "prepared";
+      if (!job.review && !job.result.refused.length && !job.result.unassignedSessions.length)
         this.storage.saveConversationOrganizationFingerprint(this.scopeKey(scan.scope), this.fingerprint(scan.items.map(item => ({ ...item,
           session: { ...item.session, ...this.storage.getSessionWorkspace(item.session.id) } })), scan.tasks.map(task => ({ ...task,
             card: { ...task.card, status: this.storage.getWandTask(task.card.id)?.status ?? task.card.status } }))));

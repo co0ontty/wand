@@ -4,6 +4,11 @@ import type { ConversationOrganizationJob } from "../conversation-organize-contr
 /** Operation receipts, not a second source of tasks or membership. Task mutations share this transaction. */
 export class ConversationOrganizationRepository {
   constructor(private readonly db: DatabaseSync) {}
+  setOrganizedSessionArchive(id: string, archived: boolean, workspaceId?: string | null): void {
+    this.db.prepare("UPDATE command_sessions SET archived=?, archived_at=? WHERE id=?")
+      .run(archived ? 1 : 0, archived ? new Date().toISOString() : null, id);
+    if (workspaceId !== undefined) this.db.prepare("UPDATE command_sessions SET workspace_id=? WHERE id=?").run(workspaceId, id);
+  }
   saveConversationOrganizationJob(job: ConversationOrganizationJob, requestToken?: string, scopeKey?: string): void {
     this.db.prepare(`INSERT INTO conversation_organization_jobs(id, request_token, scope_key, status, state_json, updated_at)
       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,

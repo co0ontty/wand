@@ -73,10 +73,11 @@ export function projectTaskComment(deps: TaskRouteDependencies, comment: WandTas
 }
 
 /** A legacy caller may supply its already validated explicit override; the new comment API always uses employee defaults. */
-export async function submitTaskComment(deps: TaskRouteDependencies, taskId: string, value: unknown, legacyOverride?: WandTaskAgent): Promise<{ comment: WandTaskComment; replayed: boolean }> {
+export async function submitTaskComment(deps: TaskRouteDependencies, taskId: string, value: unknown, legacyOverride?: WandTaskAgent, executionTaskIdOverride?: string, expectedTaskUpdatedAt?: string): Promise<{ comment: WandTaskComment; replayed: boolean }> {
   const { storage, structured, processes, config } = deps;
   const task = storage.getWandTask(taskId);
   if (!task) throw new HttpError(404, "not_found", "未找到该任务。");
+  if (expectedTaskUpdatedAt && task.updatedAt !== expectedTaskUpdatedAt) throw new HttpError(409, "conflict", "任务已变化，巡检取消本次派发。");
   const body = bodyObject(value);
   const requestId = text(body.requestId), instruction = text(body.body);
   const agentOverride = body.agent === undefined ? legacyOverride : parseTaskAgent(body.agent) ?? undefined;
@@ -108,7 +109,7 @@ export async function submitTaskComment(deps: TaskRouteDependencies, taskId: str
   const executionEmployee = employee && agentOverride ? { ...employee, agents: [agentOverride] } : employee;
   const source = sourceCommentId ? storage.getTaskCommentForTask(task.id, sourceCommentId) : null;
   const continued = source?.purpose !== "review" ? source?.dispatch?.executionTaskId ?? (source && source.taskId !== task.id ? source.taskId : null) : null;
-  const executionTaskId = purpose === "review" ? task.id : continued ?? (referencedTasks.length === 1 ? referencedTasks[0]!.id : task.parentTaskId ? task.id : null);
+  const executionTaskId = purpose === "review" ? task.id : executionTaskIdOverride ?? continued ?? (referencedTasks.length === 1 ? referencedTasks[0]!.id : task.parentTaskId ? task.id : null);
   const createChild = Boolean(employee && purpose !== "review" && !executionTaskId);
   const candidate = executionEmployee ? selectEmployeeCandidate(executionEmployee) : null;
   if (employee) {
@@ -119,7 +120,9 @@ export async function submitTaskComment(deps: TaskRouteDependencies, taskId: str
     ...(body.submissionSource === "manual" || body.submissionSource === "user_dispatch" ? { submissionSource: body.submissionSource as "manual" | "user_dispatch" } : {}),
     body: employee ? `@${employee.name} ${displayInstruction}` : instruction, employeeId, employeeName: employee?.name ?? null,
     taskVersion: task.updatedAt, referencedTaskIds: referencedTasks.map(reference => reference.id), purpose,
-    reviewRevision: purpose === "review" ? task.deliveryRevision ?? 0 : null, executionTaskId, createChild };
+    reviewRevision: purpose === "review" ? task.deliveryRevision ?? 0 : null, executionTaskId, createChild,
+    guardTaskVersion: Boolean(expectedTaskUpdatedAt),
+    assignAgent: expectedTaskUpdatedAt ? agentOverride : undefined };
   if (!employee) {
     return { comment: projectTaskComment(deps, storage.createTaskCommentIntent(intent)), replayed: false };
   }

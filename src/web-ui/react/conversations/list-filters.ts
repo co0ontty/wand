@@ -8,7 +8,7 @@ import type { ConversationListFilter } from "./state";
 export const CONVERSATION_TASK_STAGES = [
   { value: "all", label: "全部状态" },
   { value: "backlog", label: "待立项" },
-  { value: "todo", label: "等待认领" },
+  { value: "todo", label: "待派遣" },
   { value: "doing", label: "执行中" },
   { value: "review", label: "待验收" },
   { value: "ready", label: "待归档" },

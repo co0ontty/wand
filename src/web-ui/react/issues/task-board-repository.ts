@@ -8,7 +8,6 @@ import type {
   WandTaskComment,
   TaskExecutionSubject,
 } from "../../../task-types";
-import { taskHumanAccepted } from "../../../task-types";
 import type { ConversationTurn } from "../../../types.js";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
@@ -34,6 +33,20 @@ export interface WandTaskListed extends WandTaskListedDto {
 }
 
 export type TaskWorkflowAction = "submit" | "pass" | "fail" | "return" | "accept";
+
+export type TaskAutoFlowStage = "review" | "doing" | "todo";
+export interface TaskAutoFlowSettings {
+  enabled: boolean;
+  intervalMinutes: number;
+  revision: number;
+  stages: Record<TaskAutoFlowStage, { employeeId: string; agent: WandTaskAgent | null }>;
+}
+export interface TaskAutoFlowState {
+  settings: TaskAutoFlowSettings;
+  lastScan: { at: string; stage: TaskAutoFlowStage | null; taskId: string | null; result: string; requestedCount?: number; dispatchedTaskIds?: string[] } | null;
+  history: Array<{ at: string; stage: TaskAutoFlowStage | null; taskId: string | null; result: string; requestedCount?: number; dispatchedTaskIds?: string[];
+    dispatches: Array<{ taskId: string; taskIdentifier: string; commentId: string; state: string; sessionId: string | null }> }>;
+}
 
 export interface TaskWorkflowPatch {
   action: TaskWorkflowAction;
@@ -88,6 +101,15 @@ export interface IssueDispatchResult {
 
 export const taskBoardRepository = {
   list: loadTaskBoardList,
+  autoFlow(): Promise<TaskAutoFlowState> {
+    return requestJson("/api/wand-task-auto-flow");
+  },
+  saveAutoFlow(settings: TaskAutoFlowSettings): Promise<TaskAutoFlowState> {
+    return requestJson("/api/wand-task-auto-flow", jsonBody(settings, "PUT"));
+  },
+  runAutoFlow(expectedLastScanAt: string | null, stage?: TaskAutoFlowStage, count = 1): Promise<TaskAutoFlowState> {
+    return requestJson("/api/wand-task-auto-flow/run", jsonBody({ expectedLastScanAt, stage, count }));
+  },
   workspaces(): Promise<IssueWorkspace[]> {
     return requestJson("/api/workspaces");
   },
@@ -302,15 +324,19 @@ export const taskBoardRepository = {
 
 export type { IssueWorkspace };
 
-/** Server verdict wins; status fallback keeps older servers safe. */
+/** Only the server can establish that no live work blocks archiving. */
 export function canArchiveBoardTask(task: WandTaskListed): boolean {
-  return task.canArchive ?? task.status !== "doing";
+  return task.status !== "archived" && task.canArchive === true;
 }
 
-/** A denied verdict is not evidence of a running session: acceptance is required too. */
+/** Labels and drop validation share the same verdict. 归档不看验收，只挡仍在进行的工作。 */
+export function boardTaskArchiveFeedback(task: WandTaskListed): { label: string; reason: string } {
+  if (task.status === "archived") return { label: "任务已归档", reason: "任务已归档，无需重复归档。" };
+  if (canArchiveBoardTask(task)) return { label: "拖到此处归档", reason: "" };
+  if (task.canArchive === undefined) return { label: "归档状态待刷新", reason: "尚未取得服务端归档判定，请刷新任务后重试。" };
+  return { label: "仍在执行", reason: "任务还有执行、待答、排队或团队工作；结束或停止后再归档。" };
+}
+
 export function boardTaskArchiveBlockReason(task: WandTaskListed): string {
-  if (task.status === "archived") return "任务已归档。";
-  if (canArchiveBoardTask(task)) return "";
-  if (!taskHumanAccepted(task)) return "尚未人工确认当前交付的验收，请在任务详情完成验收后归档。";
-  return "任务仍有执行、待答或排队工作，请处理结束后再归档。";
+  return boardTaskArchiveFeedback(task).reason;
 }

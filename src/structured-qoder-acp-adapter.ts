@@ -186,6 +186,11 @@ export class QoderAcpRunner implements StructuredRunnerAdapter {
             return;
           }
 
+          if (record.type === "wand_qoder_effort") {
+            context.onQoderInputEvent?.(record, reducer.state);
+            return;
+          }
+
           if (record.type === "wand_qoder_permission" && record.id) {
             protocolEventObserved = true;
             const escalationId = getString(record.id);

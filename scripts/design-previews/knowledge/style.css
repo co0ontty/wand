@@ -9,4 +9,3 @@ html,body,#root{margin:0;min-height:100%;height:auto!important;overflow:visible!
 .auto-update-btn:hover{filter:brightness(1.08)}
 .update-flash-alert{margin:12px 24px 0!important;border-radius:6px;flex:none}
 .auto-pill{font-size:10px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);padding:1px 6px;border-radius:4px;font-weight:500;margin-left:4px}
-

@@ -17,8 +17,7 @@ export interface TerminalExitEvent {
   signal?: number;
 }
 
-export interface TerminalProcess {
-  readonly sessionId: string;
+export interface TerminalProcess {  readonly sessionId: string;
   readonly incarnationId: string;
   readonly pid: number;
   write(data: string): void;
@@ -64,6 +63,20 @@ export interface TerminalSpawnRequest {
   cols: number;
   rows: number;
   launchMarkerToken?: string;
+}
+
+/**
+ * The daemon was unreachable before any byte was written: the socket was
+ * already unavailable, so the request never left this process. Unlike a
+ * timeout or disconnect after the write (unknown outcome), this failure is
+ * known to be unsent and the operation is safe to retry once connected.
+ */
+export class DaemonUnavailableError extends Error {
+  readonly code = "DAEMON_UNAVAILABLE" as const;
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "DaemonUnavailableError";
+  }
 }
 
 /**

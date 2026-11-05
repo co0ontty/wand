@@ -1302,7 +1302,7 @@ export class StructuredSessionManager {
     return { ...metadata, output: "" };
   }
 
-  setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId">): void {
+  setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId"> & Partial<Pick<SessionSnapshot, "archived" | "archivedAt">>): void {
     const updated = { ...this.requireSession(id), ...membership };
     this.sessions.set(id, updated);
     this.emitStructuredSnapshot(updated);
@@ -3046,6 +3046,17 @@ export class StructuredSessionManager {
     let current = this.currentSessionForRequest(sessionId, requestId);
     if (!current || current.runner !== "qoder-cli-acp") return;
     if (dispatch) this.qoderReadyRequests.set(sessionId, requestId);
+    if (event.type === "wand_qoder_effort"
+      && (event.requested ?? null) === (thinkingEffortToQoderEffort(current.thinkingEffort) ?? null)) {
+      const effort = typeof event.effort === "string" ? event.effort : null;
+      const thinkingEffort = normalizeThinkingEffort(effort
+        ? ({ low: "standard", high: "deep", max: "max" }[effort] ?? `qoder:${effort}`) : "off");
+      const updated = { ...current, thinkingEffort };
+      this.sessions.set(sessionId, updated);
+      this.storage.updateSessionRuntimeMetadata(updated);
+      if (dispatch) this.emitStructuredSnapshot(updated);
+      current = updated;
+    }
     if (event.type === "wand_qoder_phase" && (event.phase === "idle" || event.phase === "responding")) {
       const inFlight = event.phase === "responding";
       state.phase = inFlight ? "responding" : undefined;

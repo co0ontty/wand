@@ -236,6 +236,15 @@ export class SessionRegistry {
     else if (owner === "pty") this.processes.setSessionWorkspace(id, membership);
   }
 
+  refreshOrganizedSessionArchive(id: string): void {
+    const stored = this.storage.getSessionSlim(id);
+    if (!stored) return;
+    const state = { workspaceId: stored.workspaceId, workspaceTaskId: stored.workspaceTaskId, archived: stored.archived, archivedAt: stored.archivedAt };
+    const owner = this.ownerOf(id);
+    if (owner === "structured") this.structured.setSessionWorkspace(id, state);
+    else if (owner === "pty") this.processes.setSessionWorkspace(id, state);
+  }
+
   setSessionModel(id: string, model: string | null): SessionSnapshot | null {
     const owner = this.ownerOf(id);
     if (owner === "structured") return this.structured.setSessionModel(id, model);

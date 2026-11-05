@@ -86,6 +86,7 @@ import { AI_TEAM_CHAT_PREFIX, createAiTeamRunner } from "./ai-team-runner.js";
 import { ServerNotifier } from "./server-notifier.js";
 import { ConversationService } from "./conversation-service.js";
 import { ScheduledTaskService } from "./scheduled-task-service.js";
+import { TaskAutoFlow } from "./task-auto-flow.js";
 import { registerScheduledTaskRoutes } from "./server-scheduled-task-routes.js";
 import { CONVERSATION_RELAY_PREFIX } from "./conversation-types.js";
 import { forwardConversationRelay, registerConversationRoutes } from "./server-conversation-routes.js";
@@ -839,7 +840,9 @@ export async function startServer(
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
-  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams, free: openRouter, executionQueue: taskExecutionQueue });
+  const taskRouteDeps = { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams, free: openRouter, executionQueue: taskExecutionQueue };
+  const taskAutoFlow = new TaskAutoFlow(taskRouteDeps);
+  registerTaskRoutes(app, taskRouteDeps, taskAutoFlow);
   registerAiTeamRoutes(app, {
     storage,
     runner: aiTeams,
@@ -1064,10 +1067,13 @@ export async function startServer(
   liveActivities.start();
   void structuredSessions.recoverDetachedRuns().then(() => {
     liveActivityFactsReady = true;
-    return taskExecutionQueue.drainAll();
+    // Recovery of an old queued launch can wait on a slow provider. The durable
+    // dispatch rows already block duplicate scans, so it must not gate the scanner.
+    void taskExecutionQueue.drainAll().catch(error => wandWarn(`员工队列恢复未确认：${getErrorMessage(error)}`));
+    if (!testMode) taskAutoFlow.start();
   }, () => {
     wandWarn("会话恢复未确认：暂缓灵动岛远程更新，不将旧状态判为完成。");
-  });
+  }).catch(error => wandWarn(`任务巡检启动失败：${getErrorMessage(error)}`));
   aiTeams.reconcile();
   structuredSessions.resumeQueuedPiMessages();
 
@@ -1153,6 +1159,7 @@ export async function startServer(
       employeeImLifecycle.dispose();
       employeeIm.dispose();
       await scheduledTasks.dispose();
+      taskAutoFlow.dispose();
       decisions.dispose();
       systemFallback?.dispose();
       openRouter.dispose();
@@ -1421,6 +1428,7 @@ export async function startServer(
       modelCatalog.dispose();
       const teamShutdown = aiTeams.dispose();
       await scheduledTasks.dispose();
+      taskAutoFlow.dispose();
       await daemonMaintenance.stop();
       await storageCleanup.stop();
       decisions.dispose();

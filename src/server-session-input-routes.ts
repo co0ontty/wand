@@ -14,6 +14,7 @@ import { badRequest, surfaceDomainError } from "./http-error.js";
 
 import type { SessionRouteContext } from "./server-session-context.js";
 import { getInputErrorResponse, getInputDebugMeta, startResumedPtySession, getAutoResumeInitialInput, canAutoResumePtyForInput } from "./session-service.js";
+import { PtyInputNotSentError } from "./process-manager.js";
 
 /** Structured message/queue, PTY input and permission/escalation control routes. */
 export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContext): void {
@@ -214,12 +215,27 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
         res.json(sessionResponseDTO(snapshot, req));
         return;
       }
-      const snapshot = await processes.sendInputConfirmed(sessionId, input, view, shortcutKey);
+      // Not-sent failures (daemon disconnected before any byte was written)
+      // never reached the PTY, so resubmitting is safe. Wait for reconnect
+      // within a bounded budget and retry; unknown deliveries never replay.
+      let snapshot: SessionSnapshot | undefined;
+      let delayMs = 500;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          snapshot = await processes.sendInputConfirmed(sessionId, input, view, shortcutKey);
+          break;
+        } catch (error) {
+          if (!(error instanceof PtyInputNotSentError) || attempt >= 4) throw error;
+          await new Promise<void>(resolve => setTimeout(resolve, delayMs));
+          delayMs *= 2;
+        }
+      }
+      const confirmedSnapshot = snapshot!;
       if (body.responseMode === "accepted") {
         res.status(202).json({ accepted: true });
         return;
       }
-      res.json(sessionResponseDTO(snapshot, req));
+      res.json(sessionResponseDTO(confirmedSnapshot, req));
     } catch (error) {
       const response = inputAccepted
         ? { statusCode: 503, payload: { error: getErrorMessage(error), errorCode: "INPUT_DELIVERY_UNCONFIRMED",

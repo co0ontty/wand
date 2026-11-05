@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { parseExecutionMode } from "./session-request.js";
 
-import { ProcessManager,PtyInputDeliveryError,SessionInputError } from "./process-manager.js";
+import { ProcessManager,PtyInputDeliveryError,PtyInputNotSentError,SessionInputError } from "./process-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, SessionProvider, SessionSnapshot } from "./types.js";
 
@@ -46,6 +46,19 @@ export function commitMessageFromIteration(body: { autoMessage?: boolean; custom
 }
 
 export function getInputErrorResponse(error: unknown, sessionId: string) {
+  if (error instanceof PtyInputNotSentError) {
+    return {
+      statusCode: 503,
+      payload: {
+        // Not sent (daemon unreachable before write): safe to retry.
+        error: "终端服务正在重连，输入尚未发送，可安全重试。",
+        errorCode: "INPUT_DAEMON_UNAVAILABLE",
+        retryable: true,
+        sessionId,
+        sessionStatus: null,
+      },
+    };
+  }
   if (error instanceof PtyInputDeliveryError) {
     return {
       statusCode: 503,

@@ -53,6 +53,13 @@ PORT_OVERRIDE=""
 RESTART_DAEMONS="${WAND_RESTART_DAEMONS:-0}"
 SCOPE="${WAND_SERVICE_SCOPE:-system}"
 SERVICE_STOPPED_FOR_INSTALL=0
+# TASK-421: 回滚备份与安装脚本策略在安装/恢复路径间共享。
+# 回滚备份是完整已安装目录（含 node_modules）通过同盘改名得到的，不做整包
+# 拷贝：磁盘被 npm 安装耗尽（ENOSPC）时恢复只需改名替换，零额外空间需求。
+ROLLBACK_SNAPSHOT_DIR=""
+INSTALL_VERIFIED=0
+ROLLBACK_SELECTION_FAILED=0
+NPM_SCRIPT_FLAG=""
 
 print_help() {
   awk '
@@ -395,12 +402,145 @@ cleanup_npm_package_temps() {
   for temp in "$scope_dir"/.wand-*; do
     [[ -e "$temp" ]] || continue
     [[ "$(basename "$temp")" == .wand-* ]] || continue
+    # TASK-421: 同盘回滚备份必须保留到恢复或成功安装后清除，不能被当作 npm 残留清掉。
+    [[ "$temp" == *rollback-backup* ]] && continue
     warn "清理 npm 残留临时目录: $temp"
     rm -rf "$temp"
   done
 }
 
+# TASK-421: 安装前磁盘预算检查。必须在停止服务之前调用：空间不足或无法
+# 核对可用空间时直接报错退出，正在运行的服务不受影响（2026-11-04 ENOSPC
+# 事故：停服后才发现磁盘耗尽，npm 安装中断且旧全局入口丢失）。
+# 所需空间 = 4 * tarball + 2 * 已安装包大小（含 node_modules）+ 默认 1 GiB
+# 下限：覆盖 npm 安装解包工作区与缓存写入；回滚改名恢复本身零额外空间
+#（见 snapshot_previous_install），下限即为安装后保留的缓冲。无法核对
+# 目标文件系统（statfs 不可用）时失败即拒绝，不放行。可用
+# WAND_INSTALL_MIN_FREE_BYTES 覆盖下限（字节）。
+free_bytes_for() {
+  local dir="$1"
+  "$NODE_BIN" -e '
+    const fs = require("fs");
+    try { const s = fs.statfsSync(process.argv[1]); process.stdout.write(String(s.bavail * s.bsize)); }
+    catch { process.exit(1); }
+  ' "$dir" 2>/dev/null || echo ""
+}
+
+dir_size_bytes() {
+  local dir="$1" kind size kb
+  kind="$("$NODE_BIN" -e '
+    const fs = require("fs");
+    try { if (!fs.statSync(process.argv[1]).isDirectory()) process.exit(1); process.stdout.write("directory"); }
+    catch (error) { if (error.code !== "ENOENT") process.exit(1); process.stdout.write("missing"); }
+  ' "$dir" 2>/dev/null)" || return 1
+  [[ "$kind" == "missing" ]] && { echo 0; return 0; }
+  # 单独检查 du 的退出码，不能让管道末端 cut 的成功掩盖读取失败。
+  size="$(du -sk "$dir" 2>/dev/null)" || return 1
+  kb="${size%%[[:space:]]*}"
+  [[ "$kb" =~ ^[0-9]+$ ]] || return 1
+  echo $(( kb * 1024 ))
+}
+
+check_disk_budget_for_install() {
+  local tarball="$1" prefix="$2"
+  local min_free="${WAND_INSTALL_MIN_FREE_BYTES:-1073741824}"
+  local tarball_bytes installed_bytes free dir
+  tarball_bytes="$("$NODE_BIN" -e 'try { process.stdout.write(String(require("fs").statSync(process.argv[1]).size)); } catch { process.stdout.write("0"); }' "$tarball" 2>/dev/null || echo 0)"
+  [[ "$tarball_bytes" =~ ^[0-9]+$ && "$tarball_bytes" -gt 0 ]] || die "无法核对安装包大小，已取消安装（服务未停止）：$tarball"
+  installed_bytes="$(dir_size_bytes "$prefix/lib/node_modules/@co0ontty/wand")" || die "无法核对已安装包目录大小，已取消安装（服务未停止）"
+  [[ "$installed_bytes" =~ ^[0-9]+$ ]] || die "已安装包目录大小无效，已取消安装（服务未停止）"
+  local required=$(( tarball_bytes * 4 + installed_bytes * 2 + min_free ))
+  for dir in "$prefix" "$PACK_DIR"; do
+    [[ -n "$dir" ]] || die "安装目标目录未设置，已取消安装（服务未停止）"
+    [[ -d "$dir" ]] || die "安装目标目录不存在，已取消安装（服务未停止）：$dir"
+    free="$(free_bytes_for "$dir")"
+    # 无法核对目标空间时必须在停服前拒绝：放行等于用未知空间赌安装与恢复。
+    [[ "$free" =~ ^[0-9]+$ ]] || die "无法核对 $dir 所在文件系统的可用空间，已取消安装（服务未停止）"
+    if [[ "$free" -lt "$required" ]]; then
+      die "磁盘空间不足，已取消安装（服务未停止）：$dir 可用 ${free} 字节，需要至少 ${required} 字节（tarball ${tarball_bytes} x4 + 已安装包 ${installed_bytes} x2 + 下限 ${min_free}）。请先释放空间后重跑 ./start.sh"
+    fi
+  done
+  ok "磁盘预算检查通过：安装目标可用空间充足（需要至少 ${required} 字节）"
+  return 0
+}
+
+# TASK-421: 停服后、npm install 前把当前已安装包同盘改名为回滚备份。
+# 改名是同一文件系统内的元数据操作，不复制数据、零额外空间：即使 npm
+# 安装把剩余磁盘耗尽（ENOSPC），恢复只需删掉残缺的新包再改名回来。
+# 备份位于已安装目录旁（PACK_DIR 之外），EXIT 的 finish_deployment 清理
+# PACK_DIR 不会误删；备份只在新包验证通过后清除。改名失败时旧包未动，
+# 直接 die（若服务已停止，EXIT 恢复路径会用未动的旧包拉起服务）。
+snapshot_previous_install() {
+  local installed_root="$WAND_PREFIX/lib/node_modules/@co0ontty/wand"
+  local scope_dir="$WAND_PREFIX/lib/node_modules/@co0ontty"
+  # 即使新入口存在，也可能只是上轮未验证的残包。优先保留并复用旧备份，
+  # 不得删掉唯一恢复来源再把残包当作旧版本备份。多个备份无法裁定时拒绝。
+  local stale candidate=""
+  for stale in "$scope_dir"/.wand-rollback-backup-*; do
+    [[ -e "$stale" || -L "$stale" ]] || continue
+    if [[ -n "$candidate" ]]; then
+      ROLLBACK_SELECTION_FAILED=1
+      die "发现多个遗留回滚备份，无法安全选择；已保留全部备份，请核对后重试"
+    fi
+    if [[ ! -f "$stale/package.json" || ! -f "$stale/dist/cli.js" || ! -d "$stale/node_modules" ]]; then
+      ROLLBACK_SELECTION_FAILED=1
+      die "遗留回滚备份不完整，已保留并取消安装：$stale"
+    fi
+    candidate="$stale"
+  done
+  if [[ -n "$candidate" ]]; then
+    ROLLBACK_SNAPSHOT_DIR="$candidate"
+    ok "发现上轮遗留的同盘回滚备份，直接复用（无需复制）: $candidate"
+    return 0
+  fi
+  [[ -d "$installed_root" ]] || return 0
+  [[ -f "$installed_root/package.json" && -f "$installed_root/dist/cli.js" && -d "$installed_root/node_modules" ]] || die "当前已安装包不完整，无法制作可离线恢复的回滚备份，已取消安装"
+  ROLLBACK_SNAPSHOT_DIR="$scope_dir/.wand-rollback-backup-$$"
+  if ! mv "$installed_root" "$ROLLBACK_SNAPSHOT_DIR"; then
+    ROLLBACK_SNAPSHOT_DIR=""
+    die "回滚备份改名失败（旧包未动），已取消安装"
+  fi
+  ok "已把当前安装改名为同盘回滚备份（含依赖，改名零额外空间）: $ROLLBACK_SNAPSHOT_DIR"
+}
+
+# TASK-421: 从同盘回滚备份本地恢复，不调用 npm（不触网、不依赖缓存），
+# 也不复制整包：删掉残缺的新包（释放空间）后把备份改名回原位，再重建
+# bin 软链接，保证全局 wand 入口存在，EXIT 恢复路径才能拉起服务。
+# 改名失败时备份仍保留在原处，EXIT 恢复路径可重试或手动搬回。
+restore_previous_install() {
+  [[ -n "$ROLLBACK_SNAPSHOT_DIR" && -d "$ROLLBACK_SNAPSHOT_DIR" ]] || return 1
+  [[ -f "$ROLLBACK_SNAPSHOT_DIR/package.json" && -f "$ROLLBACK_SNAPSHOT_DIR/dist/cli.js" && -d "$ROLLBACK_SNAPSHOT_DIR/node_modules" ]] || return 1
+  local installed_root="$WAND_PREFIX/lib/node_modules/@co0ontty/wand"
+  warn "安装失败，正在从同盘回滚备份恢复旧包（改名替换，无需额外空间）: $ROLLBACK_SNAPSHOT_DIR"
+  rm -rf "$installed_root" || return 1
+  if ! mv "$ROLLBACK_SNAPSHOT_DIR" "$installed_root"; then
+    warn "回滚备份改名恢复失败，备份仍保留在 ${ROLLBACK_SNAPSHOT_DIR}，请手动搬回 $installed_root"
+    return 1
+  fi
+  ROLLBACK_SNAPSHOT_DIR=""
+  chmod +x "$installed_root/dist/cli.js" 2>/dev/null || true
+  mkdir -p "$WAND_PREFIX/bin" || return 1
+  ln -sfn ../lib/node_modules/@co0ontty/wand/dist/cli.js "$WAND_BIN" || return 1
+  repair_global_package_permissions || return 1
+  restore_node_pty_spawn_helper || return 1
+  refresh_wand_runtime || return 1
+  [[ -x "$WAND_BIN" || -f "$WAND_BIN" ]]
+}
+
 restore_stopped_service() {
+  if [[ "$ROLLBACK_SELECTION_FAILED" == "1" ]]; then
+    warn "回滚来源尚未核实，保留全部备份且不自动启动当前安装"
+    return 1
+  fi
+  # 验证前的失败/中断一律先回滚，不以新入口存在作为安装成功依据。
+  # 包恢复也不能依赖是否曾停服（如服务尚未注册的首次恢复路径）。
+  if [[ "$INSTALL_VERIFIED" != "1" && -n "$ROLLBACK_SNAPSHOT_DIR" ]]; then
+    if ! restore_previous_install; then
+      warn "同盘回滚备份恢复失败；保留备份且不启动未验证的新包"
+      return 1
+    fi
+    ok "已从同盘回滚备份恢复旧包"
+  fi
   if [[ "$SERVICE_STOPPED_FOR_INSTALL" == "1" ]]; then
     warn "重启/安装未完成，尝试恢复启动原 $SCOPE 服务"
     if [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
@@ -789,13 +929,14 @@ PACK_DIR=""
 PACKAGE_STAGE=""
 
 finish_deployment() {
-  restore_stopped_service
+  restore_stopped_service || true
   [[ -n "$PACK_DIR" && -d "$PACK_DIR" ]] && rm -rf "$PACK_DIR"
   release_deployment_locks
   return 0
 }
 trap finish_deployment EXIT
-trap 'echo; warn "已中断。service 可能仍在跑旧版本。"; exit 130' INT
+trap 'echo; warn "已中断，将尝试恢复原安装与服务。"; exit 130' INT
+trap 'warn "收到终止信号，将尝试恢复原安装与服务。"; exit 143' TERM
 
 if [[ "$DO_BUILD" == "1" ]]; then
   ensure_render_submodules
@@ -850,15 +991,27 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   [[ -n "$PACK_FILE" && -f "$PACK_DIR/$PACK_FILE" ]] || die "npm pack 未产出 tarball"
 
   NPM_SCRIPT_FLAG="$("$NODE_BIN" "$REPO_ROOT/src/npm-install-policy.ts" "$NPM_FOR_WAND")"
+  # TASK-421: 先做磁盘预算检查（无法核对空间时失败即拒绝），再停服、
+  # 改名留同盘回滚备份（零额外空间），最后才 npm install。预算与改名都在
+  # npm install 之前通过；空间不足或不可核对时直接退出，服务未停止。
+  check_disk_budget_for_install "$PACK_DIR/$PACK_FILE" "$WAND_PREFIX"
   if service_installed && [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
     msg "安装前先停止 $SCOPE 服务"
     stop_service_for_install
   fi
+  snapshot_previous_install
   # sudo 继承的私有 umask 不应让包目录变成 0700，阻断 service 的普通用户。
+  # 安装失败（ENOSPC 等）先用同盘回滚备份恢复旧包，再走 EXIT 恢复路径拉服务。
   if [[ -n "$NPM_SCRIPT_FLAG" ]]; then
-    (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$NPM_SCRIPT_FLAG" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund)
+    if ! (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$NPM_SCRIPT_FLAG" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund); then
+      restore_previous_install && ok "旧包已恢复，退出路径将拉起原服务" || warn "同盘回滚备份恢复失败，请按提示手动处理"
+      die "npm 全局安装失败，已尝试恢复旧包，未更新到新版本"
+    fi
   else
-    (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund)
+    if ! (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund); then
+      restore_previous_install && ok "旧包已恢复，退出路径将拉起原服务" || warn "同盘回滚备份恢复失败，请按提示手动处理"
+      die "npm 全局安装失败，已尝试恢复旧包，未更新到新版本"
+    fi
   fi
   ok "本地 npm 包已安装到 $WAND_PREFIX"
   # npm 可能把全局包重新写成 root 所有、并丢掉 spawn-helper 的 +x。
@@ -868,6 +1021,13 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   refresh_wand_runtime
   verify_installed_beta
   verify_render_binary_installed
+  INSTALL_VERIFIED=1
+  # TASK-421: 新包已验证通过，同盘回滚备份才可清除；验证前任何退出都必须
+  # 保留备份，EXIT 恢复路径靠它改名拉回旧包。
+  if [[ -n "$ROLLBACK_SNAPSHOT_DIR" && -d "$ROLLBACK_SNAPSHOT_DIR" ]]; then
+    rm -rf "$ROLLBACK_SNAPSHOT_DIR" && ok "新包验证通过，已清除同盘回滚备份" || warn "回滚备份清除失败，已保留供下轮核对: $ROLLBACK_SNAPSHOT_DIR"
+    ROLLBACK_SNAPSHOT_DIR=""
+  fi
 
   # 保留原 daemon 是正常行为，不代表组件过期。是否有更新由新 Server 比较组件
   # 自身版本/构建并在 Web 提示，不能用「旧 PID 还活着」或 Wand 包版本变化代替。

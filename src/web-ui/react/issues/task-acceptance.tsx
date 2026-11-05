@@ -7,12 +7,37 @@ import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskAcceptan
 
 const drafts = new Map<string, { evidence: string; blocker: string }>();
 const workflowRequests = new Map<string, string>();
+type WorkflowInput = { evidence: string; blocker: string; requestId: string; expectedUpdatedAt: string };
+
+/** 编辑器里尚未保存的草稿优先，其次是已记录的验收/验证证据；顶部栏与编辑器共用同一份。 */
+export function taskAcceptanceDraft(task: WandTaskListed): { evidence: string; blocker: string } {
+  return drafts.get(task.id) ?? { evidence: task.acceptance?.evidence ?? task.verification?.evidence ?? "", blocker: task.acceptance?.blocker ?? task.verification?.blocker ?? "" };
+}
+
+/** 「确认并归档」的前置条件（不含草稿）：AI 已通过当前交付且子任务没有缺口。 */
+export function taskCanConfirmArchive(task: WandTaskListed, children: WandTaskListed[]): boolean {
+  return taskWorkflowStage(task.status) === "ready" && taskAiVerified(task) && children.every(taskAiVerified);
+}
+
+/** 同一任务版本 + 动作 + 草稿复用同一个 requestId，重复点击/未知回执不会生成新的写入。 */
+export async function submitTaskWorkflow(task: WandTaskListed, action: TaskWorkflowAction, submitted: { evidence: string; blocker: string },
+  onWorkflow: (action: TaskWorkflowAction, value: WorkflowInput) => Promise<boolean>): Promise<boolean> {
+  const expectedUpdatedAt = task.updatedAt;
+  const key = JSON.stringify([task.id, expectedUpdatedAt, action, submitted]);
+  const requestId = workflowRequests.get(key) ?? crypto.randomUUID();
+  workflowRequests.set(key, requestId);
+  if (workflowRequests.size > 100) workflowRequests.delete(workflowRequests.keys().next().value!);
+  const accepted = await onWorkflow(action, { ...submitted, requestId, expectedUpdatedAt });
+  if (accepted) { workflowRequests.delete(key); if (drafts.get(task.id) === submitted) drafts.delete(task.id); }
+  return accepted;
+}
+
 export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow }: {
   task: WandTaskListed; children: WandTaskListed[]; busy: boolean;
   onSave(value: TaskAcceptance): Promise<boolean>;
   onWorkflow(action: TaskWorkflowAction, value: { evidence: string; blocker: string; requestId: string; expectedUpdatedAt: string }): Promise<boolean>;
 }): React.ReactElement {
-  const initial = () => drafts.get(task.id) ?? { evidence: task.acceptance?.evidence ?? task.verification?.evidence ?? "", blocker: task.acceptance?.blocker ?? task.verification?.blocker ?? "" };
+  const initial = () => taskAcceptanceDraft(task);
   const [draft, setDraft] = React.useState(initial);
   const [feedback, setFeedback] = React.useState("");
   const [saving, setSaving] = React.useState<"save" | TaskWorkflowAction | null>(null);
@@ -35,17 +60,11 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
     finally { setSaving(null); }
   };
   const act = async (action: TaskWorkflowAction): Promise<void> => {
-    const submitted = draft, expectedUpdatedAt = task.updatedAt;
-    const key = JSON.stringify([task.id, expectedUpdatedAt, action, submitted]);
-    const requestId = workflowRequests.get(key) ?? crypto.randomUUID();
-    workflowRequests.set(key, requestId);
-    if (workflowRequests.size > 100) workflowRequests.delete(workflowRequests.keys().next().value!);
+    const submitted = draft;
     setSaving(action); setReceipt(null);
     try {
-      if (await onWorkflow(action, { ...submitted, requestId, expectedUpdatedAt })) {
-        workflowRequests.delete(key);
+      if (await submitTaskWorkflow(task, action, submitted, (name, value) => onWorkflow(name, value))) {
         setReceipt({ action, accepted: true });
-        if (drafts.get(task.id) === submitted) drafts.delete(task.id);
         setFeedback(action === "accept" ? "已确认并归档" : action === "pass" ? "AI 验收已通过，等待人工确认" : action === "submit" ? "已提交 AI 验收；模型派发仍需显式授权，不会自动增加执行或费用" : "已退回执行，缺口与历史已保留");
       } else { setReceipt({ action, accepted: false }); setFeedback("操作未确认，输入与请求标识已保留；请先刷新核对，不要重复派发"); }
     } catch (cause) { setReceipt({ action, accepted: false }); setFeedback(cause instanceof Error ? cause.message : "操作未确认，输入与请求标识已保留；请先刷新核对"); }

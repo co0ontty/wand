@@ -1,4 +1,6 @@
+import { changeTaskStatus } from "./task-manual-status.js";
 import { taskDispatchReceipt } from "./task-dispatch-receipt.js";
+import type { TaskAutoFlow } from "./task-auto-flow.js";
 import { sessionExecutionStatus, taskExecutionProjection } from "./execution-state.js";
 import { registerTaskCommentRoutes, submitTaskComment } from "./task-comment-dispatch.js";
 import { randomUUID } from "node:crypto";
@@ -30,7 +32,7 @@ import { generateWandTaskTitle, provisionalTaskTitleFromDescription } from "./ta
 import { isWandTaskStatus, taskWorkflowStage, statusAfterWandTaskDispatch, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus, type WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import type { SessionSnapshot, WandConfig } from "./types.js";
-import { badRequest, surfaceDomainError } from "./http-error.js";
+import { badRequest, conflict, surfaceDomainError } from "./http-error.js";
 import { parseTaskAgent, parentTaskIdFrom } from "./task-agent-parsing.js";
 
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
@@ -258,10 +260,30 @@ function taskSessionSummary(session: SessionSnapshot) {
 export { refreshAutoBoardTaskTitles,whenWandTaskTitlesSettled } from "./task-title-service.js";
 export type { AutoTaskTitleOptions } from "./task-title-service.js";
 
-export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): void {
+export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies, autoFlow?: TaskAutoFlow): void {
   const { storage, sessions, structured, processes, config, aiTeams } = deps;
   taskTitleService(storage, { config, generateTitle: deps.generateTitle, free: deps.free });
   const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(deps, task);
+
+  if (autoFlow) {
+    app.get("/api/wand-task-auto-flow", (_req, res) => res.json({ settings: autoFlow.settings(), lastScan: autoFlow.lastScan(), history: autoFlow.history() }));
+    app.put("/api/wand-task-auto-flow", asyncRoute(async (req, res) => {
+      try { res.json({ settings: autoFlow.save(req.body), lastScan: autoFlow.lastScan(), history: autoFlow.history() }); }
+      catch (error) { sendRouteError(res, error, "无法保存巡检设置。"); }
+    }));
+    app.post("/api/wand-task-auto-flow/run", asyncRoute(async (req, res) => {
+      try {
+        const expected = req.body?.expectedLastScanAt;
+        if (expected !== null && typeof expected !== "string") throw badRequest("需要当前巡检版本。");
+        const stage = req.body?.stage;
+        if (stage !== undefined && !["review", "doing", "todo"].includes(stage)) throw badRequest("巡检阶段无效。");
+        const count = req.body?.count ?? 1;
+        if (!Number.isInteger(count) || count < 1 || count > 20 || stage === undefined && count !== 1) throw badRequest("单阶段巡检数量需要在 1–20 项之间。");
+        const scan = await autoFlow.runOnce(expected, stage, count);
+        res.json({ settings: autoFlow.settings(), lastScan: scan, history: autoFlow.history() });
+      } catch (error) { sendRouteError(res, error, "无法运行巡检。"); }
+    }));
+  }
 
   const moveDispatchTask = (task: NonNullable<ReturnType<WandStorage["getWandTask"]>>, value: unknown) => {
     const workspaceId = value === null ? null : text(value) || null;
@@ -449,6 +471,13 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       sendRouteError(res, error, "无法创建任务。");
     }
   });
+  app.post("/api/wand-tasks/:id/change-status", asyncRoute(async (req, res) => {
+    const body = bodyObject(req.body);
+    if (!isWandTaskStatus(body.status) || typeof body.expectedUpdatedAt !== "string" || typeof body.requestId !== "string" || !body.requestId || body.requestId.length > 128) throw badRequest("状态或确认版本无效。");
+    try { const receipt = await changeTaskStatus(deps, req.params.id, { status: body.status, expectedUpdatedAt: body.expectedUpdatedAt, requestId: body.requestId });
+      res.json({ task: dto(storage.getWandTask(req.params.id)!), receipt }); }
+    catch (cause) { throw conflict(cause instanceof Error ? cause.message : "无法修改任务状态。"); }
+  }));
   app.patch("/api/wand-tasks/:id", (req, res) => {
     try {
       const body = bodyObject(req.body);
@@ -483,8 +512,8 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (body.status !== undefined) {
         if (!isWandTaskStatus(body.status)) throw badRequest("任务状态无效。");
         if (body.status !== taskWorkflowStage(currentTask.status) && body.status !== currentTask.status) {
-          if (body.status === "archived") { res.status(409).json({ error: "请先核对 AI 验收，再由人工确认并归档。" }); return; }
-          if (!["backlog", "todo", "doing"].includes(body.status as string)) throw badRequest("验收、待归档和归档只能通过明确的验收动作流转。");
+          // 归档是用户直接动作，不经验收；仍在执行的工作由下方 canArchiveTask 拦住。
+          if (!["backlog", "todo", "doing", "archived"].includes(body.status as string)) throw badRequest("验收与待归档只能通过明确的验收动作流转。");
           patch.status = body.status as WandTaskStatus;
         }
       }
@@ -542,7 +571,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         patch.sortOrder = Math.floor(Number(body.sortOrder));
       }
       if (patch.status === "archived" && !canArchiveTask(storage, sessions, currentTask.id)) {
-        res.status(409).json({ error: "任务尚未完成或仍有执行，完成后才能归档。" });
+        res.status(409).json({ error: "任务仍有执行、待答、排队或团队工作，结束后才能归档。" });
         return;
       }
       const task = storage.updateWandTask(req.params.id, patch);
@@ -590,7 +619,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   });
   app.delete("/api/wand-tasks/:id", (req, res) => {
     if (storage.getWandTask(req.params.id) && !canArchiveTask(storage, sessions, req.params.id)) {
-      res.status(409).json({ error: "任务尚未完成或仍有执行，完成后才能归档。" });
+      res.status(409).json({ error: "任务仍有执行、待答、排队或团队工作，结束后才能归档。" });
       return;
     }
     const archived = storage.updateWandTask(req.params.id, { status: "archived" });

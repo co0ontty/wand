@@ -258,7 +258,7 @@ export class TaskRepository {
   /** Atomically persist both the visible comment and the one-shot dispatch intent before any side effect. */
   createTaskCommentIntent(input: { taskId: string; requestId: string; signature: string; body: string; instruction: string;
     sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string; submissionSource?: "manual" | "user_dispatch";
-    referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean; purpose?: "execution" | "review"; reviewRevision?: number | null; executionTaskId?: string | null; createChild?: boolean }): WandTaskComment {
+    referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean; purpose?: "execution" | "review"; reviewRevision?: number | null; executionTaskId?: string | null; createChild?: boolean; guardTaskVersion?: boolean; assignAgent?: WandTaskAgent }): WandTaskComment {
     return this.s.transaction(() => {
       const previous = this.findTaskCommentRequest(input.taskId, input.requestId);
       if (previous) {
@@ -267,6 +267,7 @@ export class TaskRepository {
       }
       const parent = this.getWandTask(input.taskId);
       if (!parent || parent.status === "archived") throw new Error("任务已关闭，未派发。");
+      if (input.guardTaskVersion && parent.updatedAt !== input.taskVersion) throw new Error("任务已变化，巡检取消本次派发。");
       let executionTaskId = input.executionTaskId ?? parent.id;
       if (input.createChild && input.employeeId && !parent.parentTaskId) {
         const child = this.createWandTask({ title: input.instruction.split("\n").find(line => line.trim())!.trim().slice(0, 160),
@@ -281,6 +282,9 @@ export class TaskRepository {
         this.writeWandTask(parent, { status: "doing" });
         if (owner.id !== parent.id) this.writeWandTask(owner, { status: "doing" });
       }
+      if (input.employeeId && input.assignAgent) this.writeWandTask(this.getWandTask(owner.id)!, {
+        agent: input.assignAgent, executionSubject: { type: "employee", id: input.employeeId, agentOverride: input.assignAgent },
+      });
       const id = crypto.randomUUID();
       this.db.prepare(`INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at, submission_source) VALUES (?, ?, ?, ?, ?, ?)`)
         .run(id, input.taskId, "用户", input.body, nowIso(), input.submissionSource ?? null);
@@ -352,6 +356,20 @@ export class TaskRepository {
   claimQueuedTaskComment(commentId: string): boolean {
     return this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'pending', error = NULL
       WHERE comment_id = ? AND state = 'queued'`).run(commentId).changes === 1;
+  }
+
+  cancelTaskStatusQueuedDispatches(taskId: string): number {
+    return Number(this.db.prepare(`UPDATE wand_task_comment_dispatches SET state='failed', error='用户修改任务状态，取消旧派发，等待下一轮巡检。'
+      WHERE (task_id=? OR execution_task_id=?) AND state IN ('queued','paused')`).run(taskId, taskId).changes);
+  }
+  taskStatusDispatchSessions(taskId: string): string[] {
+    return (this.db.prepare(`SELECT DISTINCT session_id FROM wand_task_comment_dispatches WHERE (task_id=? OR execution_task_id=?) AND session_id IS NOT NULL`)
+      .all(taskId, taskId) as Array<{ session_id: string }>).map(row => row.session_id);
+  }
+  settleTaskStatusDispatches(taskId: string, stoppedIds: readonly string[]): void {
+    const settle = this.db.prepare(`UPDATE wand_task_comment_dispatches SET state='failed', error='用户修改任务状态，已停止旧执行；等待下一轮巡检。'
+      WHERE (task_id=? OR execution_task_id=?) AND session_id=? AND (state IN ('pending','unknown') OR (state='accepted' AND result_end_index IS NULL AND NOT EXISTS (SELECT 1 FROM task_workflow_events e WHERE e.source_session_id=wand_task_comment_dispatches.session_id AND e.task_id=COALESCE(wand_task_comment_dispatches.execution_task_id,wand_task_comment_dispatches.task_id) AND e.action IN ('submit','pass','fail'))))`);
+    for (const id of stoppedIds) settle.run(taskId, taskId, id);
   }
 
   cancelQueuedTaskComment(commentId: string, error: string): boolean {
@@ -633,7 +651,7 @@ export class TaskRepository {
       if (next.status === "ready" || next.status === "review") next.status = "doing";
     }
     if (next.status === "ready" && !taskAiVerified(next)) throw new Error("待归档需要当前交付的 AI 验收记录，请走验收工作流。");
-    if (!workflow && next.status !== current.status && next.status === "archived" && !taskHumanAccepted(current)) throw new Error("请先经 AI 验收，再由人工确认并归档。");
+    // 用户主动归档不要求验收：归档只是收起，人工确认仍是独立事实，不因归档被写入。
     if (!workflow && patch.acceptance?.acceptedAt && patch.acceptance.acceptedAt !== current.acceptance?.acceptedAt) throw new Error("人工确认只能通过验收工作流写入。");
     assertTaskHierarchy(this.listWandTasks(), current.id, next.parentTaskId, next.workspaceId, current);
     if (taskHumanAccepted(next)) {
@@ -702,7 +720,7 @@ export class TaskRepository {
         ...(parent.status === "ready" || parent.status === "review" ? { status: "doing" as const } : {}),
       }, true);
     }
-    this.s.notifyTaskTitleChange();
+    this.s.notifyTaskTitleChange(patch.description !== undefined && patch.description !== current.description && patch.title === undefined ? next : undefined);
     return next;
   }
 
@@ -1042,7 +1060,7 @@ export class TaskRepository {
   }
 
   /** Atomic exclusive ownership change; cwd, output and execution are untouched. */
-  moveSessionToWorkspaceTask(sessionId: string, taskId: string | null): void {
+  moveSessionToWorkspaceTask(sessionId: string, taskId: string | null, preserveStatus = false, allowArchivedTarget = false): void {
     if (taskId && isSystemAiCall(this.s.getSessionSlim(sessionId))) throw new Error("系统调用记录不能绑定到业务任务。");
     this.s.notifyTaskTitleChange();
     this.s.transaction(() => {
@@ -1050,7 +1068,7 @@ export class TaskRepository {
       if (!session) throw new Error("未找到该会话。");
       const target = taskId ? this.s.getWorkspaceTask(taskId) : null;
       if (taskId && !target) throw new Error("未找到目标任务。");
-      if (target?.archived) throw new Error("目标已归档，请先恢复后再移入会话。");
+      if (target?.archived && !allowArchivedTarget) throw new Error("目标已归档，请先恢复后再移入会话。");
       if (target && !this.s.getWorkspace(target.workspaceId)) throw new Error("目标工作区不存在。");
       const source = session.workspaceTaskId ? this.s.getWorkspaceTask(session.workspaceTaskId) : null;
       if (source && source.id !== target?.id && source.layout) {
@@ -1069,7 +1087,7 @@ export class TaskRepository {
       if (targetCard) {
         this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)")
           .run(targetCard!.id, sessionId, nowIso());
-        if (source?.id !== target?.id) this.recordTaskSession(this.s.getSessionSlim(sessionId)!);
+        if (source?.id !== target?.id && !preserveStatus) this.recordTaskSession(this.s.getSessionSlim(sessionId)!);
       }
     });
   }

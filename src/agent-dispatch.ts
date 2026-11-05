@@ -1,3 +1,4 @@
+import { taskDispatchFence, trackTaskDispatch } from "./task-execution-fence.js";
 import { isLocalDecisionModel } from "./decision-expert-identity.js";
 import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js";
 import type { ProcessManager } from "./process-manager.js";
@@ -47,7 +48,11 @@ export function resolveTaskDispatchTarget(
  * cwd 取任务的工作任务目录 / 所属项目目录；未指定项目时用全局默认目录。
  * 结构化会话的整轮 completion 不等待：进度与失败走正常会话事件。
  */
-export async function dispatchAgentForTask(
+export function dispatchAgentForTask(deps: AgentDispatchDeps, input: Parameters<typeof dispatchAgentForTaskInternal>[1]): Promise<AgentDispatchResult> {
+  return trackTaskDispatch(deps.storage, input.task.id, () => dispatchAgentForTaskInternal(deps, input));
+}
+
+async function dispatchAgentForTaskInternal(
   deps: AgentDispatchDeps,
   input: { task: WandTask; agent: WandTaskAgent; prompt: string; automationId: string; systemPrompt?: string;
     origin?: import("./task-types.js").TaskCommentOrigin;
@@ -57,6 +62,12 @@ export async function dispatchAgentForTask(
 ): Promise<AgentDispatchResult> {
   const { storage, config, structured, processes } = deps;
   const { agent } = input;
+  const fence = taskDispatchFence(storage, input.task.id);
+  const assertCurrent = () => {
+    const current = taskDispatchFence(storage, input.task.id);
+    if (current.blocked || current.epoch !== fence.epoch) throw new AgentDispatchPreflightError("用户正在修改任务状态，旧派发已取消。");
+  };
+  assertCurrent();
   if (input.employee) {
     if (agent.kind !== "structured") throw new Error("绑定员工只支持结构化会话。");
     const candidate = input.employee.agents[input.employeeCandidateIndex ?? 0];
@@ -83,6 +94,7 @@ export async function dispatchAgentForTask(
     try { sdkEngine = await structured!.resolveNewSessionPiEngine("sdk"); }
     catch (cause) { throw new AgentDispatchPreflightError("当前 Wand Agent 引擎不可用；未创建会话或发送输入，请核对执行工具配置。", { cause }); }
   }
+  assertCurrent();
   const session = agent.kind === "pty"
     ? await processes!.start(providerCliCommand(provider), cwd, agent.mode, input.prompt, {
         provider,
@@ -116,6 +128,10 @@ export async function dispatchAgentForTask(
         workspaceId: group.workspaceId,
         workspaceTaskId: group.workspaceTaskId,
       });
+  try { assertCurrent(); } catch (cause) {
+    if (agent.kind === "pty") processes!.stop(session.id); else structured!.stop(session.id);
+    throw cause;
+  }
   storage.bindWandTaskSession(input.task.id, session.id);
   input.sessionCreated?.(session);
   if (agent.kind !== "pty") {

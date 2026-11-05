@@ -406,6 +406,7 @@ export function registerWorkspaceRoutes(
     listSessions: () => sessions?.listSlim() ?? storage.loadSessionsSlim(),
     getSession: id => sessions?.get(id) ?? storage.getSession(id),
     refreshSession: id => sessions?.refreshSessionWorkspace(id),
+    refreshArchive: id => sessions?.refreshOrganizedSessionArchive(id),
   });
   // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
   app.get("/api/workspaces", (req, res) => {
@@ -1140,7 +1141,7 @@ export function registerWorkspaceRoutes(
     }
     const card = storage.getWandTaskByWorkspaceTaskId(existing.id);
     if (card && !canArchiveTask(storage, sessions, card.id)) {
-      res.status(409).json({ error: "任务尚未完成或仍有执行，完成后才能归档。" });
+      res.status(409).json({ error: "任务仍有执行、待答、排队或团队工作，结束后才能归档。" });
       return;
     }
     storage.archiveWorkspaceTask(existing.id);
