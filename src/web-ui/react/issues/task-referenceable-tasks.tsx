@@ -1,5 +1,5 @@
 import * as React from "react";
-import { taskHumanAccepted, taskWorkflowStage } from "../../../task-types";
+import { taskCompleted, taskWorkflowStage } from "../../../task-types";
 import { Flex, Typography } from "antd";
 import type { WandTaskListed } from "./task-board-repository";
 import { WandButton } from "../ui";
@@ -20,7 +20,7 @@ export function TaskReferenceableTasks({ children, onOpenTask, onOpenSession, on
   </Flex>;
   const awaiting = children.filter(child => taskWorkflowStage(child.status) === "review").length;
   const ready = children.filter(child => child.status === "ready").length;
-  const accepted = children.filter(taskHumanAccepted).length;
+  const accepted = children.filter(taskCompleted).length;
   return <section className="task-board-child-stream" role="region" aria-label="子任务">
     <Flex wrap align="center" justify="space-between" gap="small" className="task-stream-heading">
       <Flex wrap align="center" gap="small">

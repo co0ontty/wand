@@ -18,7 +18,7 @@ import { draggedSessionId, isSessionDrag } from "../workspaces/session-drag";
 import { workspacesStore } from "../workspaces/controller";
 import { TaskOrganizeButton } from "../workspaces/task-organization";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
-import { DEFAULT_ITERATION_NAME, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
+import { DEFAULT_ITERATION_NAME, taskCompleted, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import {
   WandButton,
@@ -36,7 +36,6 @@ import { MilestonePicker } from "../milestones/picker";
 import {
   collectIssueLabels,
   createDefaultIssueAgent,
-  DEFAULT_ISSUE_BOARD_DISPLAY,
   EMPTY_ISSUE_FILTERS,
   filterIssues,
   issueBoardEmptyState,
@@ -698,8 +697,7 @@ export function TaskBoardHost({
   const projectName = filterWorkspaceId
     ? workspaces.find((workspace) => workspace.id === filterWorkspaceId)?.name ?? "项目"
     : "所有项目";
-  const mainColumns = ISSUE_COLUMNS.filter((column) => display.mainStatuses.includes(column.status));
-  const otherColumns = ISSUE_COLUMNS.filter((column) => !display.mainStatuses.includes(column.status));
+  const mainColumns = ISSUE_COLUMNS;
   const detailBusy = selected ? busyId === selected.id : false;
   const detailAgentValue = detailAgent ?? (selected ? agentOf(selected, lastAgent) : lastAgent);
   const contextTask = contextMenu ? tasks.find((task) => task.id === contextMenu.taskId) ?? null : null;
@@ -873,7 +871,7 @@ export function TaskBoardHost({
       {task.status === "doing"
         ? <div className="task-board-card-status"><TaskBoardProcessingRow task={task}/></div>
         : ["review", "ready", "archived"].includes(task.status) || task.acceptance?.blocker?.trim()
-          ? <div className="task-board-card-status"><Typography.Text className="task-board-card-acceptance" type={taskHumanAccepted(task) ? "success" : task.acceptance?.blocker?.trim() ? "warning" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text></div>
+          ? <div className="task-board-card-status"><Typography.Text className="task-board-card-acceptance" type={taskCompleted(task) ? "success" : task.acceptance?.blocker?.trim() ? "warning" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text></div>
           : null}
       <Flex gap={4} align="center" className="task-board-card-meta" aria-label="任务属性">
         {parent && <Tag className="task-board-chip is-parent" title={`归属 ${parent.identifier} · ${parent.title}`}>↳ {parent.identifier}</Tag>}
@@ -1258,9 +1256,6 @@ export function TaskBoardHost({
         </Flex>
       </div>
       </div>
-      {otherColumns.length > 0 && <Flex component="aside" wrap gap="middle" className="task-board-other" aria-label="其他任务">
-        {otherColumns.map((column) => renderColumn(column.status))}
-      </Flex>}
     </Flex>}
 
     {contextTask && contextMenu && <TaskBoardContextMenu
@@ -1459,8 +1454,8 @@ function IssueDetail({
             <TaskBoardPriorityChip priority={task.priority}/>
             {task.dueDate ? <TaskBoardDueChip date={task.dueDate} status={task.status}/> : null}
             <TaskBoardAgentChips compact sessions={task.sessions} assigned={task.agent} subject={task.executionSubject} assignee={task.assignedExecutor}/>
-            <TaskWorkflowProgress task={task}/>
           </div>
+          <TaskWorkflowProgress task={task}/>
           {inferredWorkspace && <Alert type="info" showIcon className="task-detail-inferred" title={`此任务没有绑定项目，但会话运行在「${inferredWorkspace.name}」`}
             action={<WandButton size="small" disabled={busy} onClick={() => void onPatch({ workspaceId: inferredWorkspace.id })}>归入 {inferredWorkspace.name}</WandButton>}/>}
           <TaskNextStep task={task} children={children} reviewerName={reviewerName}
@@ -1532,6 +1527,7 @@ function IssueDetail({
         {/* 侧栏常驻：属性直接可改、会话一行一个，不再藏在「编辑属性」折叠里。 */}
         <aside className="task-board-detail-properties" aria-label="任务属性">
           <section className="task-detail-side-section" aria-label="属性">
+          <div className="task-detail-side-heading">属性</div>
           <div className="task-board-properties-fields"><Form component={false} layout="horizontal" labelAlign="left" colon={false}>
           <IssueField label="状态">
             <WandSelect

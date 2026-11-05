@@ -190,6 +190,7 @@ export class SystemAiSessionRecorder {
     const candidateName = (candidate: AiCliCandidate): string => `${candidate.provider} / ${candidate.engine === "sdk" ? "Wand Agent SDK" : "CLI"} / ${candidate.model ?? "默认模型"}`;
     return {
       sessionId: id,
+      systemPromptSubmitted: (channel, parts) => this.storage.recordExecutionPrompt(snapshot, channel, parts),
       candidateStarted: candidate => {
         attempts++;
         const runner = defaultStructuredRunner(candidate.provider);

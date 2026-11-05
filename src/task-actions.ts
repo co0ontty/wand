@@ -27,7 +27,7 @@ export function readTaskActions(storage: WandStorage, registry?: SessionRegistry
   };
   for (const task of tasks) {
     if (!taskHumanAccepted(task)) {
-      if (task.acceptance?.blocker.trim()) add(task, "blocker", task.id, task.acceptance.blocker);
+      if (task.acceptance?.blockerKind === "external" && task.acceptance.blocker.trim()) add(task, "blocker", task.id, task.acceptance.blocker);
       else if (task.status === "ready" && taskAiVerified(task)) add(task, "review", task.id, "AI 已通过当前交付验收，请查看证据并确认归档。");
       else if (task.status === "done") add(task, "blocker", task.id, "历史验收记录待核对，不能直接认定 AI 或人工已通过。");
     }

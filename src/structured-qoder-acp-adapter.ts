@@ -157,6 +157,7 @@ export class QoderAcpRunner implements StructuredRunnerAdapter {
       inputMessageId: session.messages?.slice().reverse().find(turn => turn.role === "user")?.messageId,
     };
 
+    context.onSystemPrompt?.("ACP systemPrompt", [{ source: "会话角色 + 本轮运行规则/知识 + Qoder 后台兼容规则", text: workerConfig.systemPrompt ?? "" }]);
     return startStructuredCli({
       sessionId: session.id,
       file: process.execPath,

@@ -34,6 +34,13 @@ export function registerKnowledgeRoutes(app: Express, storage: WandStorage): voi
       else res.status(500).json({ error: "知识库暂时不可用，请稍后重试。" });
     }
   };
+  app.get("/api/knowledge/execution-prompts", handle(req => {
+    const employeeId = req.query.employeeId;
+    if (typeof employeeId !== "string" || !employeeId || employeeId.length > 200) throw new KnowledgeError("请选择员工。");
+    const before = req.query.before === undefined ? undefined : Number(req.query.before);
+    if (before !== undefined && (!Number.isSafeInteger(before) || before < 1)) throw new KnowledgeError("分页游标无效。");
+    return storage.employeeExecutionPrompts(employeeId, before);
+  }));
   app.get("/api/knowledge/owners", handle(() => storage.knowledgeOwners()));
   app.get("/api/knowledge", handle(req => {
     const { scope, ownerId } = namespace(req.query);

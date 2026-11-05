@@ -1074,6 +1074,12 @@ export class ProcessManager extends EventEmitter {
         throw new Error("Terminal host did not return a running process");
       }
       child = attached.process;
+      if (attached.isNew) this.storage.recordExecutionPrompt(this.snapshot(record),
+        systemPromptFlag(provider) ?? (initialInput ? "用户消息前缀兜底（非原生系统通道）" : "未下发：无系统通道且没有首条输入"),
+        systemPromptFlag(provider) || initialInput ? [
+          { source: "PTY 启动角色/规则快照", text: systemPrompt ?? "" },
+          { source: "PTY 启动全局知识与知识工具规则", text: runtimePrompt ?? "" },
+        ] : []);
       if (this.disposed || start.cancelled || this.sessions.get(id) !== record) {
         // Explicit stop/delete still owns cancellation. Ordinary server shutdown
         // only detaches persistent hosts: the next server must be able to adopt

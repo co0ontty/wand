@@ -161,10 +161,11 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
       context.session.autoApprovePermissions ?? false,
       context.session.cwd,
     );
-    const args = buildClaudeCliArgs(context.session, {
-      permissionPolicy,
-      systemPromptParts: buildSessionSystemPromptParts(context.session, this.options.language?.()),
-    });
+    const parts = buildSessionSystemPromptParts(context.session, this.options.language?.());
+    const args = buildClaudeCliArgs(context.session, { permissionPolicy, systemPromptParts: parts });
+    context.onSystemPrompt?.("--append-system-prompt", parts.map(text => ({
+      source: text === context.session.systemPrompt?.trim() ? "会话角色/规则快照" : text === context.session.runtimeSystemPrompt?.trim() ? "本轮运行规则与知识快照" : "Claude 模式/语言规则", text,
+    })));
     const reducer = new ClaudeCliProtocolReducer(context.session);
     let killedForQuestion = false;
     let stdoutTail = "";

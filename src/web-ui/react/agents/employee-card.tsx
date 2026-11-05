@@ -1,7 +1,7 @@
 import { SettingsActionButton, SettingsField } from "../settings/fields.js";
 import * as React from "react";
 import { Alert, Input, InputNumber } from "antd";
-import { DEFAULT_MAX_CONCURRENT_TASKS, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
+import { DEFAULT_MAX_CONCURRENT_TASKS, isBuiltinSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { isFixedAvatarEmployee } from "../../../fixed-employee-avatar.js";
 import { WandButton, WandIcon, WandIconButton, WandInput } from "../ui";
 import { EmployeeAvatar } from "./employee-avatar.js";
@@ -15,12 +15,13 @@ import { EmployeeTagsField } from "./employee-tags-field.js";
 import type { IssueModelCatalog } from "../issues/task-board-agent.js";
 import { installEmployeeProfileStyles } from "../styles/employee-profile.js";
 
-export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArchive, onUnarchive, onDelete, onCancel, onBack, onDirtyChange, onSavingChange, onOpenKnowledge }: {
+export function EmployeeCard({ employee: projectedEmployee, catalog, providerOptions, onSave, onArchive, onUnarchive, onDelete, onCancel, onBack, onDirtyChange, onSavingChange, onOpenKnowledge }: {
   employee: SiliconEmployee; catalog: IssueModelCatalog | null; providerOptions: ProviderOptions;
   onSave(patch: Partial<SiliconEmployee>): Promise<void>; onArchive?(): Promise<void>; onUnarchive?(): Promise<void>; onDelete?(): Promise<void>;
   editorOnly?: boolean; onCancel?(): void; onBack?(): void; onDirtyChange?(dirty: boolean): void; onSavingChange?(saving: boolean): void;
   onOpenKnowledge?(navigate: () => void): void;
 }): React.ReactElement {
+  const employee = React.useMemo(() => ({ ...projectedEmployee, prompt: projectedEmployee.savedPrompt ?? projectedEmployee.prompt }), [projectedEmployee]);
   const [baseline, setBaseline] = React.useState(employee);
   const [draft, setDraft] = React.useState(employee);
   const [tagInput, setTagInput] = React.useState(() => siliconEmployeeTags(employee).join("，"));
@@ -94,6 +95,7 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
         <EmployeeTagsField id={`employee-${employee.id}-tags`} value={tagInput} disabled={saving || builtin} onChange={value => { setTagInput(value); setNotice(""); }}/></div></section>
       <section id="employee-settings" className="form-section" aria-label="员工设置">
         <h3>员工设置</h3>
+        <EmployeeMemory key={employee.id} employeeId={employee.id} active disabled={saving}/>
         {field("并发任务上限", `employee-${employee.id}-max-concurrent-tasks`, <InputNumber id={`employee-${employee.id}-max-concurrent-tasks`} className="wand-employee-max-concurrent-tasks" min={1} max={100} precision={0} placeholder="默认 2" disabled={saving}
           value={draft.maxConcurrentTasks ?? null}
           onChange={value => patch({ maxConcurrentTasks: typeof value === "number" ? value : null })}/>,
@@ -110,7 +112,6 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
       <EmployeeImEditor key={`${employee.id}:${imRevision}`} employeeId={employee.id} disabled={submitting || uploading} onDirtyChange={setImDirty} onBusyChange={setImBusy}/>
       <section id="advanced" className="form-section"><details className="advanced-details" open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}><summary>知识与员工管理</summary><div className="advanced-content">
         {field("员工 ID", `employee-${employee.id}-id`, <WandInput id={`employee-${employee.id}-id`} value={employee.id} readOnly/>)}
-        {isDefaultSiliconEmployee(employee) && <EmployeeMemory active={advanced}/>}
         <EmployeeKnowledge employeeId={employee.id} active={advanced} disabled={saving} onOpenLibrary={onOpenKnowledge}/>
         {!builtin && <div className="save-actions">{employee.archivedAt ? onUnarchive && <WandButton disabled={saving} onClick={() => void onUnarchive()}>恢复员工</WandButton> : onArchive && <WandButton disabled={saving} onClick={() => void onArchive()}>归档员工</WandButton>}{onDelete && <WandButton kind="danger" disabled={saving} onClick={() => void onDelete()}>删除员工</WandButton>}</div>}
       </div></details></section>

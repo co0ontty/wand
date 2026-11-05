@@ -10,7 +10,7 @@ import { taskBoardRepository, type TaskAutoFlowSettings, type TaskAutoFlowStage,
 const STAGES: ReadonlyArray<{ id: TaskAutoFlowStage; label: string; detail: string }> = [
   { id: "review", label: "待验收", detail: "优先独立验收" },
   { id: "doing", label: "执行中", detail: "继续实现或补证" },
-  { id: "todo", label: "等待认领", detail: "认领新任务" },
+  { id: "todo", label: "等待认领", detail: "手动巡检时认领" },
 ];
 const TOOL_OPTIONS = AGENT_TOOL_OPTIONS.filter(item => item.id !== WAND_AGENT_TOOL_ID)
   .map(item => ({ value: item.id, label: item.label }));
@@ -104,13 +104,13 @@ export function TaskAutoFlowSettingsView({ employees, catalog, tasks, onOpenTask
   return <section className="task-auto-flow-settings" aria-label="自动巡检设置">
     <Flex wrap align="start" justify="space-between" gap="middle" className="task-auto-flow-intro">
       <div><Typography.Title level={3}>自动巡检</Typography.Title>
-        <Typography.Text type="secondary">定期巡检按待验收、执行中、等待认领的顺序，每阶段最多派发 3 项，每轮最多 9 项；超过员工并发上限的任务排队，验收失败的任务优先进入修复与复验循环。</Typography.Text></div>
+        <Typography.Text type="secondary">移入执行中后自动完成实现、自测、独立验收和返工；验收通过自动完成归档。待办不会自动启动，手动巡检待认领可明确启动任务。</Typography.Text></div>
       <Flex align="center" gap="small"><span>启用自动巡检</span><Switch aria-label="启用自动巡检" checked={draft.enabled}
         onChange={enabled => { setDraft({ ...draft, enabled }); setNotice(""); }}/></Flex>
     </Flex>
     <Card className="task-auto-flow-card">
       <Flex wrap align="center" justify="space-between" gap="middle" className="task-auto-flow-period">
-        <div><strong>巡检周期</strong><br/><Typography.Text type="secondary">运行、排队、审批及未知送达的任务保持原状；外部阻塞跳过，累计三轮验收失败后暂停自动修复。</Typography.Text></div>
+        <div><strong>巡检周期</strong><br/><Typography.Text type="secondary">阶段变化和执行结束及时接续，周期巡检补漏。运行、排队、审批和未知送达不重复派发；自测及验收失败持续修复，只有明确外部阻塞暂停。</Typography.Text></div>
         <WandSelect ariaLabel="巡检周期" value={String(draft.intervalMinutes)} options={PERIODS}
           onValueChange={value => { setDraft({ ...draft, intervalMinutes: Number(value) }); setNotice(""); }}/>
       </Flex>

@@ -258,9 +258,8 @@ export function recordIterationPrompt(
   // Only real interactive user prompts; never learn from team-generated instructions or shell input.
   if (((!session.sessionSource || session.sessionSource === "interactive") && !session.automationId
     || session.automationId?.startsWith("wand-task:"))
-    && (!session.employeeId || session.employeeId === DEFAULT_EMPLOYEE_ID)
     && !session.interactiveShell && !/^[\/!]/.test(raw)) {
-    recordUserMemory(storage, "session.prompt", raw, session.id);
+    recordUserMemory(storage, "session.prompt", raw, session.id, session.employeeId ?? DEFAULT_EMPLOYEE_ID);
   }
   const run = async (): Promise<void> => {
     const detail = clip(cleanIterationPromptText(raw), WAND_ITERATION_PROMPT_DETAIL_MAX_LENGTH);

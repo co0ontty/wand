@@ -127,7 +127,6 @@ export class WandStorage {
   private readonly db: DatabaseSync;
   private readonly schedules: ScheduledTaskRepository;
   private readonly dbPath: string;
-  memoryCapture = { enabled: true, revision: 0 };
   private txDepth = 0;
   private savepointSeq = 0;
 
@@ -163,8 +162,6 @@ export class WandStorage {
     const brokenLinks = this.integrityReport().filter((item) => item.count > 0);
     if (brokenLinks.length > 0) console.warn(`[wand] ownership links with no target: ${JSON.stringify(brokenLinks)}`);
     this.ensureDefaultPasswordVault();
-    const memory = this.getUserMemoryState();
-    this.memoryCapture = { enabled: memory.enabled, revision: memory.revision };
     this.ensureDefaultWandMilestone();
   }
 

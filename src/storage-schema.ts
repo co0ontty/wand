@@ -359,7 +359,7 @@ const INIT_SQL = `
   CREATE INDEX IF NOT EXISTS idx_user_memory_events_dedup ON user_memory_events(dedup_key, created_at);
   CREATE TABLE IF NOT EXISTS user_memory_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    enabled INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 0,
     revision INTEGER NOT NULL DEFAULT 0,
     last_attempt_at INTEGER NOT NULL DEFAULT 0,
     source_id INTEGER NOT NULL DEFAULT 0,

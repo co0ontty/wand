@@ -9,8 +9,17 @@ import { deflateSync, inflateSync } from "node:zlib";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const check = process.argv.includes("--check");
 const read = (path) => readFileSync(resolve(root, path), "utf8");
-const foreground = read("android/app/src/main/res/drawable/ic_launcher_foreground.xml");
-const background = read("android/app/src/main/res/drawable/ic_launcher_background.xml");
+function readSource(path) {
+  const file = resolve(root, path);
+  if (!existsSync(file)) {
+    throw new Error(
+      `Missing brand source of truth: ${path}. The Android launcher vectors live in the android submodule; ` +
+      `run: git submodule update --init -- android`);
+  }
+  return readFileSync(file, "utf8");
+}
+const foreground = readSource("android/app/src/main/res/drawable/ic_launcher_foreground.xml");
+const background = readSource("android/app/src/main/res/drawable/ic_launcher_background.xml");
 const paths = [...foreground.matchAll(/android:fillColor="(#[A-Fa-f0-9]{6})"\s+android:pathData="([^"]+)"/g)]
   .map(([, fill, d]) => ({ fill, d }));
 assert.equal(paths.length, 6, "Expected Android's six-color pixel-cat artwork");

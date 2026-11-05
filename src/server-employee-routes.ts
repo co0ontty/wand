@@ -400,7 +400,7 @@ export function registerSiliconEmployeeRoutes(
       const employee = isFixedAvatarEmployee(definition)
         ? parseFixedAvatarEmployeeInput(input, definition, now)
         : isBuiltinSiliconEmployee(existing)
-          ? { ...existing, agents: parseSystemEmployeeAgents(input, existing), systemSessionLimit: parseSystemSessionLimit(input.systemSessionLimit, existing), maxConcurrentTasks: parseMaxConcurrentTasks(input.maxConcurrentTasks, existing), updatedAt: now }
+          ? { ...definition, agents: parseSystemEmployeeAgents(input, existing), systemSessionLimit: parseSystemSessionLimit(input.systemSessionLimit, existing), maxConcurrentTasks: parseMaxConcurrentTasks(input.maxConcurrentTasks, existing), updatedAt: now }
           : parseSiliconEmployeeInput({ ...definition, ...input }, definition, now);
       storage.saveSiliconEmployee(employee);
       systemAiSessions(storage).enforceRetention(employee.id);

@@ -1,10 +1,13 @@
 import * as React from "react";
 import { Sender } from "@ant-design/x";
+import { FilePathSuggestions } from "../file-path-suggestions";
 import { useImeGuard } from "../composer-sender/ime-guard";
 
 export interface NewWorkComposerHandle { inputElement: HTMLTextAreaElement | null; }
 export interface NewWorkComposerProps {
   text: string;
+  cwd?: string;
+  draftKey?: string;
   onTextChange(text: string): void;
   onSubmit(): void;
   disabled?: boolean;
@@ -20,7 +23,7 @@ export interface NewWorkComposerProps {
 
 /** Task plans and immediate work share one input, keyboard policy and visual surface. */
 export const NewWorkComposer = React.forwardRef<NewWorkComposerHandle, NewWorkComposerProps>(function NewWorkComposer({
-  text, onTextChange, onSubmit, disabled, placeholder, ariaLabel = "工作内容", expanded = false, footer, header, onPaste, children,
+  text, cwd, draftKey, onTextChange, onSubmit, disabled, placeholder, ariaLabel = "工作内容", expanded = false, footer, header, onPaste, children,
 }, ref) {
   const sender = React.useRef<React.ComponentRef<typeof Sender>>(null);
   const ime = useImeGuard();
@@ -29,7 +32,7 @@ export const NewWorkComposer = React.forwardRef<NewWorkComposerHandle, NewWorkCo
   return <div className="conversation-input-wrap" data-composer-expanded="true" data-editor-expanded={expanded}
     onCompositionStartCapture={ime.onCompositionStart} onCompositionEndCapture={ime.onCompositionEnd}>
     {children}
-    <Sender ref={sender} className="conversation-sender" value={text} readOnly={disabled} placeholder={placeholder}
+    <FilePathSuggestions cwd={cwd} identity={draftKey}><Sender ref={sender} className="conversation-sender" value={text} readOnly={disabled} placeholder={placeholder}
       aria-label={ariaLabel} suffix={false} autoSize={{ minRows: 2, maxRows: expanded ? 24 : 10 }}
       onChange={onTextChange} onSubmit={submit} submitType="enter" header={header} footer={footer} onPaste={onPaste}
       onKeyDown={event => {
@@ -40,6 +43,6 @@ export const NewWorkComposer = React.forwardRef<NewWorkComposerHandle, NewWorkCo
         event.preventDefault();
         submit();
         return false;
-      }}/>
+      }}/></FilePathSuggestions>
   </div>;
 });

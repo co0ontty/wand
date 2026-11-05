@@ -13,6 +13,8 @@ export interface SiliconEmployee {
   name: string;
   duty: string;
   prompt: string;
+  /** Read-only saved role, excluding generated preferences; editors must use this when present. */
+  savedPrompt?: string;
   avatar: string;
   agents: WandTaskAgent[];
   /** Built-in tags are fixed by systemKey; ordinary employees' tags are user-maintained. */

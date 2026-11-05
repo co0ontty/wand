@@ -1,10 +1,10 @@
-# Task workflow: two-level acceptance
+# Task workflow: autonomous delivery and independent review
 
-Implementation contract for the approved full task-panel design (`scripts/design-previews/taskboard-dashboard/README.md`). This file describes the target protocol; verification evidence is recorded in TASK-76, not implied by this document.
+Implementation contract for the approved full task-panel design (`scripts/design-previews/taskboard-dashboard/README.md`). The 2026-11-05 user decision supersedes the old idle reclamation and mandatory human-finalization policy. Runtime verification evidence belongs to the task board; this document is the protocol contract.
 
 ## Shared DTO
 
-- Active stages, ordered: `backlog` 待立项, `todo` 等待认领, `doing` 执行中, `review` 待验收（AI）, `ready` 待归档（AI 已通过，等待人工确认）. `archived` is a separate collection.
+- Active stages, ordered: `backlog` 待立项, `todo` 等待认领, `doing` 执行中, `review` 待验收（AI）, `ready` 历史待人工确认（兼容旧记录）. `archived` is a separate collection.
 - `done` is a legacy stored value only, NOT proof of AI approval. HTTP DTOs project legacy done to `review`, with `legacyReview: true`; reads never rewrite the database.
 - HTTP task DTOs advertise `workflowVersion: 1`. Updated clients require this marker and the matching task ID in a workflow response, instead of treating an older server's ignored PATCH as a successful receipt.
 - Add optional `deliveryRevision: number` (default 0) and `verification: { verdict: "passed" | "failed" | "unverified", evidence: string, blocker: string, reviewedAt: string, revision: number, sourceSessionId: string | null, reviewerId: string | null } | null`.
@@ -28,22 +28,31 @@ Use existing `PATCH /api/wand-tasks/:id` with **only** this body:
 ```
 
 Actions:
-- `progress`: doing → doing. Records actual evidence/blockers without advancing deliveryRevision or claiming completion.
-- `submit`: doing → review. Requires evidence and no blockers. Does NOT launch a model.
-- `pass`: review → ready. Requires evidence, no blockers, current delivery and all children delivered. Parent review records AI approval for the delivered children atomically. Records AI verification, NOT human acceptance.
-- `fail`: review → doing. Requires a blocker, preserving evidence and an auditable result (unable-to-verify uses this path with an explicit reason).
+- `progress`: doing → doing. Records progress/repair gaps without advancing deliveryRevision, clearing the failed-review marker or ending responsibility. It does not pause automatic continuation.
+- `block`: doing/review → same stage. Explicit external impediment only; requires evidence of attempted remedies and the minimum missing condition. Stores `acceptance.blockerKind="external"`; automation waits until explicitly cleared. Environment/permission failure is not a failed functional review.
+- `submit`: doing → review. Requires evidence and no blockers; employee submissions also require a nonempty `selfTest: [{criterion, evidence}]` list covering the complete goal. A field check does not prove correctness; independent review must verify the actual evidence. The enabled scheduler automatically dispatches review after the current execution settles.
+- `pass`: review → archived. Requires evidence, no blockers, current delivery and all children delivered. Employee reviewers must have an explicit review dispatch for this version and must not be the submitter. Parent review records approval and completion for delivered non-archived children atomically, preserving already archived child history. Records AI verification, NOT human acceptance, and does not enroll these archives in automatic deletion.
+- `fail`: review → doing. Requires a blocker, preserving evidence and an auditable result (functional gaps use this path; external inability to verify uses block without restarting implementation).
 - `return`: ready → doing. Requires human rejection reason; clears current AI/human approval while keeping history.
 - `accept`: ready → archived. Explicit **确认并归档**, human-only, records acceptance with confirmedRevision and archives atomically. Requires current AI approval for the parent and children, and no active/pending execution. Parent acceptance archives approved children atomically.
 
-Every client must keep the clicked snapshot, retain the same requestId when checking/retrying an unknown receipt, retain drafts on rejection/conflict, refresh instead of replaying a stale intent. UUID is fine for requestId. This action cannot be mixed with arbitrary task patches. Response is the normal fresh task DTO. No automatic model dispatch, no production simulation buttons.
+Every client must keep the clicked snapshot, retain the same requestId when checking/retrying an unknown receipt, retain drafts on rejection/conflict, refresh instead of replaying a stale intent. UUID is fine for requestId. This action cannot be mixed with arbitrary task patches. Response is the normal fresh task DTO. Enabled automation dispatches eligible doing/review work through the existing employee queue, preserving explicit model choices and permission boundaries. No production simulation buttons.
 
 Direct PATCH remains for draft evidence/metadata, backlog/todo/doing planning changes and user-initiated archive. Direct ready, new done and acceptance.acceptedAt must not bypass the workflow. Archiving (board drag to the archive target, detail/context-menu “归档”) is a direct user action from any active stage after one confirmation dialog: it requires no AI or human acceptance, never writes acceptance, and is blocked only by running/approval/queued/team work (`canArchiveTask`); archived-without-acceptance stays a historical archive, not a completion. Automatic retention archiving keeps its stricter accepted-only rule. Existing archive/restore/history APIs preserve data. Creating a task only permits planning stages, not pretending it already passed. An explicitly deleted project may collect unaccepted task history through the separately named storage removal operation; it records a project-removal comment and never writes human acceptance or counts that collection as completion.
 
-## Idle execution-stage convergence
+## Automatic closure and continuing ownership
 
-The startup/hourly retention sweep rechecks `doing` tasks after the ten-minute card-update grace window. In a storage transaction it reads live session facts (falling back to stored snapshots), comment dispatches for both source and execution tasks, active teams and non-archived descendants. Running work, approvals, queued/paused work, unknown delivery and accepted dispatches with no session ID (or a missing session without a terminal receipt) all prevent reclamation; elapsed time is never proof of delivery or completion.
+Creating a backlog/todo requirement does not start work. Moving it into doing starts automatic scheduling; entering doing preserves existing running/queued work instead of stopping and recreating it. New tasks without an explicit executor use the configured implementation employee. Existing work uses the latest implementation dispatch's employee and tool snapshot; a review never overwrites implementation ownership. Explicit team/direct-tool assignments are not silently converted to another employee.
 
-Idle historical sessions and existing evidence/failed verification do not pin a card to `doing`. Eligible cards return only to `todo`, with an explanatory comment. Session membership/history, blockers, delivery revision and verification remain unchanged. `review`, `ready` and archived cards are not rewritten. Reads never trigger this maintenance, and no runtime is stopped or input replayed. Clients continue consuming the existing shared `status`/`executionStatus` DTO; no protocol or client mutation is added.
+Self-test failures stay with the implementer: diagnose, repair and retest all criteria before submitting. Independent functional failures return to doing and the same implementation owner. Ordinary progress preserves failed-review context. There is no fixed retry count that abandons the task; known terminal launch/execution failures have exponential backoff up to 30 minutes. A completed turn without delivery gets a continuation instruction, not replay of prior side effects. Queued/pending/unknown deliveries, running/approval states, cancellations, active teams and descendants prevent conflicting dispatch. Source and execution task ownership are both checked. Persisted request IDs and expectedUpdatedAt provide restart idempotence.
+
+Events wake the scheduler after status changes and execution completion. A ten-second reconciliation observes workflow writes from the separate CLI database connection; the configured interval provides an idle fallback. Automatic scans cover review then doing, at most three dispatches per stage. Todo is only processed by an explicit manual scan or explicit employee assignment. Parents wait for active children; independently completed children allow the parent to continue integration and overall review.
+
+Business stage is independent of runtime activity. The retention sweep must never return idle doing tasks to todo. This supersedes the old TASK-372 reclamation requirement; do not restore it as a regression repair. New requirements supersede obsolete acceptance criteria; compare the current task, parent and comments before implementation/review. Do not batch-rewrite historical states based on guesses.
+
+An external block preserves ownership and stage. Clear it explicitly after supplying the missing condition (or issue a new authorized instruction); ordinary repair difficulty, self-test failure and turn completion are not external blockers. Historic untyped blocker text receives a diagnostic continuation rather than being silently treated as authorization or permanent abandonment. The action inbox only requests human help for explicit external blockers and live permission/question requests.
+
+Independent approval automatically archives the task without recording a human actor or acceptedAt. `taskCompleted` recognizes that approval at the current revision; plain historical archives still do not count. Legacy ready/accept/return remain available for old clients and records, but new pass receipts do not require another human confirmation. Auto-completed archives retain their history and are excluded from automatic deletion.
 
 ## Cancel unnecessary work without accepting delivery
 

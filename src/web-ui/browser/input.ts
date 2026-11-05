@@ -660,7 +660,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         opts = opts || {};
         var interruptFlag = !!opts.interrupt;
         var embedTerminal = document.documentElement.classList.contains("is-wand-embed-terminal");
-        if (state.terminalInteractive && !embedTerminal) {
+        if (state.terminalInteractive && !embedTerminal && !getPendingAttachments(state.selectedId).length) {
           // 网页端直通模式：composer 本身就是 PTY 输入面。
           // 打字已经由 handleInteractiveTextInput 逐字透传，Enter 只负责提交，
           // 按服务端契约拆成「先文本、后单独 \r」两包发出去。

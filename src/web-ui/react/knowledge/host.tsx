@@ -12,6 +12,7 @@ import { installStyleSheet } from "../styles";
 import { knowledgeController as controller, knowledgeStore, knowledgeDraftDirty } from "./controller";
 import type { KnowledgeDocument, KnowledgeScope } from "./repository";
 import { knowledgeStyles } from "./styles";
+import { ExecutionPrompts } from "./execution-prompts";
 
 export interface KnowledgeHostProps { visible: boolean; onOpenSidebar?(): void }
 export function KnowledgeHost({ visible, onOpenSidebar }: KnowledgeHostProps): React.ReactElement | null {
@@ -52,8 +53,9 @@ export function KnowledgeHost({ visible, onOpenSidebar }: KnowledgeHostProps): R
   };
   const switchScope = (scope: KnowledgeScope): void => { if (scope !== state.scope) guard(() => controller.open(scope, "")); };
   const latest = state.conflict && state.draft ? entries.find(entry => entry.id === state.draft?.id && entry.revision !== state.draft.revision) : null;
+  const showingExecutions = state.scope === "personal" && state.selectedId === "execution-prompts" && !state.draft;
   const writable = !!state.library && !state.library.readOnly;
-  return <section aria-label="知识库" className={`wand-knowledge-page ${state.mobileDocument ? "show-document" : "show-directory"}`}
+  return <section aria-label="知识库" className={`wand-knowledge-page ${showingExecutions ? "show-executions" : ""} ${state.mobileDocument ? "show-document" : "show-directory"}`}
     style={{ display: visible ? undefined : "none" }} inert={!visible} aria-hidden={!visible}>
     <aside className="knowledge-directory" aria-label="知识库目录">
       <div className="directory-title"><Flex align="center" gap={8}>{onOpenSidebar && <WandIconButton aria-label="打开导航" onClick={onOpenSidebar}><WandIcon name="rail"/></WandIconButton>}<h1>知识库</h1></Flex>
@@ -66,6 +68,7 @@ export function KnowledgeHost({ visible, onOpenSidebar }: KnowledgeHostProps): R
         ariaLabel={state.scope === "personal" ? "选择员工" : "选择项目"} placeholder={state.scope === "personal" ? "选择员工" : "选择项目"} searchable disabled={state.busy || !owners?.length}
         onValueChange={id => { if (id !== state.ownerId) guard(() => controller.open(state.scope, id)); }}/>}
         <WandSearchField label="搜索当前知识库" placeholder="搜索文档…" value={state.query} onValueChange={query => controller.search(query)}/></div>
+      {state.scope === "personal" && state.ownerId && <WandButton className="knowledge-executions-link" kind="ghost" aria-pressed={showingExecutions} onClick={() => guard(() => controller.select("execution-prompts"))}><WandIcon name="history" size={16}/>执行下发记录<WandIcon name="chevron" size={14}/></WandButton>}
       <div className="directory-caption"><span>{state.query ? `${filtered.length} 篇匹配` : `${entries.length} 篇文档`}</span><WandIconButton aria-label="刷新知识库" title="刷新知识库" disabled={state.loading || state.busy} onClick={() => void controller.load()}><WandIcon name="refresh" size={14}/></WandIconButton></div>
       <div className="document-tree" aria-busy={state.loading}>{state.loading && !state.library ? <Flex justify="center" role="status" gap={8}><Spin size="small"/>正在读取…</Flex>
         : tree.length ? <Tree key={`${state.scope}:${state.ownerId}:${state.query}:${folders.join("\u0000")}`} treeData={tree} defaultExpandAll showIcon blockNode selectedKeys={state.selectedId ? [state.selectedId] : []}
@@ -77,7 +80,7 @@ export function KnowledgeHost({ visible, onOpenSidebar }: KnowledgeHostProps): R
       <div className="library-note"><WandIcon name={state.scope === "personal" ? "lock" : "folder"} size={14}/><p>{state.scope === "global" ? "全局约定自动用于所有对话。默认安装同步各 CLI 的全局规则；现有终端会话可能需要重开。完整加载，合计最多 24 KB。" : state.scope === "personal" ? "每位员工拥有自己的知识库。在对话里说「记住」，就会写入这位员工的知识库。" : "项目约定集中保存在这里。在项目对话中明确说「记到项目知识库」，即可保存。"}</p></div>
     </aside>
     <article className="knowledge-document" aria-label="知识文档">
-      <div className="document-bar"><div className="document-location"><WandButton className="directory-back" kind="ghost" onClick={() => controller.directory()}><WandIcon name="chevronLeft"/>目录</WandButton><span>{ownerName}</span><span className="breadcrumb-divider">/</span><span>{state.draft?.folder || selected?.folder || "未分类"}</span></div>
+      <div className="document-bar"><div className="document-location"><WandButton className="directory-back" kind="ghost" onClick={() => controller.directory()}><WandIcon name="chevronLeft"/>目录</WandButton><span>{ownerName}</span><span className="breadcrumb-divider">/</span><span>{showingExecutions ? "执行下发记录" : state.draft?.folder || selected?.folder || "未分类"}</span></div>
         <div className="document-actions">{state.draft ? <><WandButton disabled={state.busy} onClick={() => guard(() => controller.discard())}>取消</WandButton><WandButton className="knowledge-save-button" kind="primary" disabled={!writable || state.busy || state.loading || !knowledgeDraftDirty(state.draft)} onClick={() => { focusInvalid(); void controller.save(); }}>{state.busy ? "保存中…" : "保存"}</WandButton></> : selected ? <>
           <WandIconButton aria-label="删除文档" title="删除文档" disabled={state.busy} onClick={() => setConfirm({ kind: "delete", entry: selected })}><WandIcon name="trash" size={16}/></WandIconButton>
           {writable && <WandButton disabled={state.busy || state.loading} onClick={() => controller.edit(selected)}><WandIcon name="edit" size={14}/>编辑</WandButton>}</> : null}</div></div>
@@ -86,7 +89,7 @@ export function KnowledgeHost({ visible, onOpenSidebar }: KnowledgeHostProps): R
           action={state.validationFailed ? undefined : <WandButton size="small" disabled={state.loading || state.busy} onClick={() => void controller.load()}>重新读取</WandButton>}/> : null}
         {syncErrors.length ? <Alert className="document-error" type="warning" showIcon title="知识已保存，部分 CLI 尚未同步" description={syncErrors.map(result => `${result.provider}：${result.error}`).join("；")}/> : null}
         {state.library?.readOnly ? <Alert className="document-error" type="info" title="项目已移除，保留的知识仍可阅读或删除。"/> : null}
-        {state.draft ? <>
+        {state.scope === "personal" && state.ownerId && state.selectedId === "execution-prompts" ? <ExecutionPrompts key={state.ownerId} employeeId={state.ownerId} employeeName={ownerName}/> : state.draft ? <>
           <div className="document-state" role="status">{state.notice || (knowledgeDraftDirty(state.draft) ? "有未保存的修改" : "编辑文档")}</div>
           {latest && <details className="knowledge-conflict"><summary>查看最新版本并合并</summary><h2>{latest.title}</h2><MarkdownPreview content={latest.content} variant="inline" wrap/><WandButton onClick={() => controller.acceptLatestRevision()}>已核对，保留草稿继续编辑</WandButton></details>}
           <Input.TextArea ref={titleInput} className="document-title-input" aria-label="文档标题" aria-invalid={titleInvalid || undefined} aria-describedby={titleInvalid ? "knowledge-document-error" : undefined} placeholder="文档标题" value={state.draft.title} maxLength={100} autoSize variant="borderless" disabled={state.busy} onChange={event => controller.change({ title: event.target.value })}/>

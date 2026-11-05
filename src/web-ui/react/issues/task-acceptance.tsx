@@ -3,7 +3,7 @@ import { Alert, Flex, Typography } from "antd";
 import { TaskTextArea } from "./task-form";
 import { WandButton } from "../ui";
 import type { WandTaskListed, TaskWorkflowAction } from "./task-board-repository";
-import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskAcceptance } from "../../../task-types";
+import { taskAiVerified, taskCompleted, taskHumanAccepted, taskWorkflowStage, type TaskAcceptance } from "../../../task-types";
 
 const drafts = new Map<string, { evidence: string; blocker: string }>();
 const workflowRequests = new Map<string, string>();
@@ -65,7 +65,7 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
     try {
       if (await submitTaskWorkflow(task, action, submitted, (name, value) => onWorkflow(name, value))) {
         setReceipt({ action, accepted: true });
-        setFeedback(action === "accept" ? "已确认并归档" : action === "pass" ? "AI 验收已通过，等待人工确认" : action === "submit" ? "已提交 AI 验收；模型派发仍需显式授权，不会自动增加执行或费用" : "已退回执行，缺口与历史已保留");
+        setFeedback(action === "accept" ? "已确认并归档" : action === "pass" ? "独立验收通过，已自动完成归档" : action === "submit" ? "已提交独立验收，自动执行开启时将接续派发" : "已退回执行，缺口与历史已保留");
       } else { setReceipt({ action, accepted: false }); setFeedback("操作未确认，输入与请求标识已保留；请先刷新核对，不要重复派发"); }
     } catch (cause) { setReceipt({ action, accepted: false }); setFeedback(cause instanceof Error ? cause.message : "操作未确认，输入与请求标识已保留；请先刷新核对"); }
     finally { setSaving(null); }
@@ -74,7 +74,7 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
     if (saving === action) return "提交中…";
     if (receipt?.action !== action) return fallback;
     if (!receipt.accepted) return "未确认，请核对";
-    return ({ progress: "进展已记录", save: "交付已保存", submit: "已提交 AI 验收", pass: "已进入待归档", fail: "已退回执行", accept: "已确认并归档", return: "已退回执行" })[action];
+    return ({ progress: "进展已记录", save: "交付已保存", submit: "已提交 AI 验收", pass: "已完成并归档", fail: "已退回执行", accept: "已确认并归档", return: "已退回执行" })[action];
   };
   const status = taskWorkflowStage(task.status), gaps = children.filter(child => !taskAiVerified(child));
   const proof = Boolean(draft.evidence.trim()), blocked = Boolean(draft.blocker.trim());
@@ -86,7 +86,7 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
     { action: "return", label: "退回执行", enabled: status === "ready" && blocked },
   ];
   return <Flex vertical gap="small" aria-label="交付与验收">
-    <Typography.Text type="secondary">执行结束不代表交付；AI 验收通过后，仍需你明确确认并归档。这里只记录真实结论，不会启动模型。</Typography.Text>
+    <Typography.Text type="secondary">负责人完整实现并自测通过后提交独立验收；未通过自动返工，通过自动完成归档。只有明确外部阻塞才暂停。</Typography.Text>
     <TaskTextArea aria-label="交付证据与产物" placeholder="实际产物路径、版本、验证命令与结果，未验证项不能写成通过" value={draft.evidence} onChange={event => edit({ evidence: event.target.value })} autoSize={{ minRows: 3 }} maxLength={16000} disabled={busy || Boolean(saving) || status === "archived"}/>
     <TaskTextArea aria-label="验收阻塞" placeholder="无阻塞时留空；不通过、无法验证或人工退回时写明原因" value={draft.blocker} onChange={event => edit({ blocker: event.target.value })} autoSize={{ minRows: 2 }} maxLength={4000} disabled={busy || Boolean(saving) || status === "archived"}/>
     {status !== "archived" && !actions.some(entry => entry.enabled) && <Typography.Text type="secondary" className="task-acceptance-hint">{
@@ -100,7 +100,7 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
     </Flex>
     {task.legacyReview && <Alert type="warning" showIcon title="历史验收记录待核对" description="旧状态没有可信 AI 通过记录；原证据与历史保留，请针对当前交付重新核验。"/>}
     {gaps.length > 0 && <Alert type="warning" showIcon title={`${gaps.length} 个子任务尚未通过当前交付验收`} description={gaps.map(child => child.identifier).join("、")}/>}
-    {status === "archived" && <Alert type={taskHumanAccepted(task) ? "success" : "info"} title={taskHumanAccepted(task) ? "人工已确认 · 已归档" : "历史归档 · 不代表本轮验收通过"}/>}
+    {status === "archived" && <Alert type={taskCompleted(task) ? "success" : "info"} title={taskHumanAccepted(task) ? "人工已确认 · 已归档" : taskCompleted(task) ? "独立验收通过 · 已自动完成" : "历史归档 · 不代表本轮验收通过"}/>}
     <Typography.Text type="secondary" role="status">{feedback || "工作流按真实回执流转；版本冲突与未知结果不会自动重试。"}</Typography.Text>
   </Flex>;
 }

@@ -23,6 +23,17 @@ export function changeTaskStatus(deps: TaskRouteDependencies, taskId: string,
       return prior;
     }
     if (task.updatedAt !== input.expectedUpdatedAt) throw new Error("任务已有新进展，请刷新后重新选择状态。");
+    if (input.status === "doing" && task.status !== "archived" && !taskDispatchFence(storage, taskId).blocked) {
+      return storage.transaction(() => {
+        const current = storage.getWandTask(taskId);
+        if (!current || current.updatedAt !== input.expectedUpdatedAt) throw new Error("任务已有新进展，请刷新后重试。");
+        const receipt: TaskStatusChangeReceipt = { requestId, status: "doing", state: "completed", requestedAt: new Date().toISOString(), stoppedSessions: 0, cancelledDispatches: 0 };
+        storage.updateWandTask(taskId, { status: "doing" });
+        storage.setPreference(taskStatusChangeKey(taskId), receipt);
+        storage.addSystemComment(taskId, "开始自动执行", "用户将任务移入执行中：自动完成实现、自测、独立验收和必要返工；已有运行与排队保持，明确外部阻塞保留，验收通过后自动完成归档。");
+        return receipt;
+      });
+    }
     if (task.status === input.status && prior?.state !== "failed") return { requestId, status: input.status, state: "completed", requestedAt: new Date().toISOString(), stoppedSessions: 0, cancelledDispatches: 0 };
     const receipt: TaskStatusChangeReceipt = { requestId, status: input.status, state: "stopping", requestedAt: new Date().toISOString(), stoppedSessions: 0, cancelledDispatches: 0 };
     const ids = new Set([taskId]);
@@ -75,7 +86,7 @@ export function changeTaskStatus(deps: TaskRouteDependencies, taskId: string,
         }
         storage.updateWandTask(taskId, { status: input.status });
         receipt.state = "completed"; storage.setPreference(taskStatusChangeKey(taskId), receipt);
-        storage.addSystemComment(taskId, "手动修改状态", `用户将任务状态改为 ${input.status}。已停止 ${receipt.stoppedSessions} 个执行会话，取消 ${receipt.cancelledDispatches} 条旧派发；等待下一轮巡检按新阶段判断，不立即重发。此操作不代表验收通过。`);
+        storage.addSystemComment(taskId, "手动修改状态", `用户将任务状态改为 ${input.status}。已停止 ${receipt.stoppedSessions} 个执行会话，取消 ${receipt.cancelledDispatches} 条旧派发；执行中任务由自动闭环接续；待办与归档不自动启动。此操作不代表验收通过。`);
       });
       return receipt;
     } catch (cause) {

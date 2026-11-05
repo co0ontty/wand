@@ -9,6 +9,7 @@ export function keepUnixSocketAlive(
   socketPath: string,
   onListening: () => void,
   intervalMs = 1_000,
+  onOwnedEndpoint?: () => void,
 ): () => void {
   if (process.platform === "win32") return () => {};
   let identity = lstatSync(socketPath);
@@ -46,6 +47,7 @@ export function keepUnixSocketAlive(
     if (stopped || binding) return;
     try {
       const current = lstatSync(socketPath);
+      if (current.dev === identity.dev && current.ino === identity.ino) onOwnedEndpoint?.();
       // Never touch a replacement file/socket owned by another listener.
       if (current.dev === identity.dev && current.ino === identity.ino
         && Date.now() - lastTouch >= 60_000) {

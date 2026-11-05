@@ -206,6 +206,10 @@ export class PiRunner implements StructuredRunnerAdapter {
     const nativePi = this.execHost?.piNativeTui === true;
     const args = nativePi ? buildPiNativeArgs(context.session, context.prompt, resourceArgs)
       : buildPiArgs(context.session, context.prompt, resourceArgs);
+    context.onSystemPrompt?.("--append-system-prompt", [
+      { source: "会话角色/规则快照", text: context.session.systemPrompt?.trim() ?? "" },
+      { source: "本轮运行规则与知识快照", text: context.session.runtimeSystemPrompt?.trim() ?? "" },
+    ]);
     const state: PiTurnState = {
       blocks: [],
       result: "",

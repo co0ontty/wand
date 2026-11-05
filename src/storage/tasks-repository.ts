@@ -282,7 +282,7 @@ export class TaskRepository {
         this.writeWandTask(parent, { status: "doing" });
         if (owner.id !== parent.id) this.writeWandTask(owner, { status: "doing" });
       }
-      if (input.employeeId && input.assignAgent) this.writeWandTask(this.getWandTask(owner.id)!, {
+      if (input.employeeId && input.assignAgent && input.purpose !== "review") this.writeWandTask(this.getWandTask(owner.id)!, {
         agent: input.assignAgent, executionSubject: { type: "employee", id: input.employeeId, agentOverride: input.assignAgent },
       });
       const id = crypto.randomUUID();
@@ -368,7 +368,7 @@ export class TaskRepository {
   }
   settleTaskStatusDispatches(taskId: string, stoppedIds: readonly string[]): void {
     const settle = this.db.prepare(`UPDATE wand_task_comment_dispatches SET state='failed', error='用户修改任务状态，已停止旧执行；等待下一轮巡检。'
-      WHERE (task_id=? OR execution_task_id=?) AND session_id=? AND (state IN ('pending','unknown') OR (state='accepted' AND result_end_index IS NULL AND NOT EXISTS (SELECT 1 FROM task_workflow_events e WHERE e.source_session_id=wand_task_comment_dispatches.session_id AND e.task_id=COALESCE(wand_task_comment_dispatches.execution_task_id,wand_task_comment_dispatches.task_id) AND e.action IN ('submit','pass','fail'))))`);
+      WHERE (task_id=? OR execution_task_id=?) AND session_id=? AND (state IN ('pending','unknown') OR (state='accepted' AND result_end_index IS NULL AND NOT EXISTS (SELECT 1 FROM task_workflow_events e WHERE e.source_session_id=wand_task_comment_dispatches.session_id AND e.task_id=COALESCE(wand_task_comment_dispatches.execution_task_id,wand_task_comment_dispatches.task_id) AND e.action IN ('submit','pass','fail','block'))))`);
     for (const id of stoppedIds) settle.run(taskId, taskId, id);
   }
 

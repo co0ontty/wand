@@ -11,7 +11,7 @@ import { WandButton } from "../ui";
 import { Alert, Avatar, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
 import { taskAcceptanceLabel, taskSessionIsRunning, taskSessionSummary } from "./task-delivery-state";
-import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
+import { taskAiVerified, taskCompleted, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { DEFAULT_ITERATION_NAME } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
 import { normalizeProviderId } from "../../provider-identity";
@@ -232,22 +232,6 @@ export function TaskBoardDisplayOptions({
       ariaLabel="显示正文"
       label="正文"
     />
-    <p>主列</p>
-    {ISSUE_COLUMNS.map((column) => {
-      const checked = display.mainStatuses.includes(column.status);
-      return <Checkbox key={column.status} className="task-board-display-status" checked={checked} onChange={() => {
-            const mainStatuses = checked
-              ? display.mainStatuses.filter((status) => status !== column.status)
-              : [...display.mainStatuses, column.status];
-            onChange({
-              ...display,
-              mainStatuses: mainStatuses.length > 0 ? mainStatuses : [column.status],
-            });
-          }}>
-        <TaskBoardStatusIcon status={column.status} size={14}/>
-        {column.label}
-      </Checkbox>;
-    })}
   </Flex>;
 }
 
@@ -328,21 +312,23 @@ function TaskBoardListRow({
       onOpen(task.id);
     }}
   >
-    <WandButton kind="ghost"
-      type="button"
-      className="task-board-list-title"
-      aria-label={`打开 ${task.identifier}: ${task.title}`}
-      onClick={() => onOpen(task.id)}
-    >
-      <small>{task.identifier}{parentLabel ? ` ↳ ${parentLabel}` : ""}</small>
-      <strong>{task.title}</strong>
-    </WandButton>
-    {description ? <p className="task-board-list-description">{description}</p> : null}
+    <div className="task-board-list-content">
+      <WandButton kind="ghost"
+        type="button"
+        className="task-board-list-title"
+        aria-label={`打开 ${task.identifier}: ${task.title}`}
+        onClick={() => onOpen(task.id)}
+      >
+        <small>{task.identifier}{parentLabel ? ` ↳ ${parentLabel}` : ""}</small>
+        <strong>{task.title}</strong>
+      </WandButton>
+      {description ? <p className="task-board-list-description">{description}</p> : null}
+    </div>
     <Flex wrap align="center" gap={4} className="task-board-list-meta">
       {/* 列表已按阶段分组，只有「排队中」这类组名表达不了的状态才单独标出。 */}
       {issueTaskStatusLabel(task) !== issueStatusLabel(task.status) && <Tag className="task-board-chip task-detail-stage" data-stage={taskWorkflowStage(task.status)}>{issueTaskStatusLabel(task)}</Tag>}
       {["review", "ready", "archived"].includes(task.status) || task.acceptance?.blocker?.trim()
-        ? <Typography.Text type={taskHumanAccepted(task) ? "success" : task.acceptance?.blocker?.trim() ? "warning" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text> : null}
+        ? <Typography.Text type={taskCompleted(task) ? "success" : task.acceptance?.blocker?.trim() ? "warning" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text> : null}
       <TaskBoardPriorityChip priority={task.priority}/>
       {task.milestone && task.milestone.name !== DEFAULT_ITERATION_NAME ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
@@ -350,7 +336,7 @@ function TaskBoardListRow({
       <span>{workspaceLabel}</span>
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
       {(task.commentCount ?? 0) > 0 && <TaskBoardCommentCountButton task={task} onOpen={() => onOpenComments?.(task.id)}/>}
-      <time>{formatIssueStamp(task.updatedAt)}</time>
+      <time dateTime={task.updatedAt} title={`更新于 ${formatIssueStamp(task.updatedAt)}`}>{formatIssueStamp(task.updatedAt)}</time>
     </Flex>
     <TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/>
   </Card>;
@@ -462,7 +448,7 @@ export function TaskBoardDashboard({ tasks, projectName, onOpen, onOpenAcceptanc
   ];
   const owners = [...new Set(goals.map(task => task.assignedExecutor?.id).filter(Boolean))].map(id => {
     const owned = goals.filter(task => task.assignedExecutor?.id === id);
-    return { id: id!, name: owned[0]!.assignedExecutor!.name, active: owned.filter(task => task.status !== "archived").length, waiting: owned.filter(task => task.status === "ready").length, accepted: owned.filter(taskHumanAccepted).length };
+    return { id: id!, name: owned[0]!.assignedExecutor!.name, active: owned.filter(task => task.status !== "archived").length, waiting: owned.filter(task => task.status === "ready").length, accepted: owned.filter(taskCompleted).length };
   }).sort((a, b) => b.active - a.active).slice(0, 6);
   const list = (items: WandTaskListed[], caption: (task: WandTaskListed) => string, empty: string): React.ReactElement => items.length
     ? <div className="task-dash-list">{items.slice(0, 5).map(task => <TaskSummaryRow key={task.id} task={task} caption={caption(task)} onOpen={onOpen}/>)}</div>
@@ -471,7 +457,7 @@ export function TaskBoardDashboard({ tasks, projectName, onOpen, onOpenAcceptanc
     <header className="task-dash-head">
       <div>
         <h2>{projectName}</h2>
-        <p>{active.length} 个任务进行中 · 人工确认完成 {stats.accepted}/{stats.total}（{completion}%）{stats.overdue ? ` · ${stats.overdue} 个已逾期` : ""}</p>
+        <p>{active.length} 个任务进行中 · 已完成 {stats.accepted}/{stats.total}（{completion}%）{stats.overdue ? ` · ${stats.overdue} 个已逾期` : ""}</p>
       </div>
     </header>
     <nav className="task-dash-stages" aria-label="各阶段任务数">

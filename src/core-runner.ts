@@ -469,6 +469,11 @@ export class CoreRunner implements StructuredRunnerAdapter {
       streamFn,
       toolExecution: "parallel",
     });
+    context.onSystemPrompt?.("Agent.initialState.systemPrompt", [
+      { source: "Wand Agent 基础规则", text: CORE_BASE_SYSTEM_PROMPT },
+      { source: "会话角色/规则快照", text: session.systemPrompt?.trim() ?? "" },
+      { source: "本轮运行规则与知识快照", text: session.runtimeSystemPrompt?.trim() ?? "" },
+    ]);
     activeAgent = agent;
     if (free) agent.state.model = activeModel;
     register(agent);

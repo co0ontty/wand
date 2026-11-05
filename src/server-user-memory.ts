@@ -1,4 +1,4 @@
-import type { Express, RequestHandler } from "express";
+import type { Express, Request, RequestHandler } from "express";
 import { asyncRoute } from "./express-async.js";
 import { bodyObject, sendRouteError } from "./server-request.js";
 import type { WandStorage } from "./storage.js";
@@ -27,17 +27,23 @@ export function userMemoryOperationLog(storage: WandStorage): RequestHandler {
   return (req, res, next) => {
     const operation = OPERATIONS.find((entry) => entry.method === req.method && entry.path.test(req.path));
     if (operation) {
-      const epoch = storage.userMemoryCaptureState();
       const body = bodyObject(req.body);
       const subject = body.executionSubject ?? body.subject;
-      const privateEmployee = isTaskExecutionSubject(subject) && subject.type === "employee"
-        && subject.id !== DEFAULT_EMPLOYEE_ID;
-      const observation = privateEmployee ? "" : (operation.fields ?? [])
+      const sessionId = req.path.startsWith("/api/sessions/") || req.path.startsWith("/api/structured-sessions/")
+        ? req.path.split("/")[3] : undefined;
+      const session = sessionId ? storage.getSessionSlim(sessionId) : null;
+      const taskId = operation.feature === "task.dispatch" || operation.feature === "task.edit" ? req.path.split("/")[3] : undefined;
+      const taskSubject = taskId ? (req.path.split("/")[2] === "workspace-tasks"
+        ? storage.getWandTaskByWorkspaceTaskId(taskId) : storage.getWandTask(taskId))?.executionSubject : null;
+      const owner = isTaskExecutionSubject(subject) ? subject : taskSubject;
+      const employeeId = session?.employeeId ?? (owner?.type === "employee" ? owner.id : DEFAULT_EMPLOYEE_ID);
+      const epoch = storage.userMemoryCaptureState(employeeId);
+      const observation = (operation.fields ?? [])
         .map((field) => typeof body[field] === "string" ? body[field] : "").filter(Boolean).join("\n");
       // Only the successful user action is evidence. IDs/URLs and arbitrary request fields aren't logged.
       res.once("finish", () => {
-        if (epoch.enabled && storage.userMemoryCaptureState().enabled
-          && storage.userMemoryCaptureState().revision === epoch.revision
+        if (epoch.enabled && storage.userMemoryCaptureState(employeeId).enabled
+          && storage.userMemoryCaptureState(employeeId).revision === epoch.revision
           && res.statusCode >= 200 && res.statusCode < 300) {
           if (operation.feature === "session.prompt") {
             // Team-generated instructions never pass through these authenticated input requests.
@@ -46,16 +52,10 @@ export function userMemoryOperationLog(storage: WandStorage): RequestHandler {
             const session = storage.getSessionSlim(sessionId);
             if (session?.sessionKind === "structured" && session.automationId?.startsWith("ai-team")
               && !/^[\/!]/.test(observation.trim()) && shouldGenerateSessionTopicFromInput(observation)) {
-              recordUserMemory(storage, operation.feature, observation, sessionId);
+              recordUserMemory(storage, operation.feature, observation, sessionId, employeeId);
             }
           } else {
-            const taskId = operation.feature === "task.dispatch" || operation.feature === "task.edit"
-              ? req.path.split("/")[3] : undefined;
-            const taskSubject = taskId ? (req.path.split("/")[2] === "workspace-tasks"
-              ? storage.getWandTaskByWorkspaceTaskId(taskId) : storage.getWandTask(taskId))?.executionSubject : null;
-            const text = taskSubject?.type === "employee" && taskSubject.id !== DEFAULT_EMPLOYEE_ID
-              ? "" : observation;
-            recordUserMemory(storage, operation.feature, text, req.path);
+            recordUserMemory(storage, operation.feature, observation, req.path, employeeId);
           }
         }
       });
@@ -69,27 +69,42 @@ export function registerUserMemoryRoutes(
   deps: { storage: WandStorage; service: UserMemoryService; notifyChanged?: (id: string) => void },
 ): void {
   const { storage, service, notifyChanged } = deps;
-  app.get("/api/user-memory", (_req, res) => {
-    res.setHeader("Cache-Control", "no-store");
-    res.json(service.view());
+  // Older clients omit employeeId and continue to address only the default employee.
+  const owner = (req: Request): string => {
+    const value = req.query.employeeId;
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) throw new Error("employeeId 必须是员工 ID。");
+    const id = value === undefined ? DEFAULT_EMPLOYEE_ID : value as string;
+    if (!storage.getSiliconEmployeeDefinition(id)) throw new Error("员工不存在。");
+    return id;
+  };
+  app.get("/api/user-memory", (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      res.json(service.view(owner(req)));
+    } catch (error) { sendRouteError(res, error, "无法读取短期记忆。"); }
   });
   app.patch("/api/user-memory", (req, res) => {
     try {
+      const id = owner(req);
       const body = bodyObject(req.body);
       if (typeof body.enabled !== "boolean") throw new Error("enabled 必须是布尔值。");
-      storage.setUserMemoryEnabled(body.enabled);
-      notifyChanged?.(DEFAULT_EMPLOYEE_ID);
-      res.json(service.view());
+      storage.setUserMemoryEnabled(body.enabled, id);
+      notifyChanged?.(id);
+      res.json(service.view(id));
     } catch (error) { sendRouteError(res, error, "无法调整短期记忆。"); }
   });
-  app.delete("/api/user-memory", (_req, res) => {
-    storage.clearUserMemory();
-    notifyChanged?.(DEFAULT_EMPLOYEE_ID);
-    res.json(service.view());
+  app.delete("/api/user-memory", (req, res) => {
+    try {
+      const id = owner(req);
+      storage.clearUserMemory(id);
+      notifyChanged?.(id);
+      res.json(service.view(id));
+    } catch (error) { sendRouteError(res, error, "无法清空短期记忆。"); }
   });
-  app.post("/api/user-memory/refresh", asyncRoute(async (_req, res) => {
-    const updated = await service.refresh(true);
-    const view = service.view();
+  app.post("/api/user-memory/refresh", asyncRoute(async (req, res) => {
+    const id = owner(req);
+    const updated = await service.refresh(true, id);
+    const view = service.view(id);
     if (!updated && view.lastError) {
       res.status(503).json({ error: view.lastError });
       return;

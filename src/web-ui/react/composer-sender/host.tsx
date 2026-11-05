@@ -2,7 +2,7 @@ import * as React from "react";
 import { Sender } from "@ant-design/x";
 import { createPortal } from "react-dom";
 import { useEditorExpansion } from "./editor-expansion.js";
-import { pasteFilesInto } from "../composer-paste.js";
+import { FilePathSuggestions } from "../file-path-suggestions.js";
 import { ComposerAttachmentList } from "../composer-attachments/host.js";
 
 export type ResizeInput = (input: HTMLTextAreaElement) => void;
@@ -15,6 +15,8 @@ export interface SenderProjection {
   subscribe(listener: () => void): () => void;
   revision(): number;
   text(): string;
+  cwd?(): string;
+  identity?(): string;
   isComposing(): boolean;
   attachments?(): readonly SenderProjectionAttachment[];
   addAttachment?(file: File): void;
@@ -49,12 +51,14 @@ const ComposerInput = React.forwardRef<any, any>((props, ref) => {
       resize(input);
     }
   }, [input, props.value, props.className, resize]);
-  return <div ref={slot} style={{ display: "contents" }} onPaste={props.onPaste}/>;
+  // This adopted node keeps its native paste listener; never invoke Sender’s
+  // onPasteFile as a second owner for the same bubbling clipboard event.
+  return <div ref={slot} style={{ display: "contents" }}/>;
 });
 const components = { input: ComposerInput };
 
 /** Controlled projection only; the original native handlers own every edit and submit callback. */
-export function ComposerSender({ input, resize, projection }: { input: HTMLTextAreaElement; resize: ResizeInput; projection: SenderProjection }): React.ReactElement {
+export function ComposerSender({ input, resize, projection, structured = true }: { input: HTMLTextAreaElement; resize: ResizeInput; projection: SenderProjection; structured?: boolean }): React.ReactElement {
   React.useSyncExternalStore(projection.subscribe, projection.revision, () => 0);
   const editor = useEditorExpansion(input.dataset.sessionId ?? "workspace", () => input);
   React.useLayoutEffect(() => {
@@ -77,11 +81,9 @@ export function ComposerSender({ input, resize, projection }: { input: HTMLTextA
       onRemove={index => projection.removeAttachment?.(index)}
     />
   ) : null;
-  const onPaste = pasteFilesInto(files => {
-    for (const file of files) projection.addAttachment?.(file);
-  });
-  return <InputContext.Provider value={{ input, resize, projection }}><Sender value={projection.text()}
+  if (!structured) return <InputContext.Provider value={{ input, resize, projection }}><FilePathSuggestions cwd={projection.cwd?.()} identity={projection.identity?.()} terminal><ComposerInput value={projection.text()} className="" /></FilePathSuggestions></InputContext.Provider>;
+  return <InputContext.Provider value={{ input, resize, projection }}><FilePathSuggestions cwd={projection.cwd?.()} identity={projection.identity?.()}><Sender value={projection.text()}
     placeholder={input.placeholder} components={components} suffix={false} autoSize={false} onKeyDown={() => false}
-    header={header} onPaste={onPaste} onPasteFile={files => { for (const file of Array.from(files)) projection.addAttachment?.(file); }}
-    styles={{ root: { border: 0, boxShadow: "none", borderRadius: 0, background: "transparent" }, content: { padding: 0 } }}/>{controls ? createPortal(editor.control, controls) : null}</InputContext.Provider>;
+    header={header}
+    styles={{ root: { border: 0, boxShadow: "none", borderRadius: 0, background: "transparent" }, content: { padding: 0 } }}/></FilePathSuggestions>{controls ? createPortal(editor.control, controls) : null}</InputContext.Provider>;
 }

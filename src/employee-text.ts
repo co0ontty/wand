@@ -17,6 +17,7 @@ export interface EmployeeTextDeps {
   free?: Pick<OpenRouterFreeModelsService, "resolveForCall">;
   onUsage?: (usage: { inputTokens: number; outputTokens: number; model: string }) => void;
   callSessionId?: string;
+  onSystemPrompt?: (text: string) => void;
 }
 
 /** Expand each configured slot once; equivalent leaves execute once in first occurrence order. */
@@ -105,6 +106,7 @@ export async function prepareEmployeeTextCandidate(
       const token = CoreTurnTracker.startTurn(deps.callSessionId ?? `system-ai:${randomUUID()}`, true);
       try {
         let status: number | undefined;
+        deps.onSystemPrompt?.(request.system);
         const message = await streamSimple(checked.model as Parameters<typeof streamSimple>[0], context, { apiKey: checked.apiKey, signal,
           maxRetries: 0, fetch: async (input, init) => { const response = await fetch(input, init); status = response.status; return response; },
           maxTokens: Math.min(4096, checked.model.maxTokens), reasoning: reasoning === "off" ? undefined : reasoning as ThinkingLevel,
@@ -123,6 +125,7 @@ export async function prepareEmployeeTextCandidate(
     signal.throwIfAborted();
     const token = CoreTurnTracker.startTurn(deps.callSessionId ?? `system-ai:${randomUUID()}`, true);
     try {
+      deps.onSystemPrompt?.(request.system);
       const message = await runtime.streamSimple(resolved.model, context, { signal, maxRetries: 0, maxTokens: Math.min(4096, resolved.model.maxTokens),
         reasoning: level === "off" ? undefined : level as ThinkingLevel, toolChoice: "none" }).result();
       const text = sdkText(message);

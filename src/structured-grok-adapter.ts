@@ -207,6 +207,10 @@ export class GrokRunner implements StructuredRunnerAdapter {
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const args = buildGrokArgs(context.session, context.prompt);
+    context.onSystemPrompt?.("--rules", [
+      { source: "会话角色/规则快照", text: context.session.systemPrompt?.trim() ?? "" },
+      { source: "本轮运行规则与知识快照", text: context.session.runtimeSystemPrompt?.trim() ?? "" },
+    ]);
     const state: GrokTurnState = {
       blocks: [],
       result: "",

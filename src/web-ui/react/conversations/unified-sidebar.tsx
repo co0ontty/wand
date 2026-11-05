@@ -15,6 +15,7 @@ import { WandIcon, WandIconFamily } from "../ui/icons";
 import { WandPopover } from "../ui/popover";
 import { WandSearchField } from "../ui/search-field";
 import { SessionProviderMark } from "../workspaces/session-mark";
+import { sidebarWorkspaceLabel } from "../workspaces/sidebar-task-meta";
 import { sidebarSessionLabel, workspaceSessionProvider } from "../workspaces/session-order";
 import { sidebarSessionState, sessionGlowStatus } from "../workspaces/sidebar-session-state";
 import { SidebarSurfacesContext } from "../workspaces/sidebar-popup-owner";
@@ -274,7 +275,7 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
         {looseQueuedTasks.map(({ group, task, count }) => <div className="unified-sidebar-row" data-queued-task={task.boardTaskId} key={`queued-task:${task.id}`}>
           <ImSidebarItem id={`queued-task:${task.id}`} title={task.name} avatarNode={<WandIcon name="task" size={13}/>}
             state={{ label: "排队中", icon: "clock", tone: "muted" }} glow="queued"
-            summary={[task.boardTaskIdentifier, task.assignedExecutor?.name, group.workspaceName, `${count} 条派发排队中`].filter(Boolean).join(" · ")}
+            summary={{ identity: [task.boardTaskIdentifier, task.assignedExecutor?.name].filter(Boolean).join(" · "), workspace: sidebarWorkspaceLabel(group), status: `${count} 条派发排队中` }}
             onClick={() => updatePageRoute({ view: "issues", task: task.boardTaskId!, directory: group.workspaceId })}/>
         </div>)}
       </details> : null}
@@ -283,9 +284,12 @@ export function UnifiedSidebarList({ model, titles, selectedSessionId, selectedC
         const title = sidebarSessionLabel(session, model.entries.indexOf(entry), titles[session.id]);
         const tree = sessionWorktree(entry.group, entry.task, session);
         const parent = entry.group.worktree?.parentWorkspaceId ? model.groups.find(group => group.workspaceId === entry.group.worktree?.parentWorkspaceId) : undefined;
-        const workspace = parent?.workspaceName ?? (entry.group.synthetic || entry.group.global ? "未分配工作区" : entry.group.workspaceName);
-        const summary = [session.employeeName || entry.conversation?.title || (workspaceSessionProvider(session) ? agentToolDisplayName(workspaceSessionProvider(session), session.engine) : session.sessionKind === "pty" ? "空白终端" : "执行工具未知"), workspace,
-          entry.archived ? "已归档" : sidebarSessionState(session).label].filter(Boolean).join(" · ");
+        const workspace = parent ? sidebarWorkspaceLabel(parent) : entry.group.synthetic || entry.group.global ? "未分配工作区" : sidebarWorkspaceLabel(entry.group);
+        const summary = {
+          identity: session.employeeName || entry.conversation?.title || (workspaceSessionProvider(session) ? agentToolDisplayName(workspaceSessionProvider(session), session.engine) : session.sessionKind === "pty" ? "空白终端" : "执行工具未知"),
+          workspace,
+          status: entry.archived ? "已归档" : sidebarSessionState(session).label,
+        };
         const row = <div data-unified-session={session.id} className={`unified-sidebar-row${selected(entry) ? " is-selected" : ""}`}><ImSidebarItem id={session.id} title={title} titleGenerating={session.titleGenerating}
           avatarNode={<SessionProviderMark session={session} size={13}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus({ ...session, archived: entry.archived })} summary={summary}
           active={selected(entry)} onClick={() => onOpen(entry)}/>

@@ -400,7 +400,7 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
           })
             .catch(cause => setError(describeError(cause, "打开工作失败，请从会话列表重试。")));
         }}>打开已创建的工作（本页草稿保留）</WandButton> : null}
-          <NewWorkComposer ref={sender} text={draft.text} disabled={disabled} placeholder={placeholder}
+          <NewWorkComposer ref={sender} text={draft.text} cwd={form.cwd} draftKey={key} disabled={disabled} placeholder={placeholder}
             expanded={editor.expanded} onTextChange={text => teamChatComposer.edit(key, { text })} onSubmit={() => void submit()}
             onPaste={pasteFilesInto(addFiles)}
             header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((item, index) => ({ index, name: item.name, sizeLabel: `${item.size} B`, previewUrl: item.previewUrl || null }))} onRemove={index => { if (!disabled) teamChatComposer.edit(key, { removeAttachment: index }); }}/> : null}

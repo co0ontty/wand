@@ -62,6 +62,7 @@ export function isRetainableSystemAiCall(session: { automationId?: unknown } | n
 
 export interface AiCallTrace {
   readonly sessionId: string;
+  systemPromptSubmitted?(channel: string, parts: import("./execution-prompt-types.js").ExecutionPromptPart[]): void;
   candidateStarted(candidate: AiCliCandidate): void;
   localStarted(model: string): void;
   candidateSkipped(candidate: AiCliCandidate, reason: string): void;

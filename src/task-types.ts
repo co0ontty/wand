@@ -19,6 +19,11 @@ export function taskHumanAccepted(task: Pick<WandTask, "acceptance" | "deliveryR
     && typeof task.acceptance?.blocker === "string" && !task.acceptance.blocker.trim();
 }
 
+/** Independent approval completes automatic work; it never impersonates human acceptance. */
+export function taskCompleted(task: Pick<WandTask, "status" | "acceptance" | "verification" | "deliveryRevision">): boolean {
+  return taskHumanAccepted(task) || task.status === "archived" && taskAiVerified(task);
+}
+
 export function isWandTaskStatus(value: unknown): value is WandTaskStatus {
   return typeof value === "string" && WAND_TASK_STATUSES.includes(value as WandTaskStatus);
 }
@@ -284,6 +289,9 @@ export interface TaskAcceptance {
   blocker: string;
   acceptedAt: string | null;
   confirmedRevision?: number;
+  /** Only an explicit block receipt pauses automatic work. Ordinary repair gaps do not. */
+  blockerKind?: "external";
+  selfTest?: Array<{ criterion: string; evidence: string }>;
 }
 
 export interface TaskVerification {
@@ -296,13 +304,14 @@ export interface TaskVerification {
   reviewerId: string | null;
 }
 
-export type TaskWorkflowAction = "progress" | "submit" | "pass" | "fail" | "return" | "accept";
+export type TaskWorkflowAction = "progress" | "block" | "submit" | "pass" | "fail" | "return" | "accept";
 export interface TaskWorkflowInput {
   action: TaskWorkflowAction;
   requestId: string;
   expectedUpdatedAt: string;
   evidence: string;
   blocker: string;
+  selfTest?: Array<{ criterion: string; evidence: string }>;
 }
 
 export interface WandTask {

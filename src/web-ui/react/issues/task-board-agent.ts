@@ -14,7 +14,7 @@ import {
   DEFAULT_WAND_TASK_AGENT_MODE,
   isClosedWandTaskStatus,
   taskWorkflowStage,
-  taskHumanAccepted,
+  taskCompleted,
   isWandTaskAgentEngine,
   isWandTaskAgentKind,
   normalizeWandTaskAgentMode,
@@ -630,43 +630,25 @@ export function issueFilterCount(filters: IssueBoardFilters): number {
     + Number(filters.labels.length > 0);
 }
 
-/** 卡片是否展示正文；主列之外的状态进「其他任务」。 */
+/** 卡片是否展示正文。 */
 export interface IssueBoardDisplay {
   body: boolean;
-  mainStatuses: WandTaskStatus[];
 }
 
 export const DEFAULT_ISSUE_BOARD_DISPLAY: IssueBoardDisplay = {
   body: false,
-  mainStatuses: ["backlog", "todo", "doing", "review", "ready"],
 };
 
 const ISSUE_BOARD_DISPLAY_KEY = "wand.issue-board.display";
-const ISSUE_BOARD_DISPLAY_VERSION = 3;
-const LEGACY_DEFAULT_MAIN_STATUSES: WandTaskStatus[] = ["todo", "doing", "done"];
+const ISSUE_BOARD_DISPLAY_VERSION = 4;
 
 export function readIssueBoardDisplay(): IssueBoardDisplay {
   if (typeof window === "undefined") return DEFAULT_ISSUE_BOARD_DISPLAY;
   try {
     const raw = window.localStorage.getItem(ISSUE_BOARD_DISPLAY_KEY);
     if (!raw) return DEFAULT_ISSUE_BOARD_DISPLAY;
-    const parsed = JSON.parse(raw) as Partial<IssueBoardDisplay> & { version?: number };
-    const allowed = new Set(ISSUE_COLUMNS.map((column) => column.status));
-    const parsedStatuses = Array.isArray(parsed.mainStatuses)
-      ? parsed.mainStatuses.map(status => status === "done" ? "review" as const : status).filter(status => allowed.has(status))
-      : [];
-    const migratedLegacyDefault = parsed.version !== ISSUE_BOARD_DISPLAY_VERSION
-      && Array.isArray(parsed.mainStatuses)
-      && LEGACY_DEFAULT_MAIN_STATUSES.every((status) => parsed.mainStatuses!.includes(status))
-      && (parsed.mainStatuses.length === LEGACY_DEFAULT_MAIN_STATUSES.length || parsed.mainStatuses.length === LEGACY_DEFAULT_MAIN_STATUSES.length + 1 && parsed.mainStatuses.includes("backlog"));
-    const mainStatuses = migratedLegacyDefault
-      ? DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses
-      : parsedStatuses.length > 0 ? parsedStatuses : DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses;
-    const display = { body: parsed.body === true, mainStatuses };
-    if (migratedLegacyDefault) {
-      window.localStorage.setItem(ISSUE_BOARD_DISPLAY_KEY, JSON.stringify({ ...display, version: ISSUE_BOARD_DISPLAY_VERSION }));
-    }
-    return display;
+    const parsed = JSON.parse(raw) as Partial<IssueBoardDisplay>;
+    return { body: parsed.body === true };
   } catch {
     return DEFAULT_ISSUE_BOARD_DISPLAY;
   }
@@ -770,7 +752,7 @@ export function issueBoardStats<T extends {
   status: WandTaskStatus;
   priority: WandTaskPriority;
   dueDate: string | null;
-  acceptance?: WandTask["acceptance"];
+  acceptance?: WandTask["acceptance"]; verification?: WandTask["verification"];
   deliveryRevision?: number;
 }>(tasks: readonly T[]): IssueBoardStats {
   const today = isoDate(new Date());
@@ -781,7 +763,7 @@ export function issueBoardStats<T extends {
   let backlog = 0;
   let overdue = 0;
   let high = 0;
-  const accepted = tasks.filter(taskHumanAccepted).length;
+  const accepted = tasks.filter(taskCompleted).length;
   for (const task of tasks) {
     if (task.status === "archived") continue;
     if (task.status === "backlog") backlog += 1;
@@ -802,7 +784,7 @@ export interface IssueProgressPoint {
   completed: number;
 }
 
-export function issueProgressSeries<T extends { status: WandTaskStatus; createdAt: string; updatedAt: string; acceptance?: WandTask["acceptance"]; deliveryRevision?: number }>(
+export function issueProgressSeries<T extends { status: WandTaskStatus; createdAt: string; updatedAt: string; acceptance?: WandTask["acceptance"]; verification?: WandTask["verification"]; deliveryRevision?: number }>(
   tasks: readonly T[],
 ): IssueProgressPoint[] {
   const now = Date.now();
@@ -822,7 +804,7 @@ export function issueProgressSeries<T extends { status: WandTaskStatus; createdA
         if (task.status === "todo" || task.status === "backlog") return false;
         return (Number.isNaN(updatedAt) ? createdAt : Math.max(createdAt, updatedAt)) <= timestamp;
       }).length,
-      completed: tasks.filter((task) => taskHumanAccepted(task) && new Date(task.acceptance!.acceptedAt!).getTime() <= timestamp).length,
+      completed: tasks.filter((task) => taskCompleted(task) && new Date(task.acceptance?.acceptedAt ?? task.verification!.reviewedAt).getTime() <= timestamp).length,
     };
   });
 }

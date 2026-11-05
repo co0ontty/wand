@@ -4,7 +4,7 @@ import type { SiliconEmployee } from "../ai-team-types.js";
 import { DEFAULT_EMPLOYEE_KEY, DEFAULT_MAX_CONCURRENT_TASKS, isBuiltinSiliconEmployee, parseSiliconEmployeeTags, siliconEmployeeTags } from "../ai-team-types.js";
 import { decisionExpertDefinition } from "../decision-expert-employee.js";
 import { DECISION_EXPERT_KEY } from "../decision-expert-identity.js";
-import { defaultEmployeeDefinition } from "../default-employee.js";
+import { defaultEmployeeDefinition, employeeMemoryPrompt, savedDefaultEmployeeBasePrompt } from "../default-employee.js";
 import { normalizeEmployeeKnowledge } from "../employee-knowledge-content.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "../employee-knowledge-types.js";
 import { FIXED_EMPLOYEE_AVATARS, employeeAvatarValue, fixedEmployeeAvatar, isFixedAvatarEmployee } from "../fixed-employee-avatar.js";
@@ -32,9 +32,10 @@ export class EmployeeRepository {
 
   private projectDefaultEmployee(employee: SiliconEmployee): SiliconEmployee {
     // Presentation only: legacy columns stay untouched until an explicit migration.
-    employee = { ...employee, avatar: employeeAvatarValue(employee) };
-    if (employee.systemKey !== DEFAULT_EMPLOYEE_KEY) return employee;
-    const state = this.s.getUserMemoryState();
+    employee = { ...employee, avatar: employeeAvatarValue(employee), savedPrompt: employee.systemKey === DEFAULT_EMPLOYEE_KEY
+      ? savedDefaultEmployeeBasePrompt(employee.prompt) : employee.prompt };
+    const state = this.s.getUserMemoryState(Date.now(), employee.id);
+    if (employee.systemKey !== DEFAULT_EMPLOYEE_KEY) return { ...employee, prompt: employee.prompt + employeeMemoryPrompt(state.enabled ? state.profile : null) };
     return defaultEmployeeDefinition(employee.agents, employee.updatedAt, employee,
       state.enabled ? state.profile : null);
   }

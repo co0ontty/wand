@@ -13,7 +13,7 @@ export interface ImSidebarItemProps {
   titleGenerating?: boolean;
   state: SidebarSessionState;
   glow?: GlowStatus;
-  summary: string;
+  summary: string | { identity?: string; workspace?: string; status: string };
   active?: boolean;
   onClick(): void;
 }
@@ -30,14 +30,15 @@ export function ImSidebarItem({
       : state.tone === "warning" ? "permission"
       : "none"
   );
+  const summaryText = typeof summary === "string" ? summary : [summary.identity, summary.workspace, summary.status].filter(Boolean).join(" · ");
   const visualStatus = glowVisualStatus(effectiveGlow);
   const descriptionId = React.useId();
   return (
-    <SidebarLabelTooltip title={`${title} · ${summary}`} selector=".im-sidebar-item-name">
+    <SidebarLabelTooltip title={`${title} · ${summaryText}`} selector=".im-sidebar-item-name">
       <WandButton kind={active ? "soft" : "ghost"} type="button" className={`session-item wand-sidebar-session-row${active ? " active" : ""}`}
         style={{ width: "100%", height: "auto", whiteSpace: "normal", justifyContent: "flex-start", padding: "8px 10px" }}
         data-session-id={id} aria-current={active ? "page" : undefined}
-        aria-describedby={descriptionId} title={`${title} · ${summary}`} onClick={onClick}>
+        aria-describedby={descriptionId} title={`${title} · ${summaryText}`} onClick={onClick}>
         <Flex vertical style={{ minWidth: 0, textAlign: "start", flex: 1, gap: 3 }}>
           {/* 第一行：会话标题 + 卡片右侧运行状态动效图标 */}
           <Flex align="center" justify="space-between" gap={8} style={{ width: "100%", minWidth: 0 }}>
@@ -73,9 +74,17 @@ export function ImSidebarItem({
                 {avatarNode}
               </span>
             ) : null}
-            <Typography.Text ellipsis type="secondary" id={descriptionId} title={summary} className="im-sidebar-item-summary" style={{ fontSize: 11, margin: 0, flex: 1, minWidth: 0 }}>
-              {summary}
-            </Typography.Text>
+            {typeof summary === "string" ? (
+              <Typography.Text ellipsis type="secondary" id={descriptionId} title={summaryText} className="im-sidebar-item-summary" style={{ fontSize: 11, margin: 0, flex: 1, minWidth: 0 }}>
+                {summaryText}
+              </Typography.Text>
+            ) : (
+              <span id={descriptionId} title={summaryText} aria-label={summaryText} className="im-sidebar-item-summary" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
+                {summary.identity ? <><span className="im-sidebar-item-identity" style={{ flex: "0 1 auto", maxWidth: summary.workspace ? "35%" : undefined, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{summary.identity}</span><span aria-hidden="true" style={{ flexShrink: 0 }}>·</span></> : null}
+                {summary.workspace ? <><span className="im-sidebar-item-workspace" style={{ flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{summary.workspace}</span><span aria-hidden="true" style={{ flexShrink: 0 }}>·</span></> : null}
+                <span className="im-sidebar-item-summary-status" style={{ flexShrink: 0 }}>{summary.status}</span>
+              </span>
+            )}
           </Flex>
         </Flex>
       </WandButton>

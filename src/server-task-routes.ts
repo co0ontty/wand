@@ -268,7 +268,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies, au
   if (autoFlow) {
     app.get("/api/wand-task-auto-flow", (_req, res) => res.json({ settings: autoFlow.settings(), lastScan: autoFlow.lastScan(), history: autoFlow.history() }));
     app.put("/api/wand-task-auto-flow", asyncRoute(async (req, res) => {
-      try { res.json({ settings: autoFlow.save(req.body), lastScan: autoFlow.lastScan(), history: autoFlow.history() }); }
+      try { const settings = autoFlow.save(req.body); autoFlow.wake(); res.json({ settings, lastScan: autoFlow.lastScan(), history: autoFlow.history() }); }
       catch (error) { sendRouteError(res, error, "无法保存巡检设置。"); }
     }));
     app.post("/api/wand-task-auto-flow/run", asyncRoute(async (req, res) => {
@@ -475,6 +475,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies, au
     const body = bodyObject(req.body);
     if (!isWandTaskStatus(body.status) || typeof body.expectedUpdatedAt !== "string" || typeof body.requestId !== "string" || !body.requestId || body.requestId.length > 128) throw badRequest("状态或确认版本无效。");
     try { const receipt = await changeTaskStatus(deps, req.params.id, { status: body.status, expectedUpdatedAt: body.expectedUpdatedAt, requestId: body.requestId });
+      autoFlow?.wake();
       res.json({ task: dto(storage.getWandTask(req.params.id)!), receipt }); }
     catch (cause) { throw conflict(cause instanceof Error ? cause.message : "无法修改任务状态。"); }
   }));
@@ -489,6 +490,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies, au
       if (body.workflow !== undefined) {
         if (Object.keys(body).some(key => key !== "workflow")) throw badRequest("工作流动作不能与其他编辑混合提交。");
         const result = storage.applyTaskWorkflow(currentTask.id, body.workflow, { kind: "user" }, sessions);
+        autoFlow?.wake();
         res.json(dto(result));
         return;
       }
@@ -580,6 +582,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies, au
         return;
       }
       if (body.rememberAgentDefaults === true && patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
+      autoFlow?.wake();
       res.json(dto(storage.getWandTask(task.id) ?? task));
     } catch (error) {
       sendRouteError(res, error, "无法更新任务。");

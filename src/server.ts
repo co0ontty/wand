@@ -1056,6 +1056,7 @@ export async function startServer(
     const data = event.data as { employeeId?: unknown; structuredState?: { inFlight?: unknown } } | undefined;
     if (typeof data?.employeeId === "string" && data.structuredState?.inFlight !== true) {
       taskExecutionQueue.scheduleDrain(data.employeeId);
+      taskAutoFlow.wake();
     }
     wsManager.emitEvent(event);
   });

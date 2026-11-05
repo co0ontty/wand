@@ -10,7 +10,7 @@
 function normalizeClipboardFile(file: File, index: number): File {
   const isImage = file.type.toLowerCase().startsWith("image/");
   const hasExt = /\.(?:png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name);
-  if (!isImage || (file.name && file.name !== "blob" && hasExt)) return file;
+  if (!isImage || (file.name && file.name !== "blob")) return file;
   const ext = file.type === "image/jpeg" ? ".jpg" : file.type === "image/webp" ? ".webp" : file.type === "image/gif" ? ".gif" : ".png";
   const base = file.name && file.name !== "blob" ? file.name : `image-${Date.now()}-${index + 1}`;
   return new File([file], hasExt ? base : `${base}${ext}`, { type: file.type, lastModified: file.lastModified });
@@ -33,8 +33,9 @@ export function clipboardFiles(clipboard: DataTransfer | null | undefined): File
  * text pastes keep the browser's native insert so drafts, IME and the PTY text
  * path stay owned by their existing handlers.
  */
-export function pasteFilesInto(addFiles: (files: File[]) => void): (event: { clipboardData: DataTransfer | null; preventDefault(): void }) => void {
+export function pasteFilesInto(addFiles: (files: File[]) => void): (event: { clipboardData: DataTransfer | null; readonly defaultPrevented?: boolean; preventDefault(): void }) => void {
   return event => {
+    if (event.defaultPrevented) return;
     const files = clipboardFiles(event.clipboardData);
     if (!files.length) return;
     event.preventDefault();

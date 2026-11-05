@@ -1,5 +1,6 @@
 import { composer, state, todoTurnEvidence, writeStoredBoolean } from "./state";
 import { observeTodoTurn } from "./todo-execution.js";
+import { clipboardFiles } from "../react/composer-paste.js";
 import { clearStartupPreloads } from "./startup";
 import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "../../system-ai-call.js";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
@@ -2295,6 +2296,11 @@ function sessionProjectionSignature(session: any): string {
 
         if (terminalZoomFromKeyboard(event)) return;
 
+        // @ completion keeps an editable local draft until explicit submit.
+        // Never send navigation/deletion or its unfinished token into the CLI.
+        const bufferedPath = !!(event.target as HTMLTextAreaElement | null)?.dataset.localPathDraft
+          && !!(event.target as HTMLTextAreaElement | null)?.value;
+        if (bufferedPath && event.key !== "Enter") return;
         const selectedForKeys = getSelectedSession();
         const held = ptyInputState.read(state.selectedId);
         if (!isStructuredSession(selectedForKeys) && (held.ctrl || held.shift)
@@ -2319,7 +2325,7 @@ function sessionProjectionSignature(session: any): string {
           }
         }
 
-        if (shouldCaptureTerminalEvent(event)) {
+        if (!bufferedPath && shouldCaptureTerminalEvent(event)) {
           captureTerminalInput(event);
           return;
         }
@@ -2513,19 +2519,18 @@ function sessionProjectionSignature(session: any): string {
       }
 
       function attachmentEntry(file, index?) {
-        var originalName = typeof file.name === "string" ? file.name.trim() : "";
+        var originalName = typeof file.name === "string" ? file.name : "";
         var isImage = isClipboardImageMimeType(file.type);
         var fallbackName = isImage
           ? "clipboard-image-" + Date.now() + "-" + ((index || 0) + 1)
             + clipboardImageExtension(file.type)
           : "attachment-" + Date.now() + "-" + ((index || 0) + 1);
-        var imageNameHasExtension = /\.(?:png|jpe?g|gif|webp|bmp|svg)$/i.test(originalName);
         return {
           file: file,
           // Clipboard APIs sometimes name image blobs simply "blob". Give
           // those files a real image suffix so Codex's path/image validation
           // does not have to guess from the bytes alone.
-          name: isImage && !imageNameHasExtension ? fallbackName : (originalName || fallbackName),
+          name: !originalName || originalName === "blob" ? fallbackName : originalName,
           size: file.size,
           previewUrl: null,
         };
@@ -2641,6 +2646,10 @@ function sessionProjectionSignature(session: any): string {
       export function addPendingAttachment(file) {
         if (!file) return;
         if (!state.selectedId) return;
+        if (getPendingAttachments(state.selectedId).length >= 5) {
+          showToast("一次最多粘贴或上传 5 个附件。", "warning");
+          return;
+        }
         var entries = validAttachmentEntries([file]);
         if (!entries.length) return;
         var entry = entries[0];
@@ -2711,7 +2720,13 @@ function sessionProjectionSignature(session: any): string {
         if (!inputBox || isStructuredSession(getSelectedSession())) return false;
         if (document.documentElement.classList.contains("is-wand-embed-terminal")) return false;
         var value = inputBox.value || "";
-        if (!value) return false;
+        if (!value) { delete inputBox.dataset.localPathDraft; return false; }
+        // This check is synchronous, before any direct-input enqueue, including
+        // the lazy React host window and compositionend flush.
+        if (inputBox.dataset.localPathDraft || /(?:^|\s)@/.test(value)) {
+          inputBox.dataset.localPathDraft = "true";
+          return false;
+        }
         const held = ptyInputState.read(state.selectedId);
         const typed = event?.data ?? value;
         const modified = modifiedTypedPtyText(typed, event, held);
@@ -2732,47 +2747,33 @@ function sessionProjectionSignature(session: any): string {
         return true;
       }
 
-      function clipboardImageFiles(event) {
-        var clipboard = event && event.clipboardData;
-        if (!clipboard) return [];
-        var files = [];
-        var items = clipboard.items;
-        if (items) {
-          for (var i = 0; i < items.length; i++) {
-            if (!isClipboardImageMimeType(items[i].type)) continue;
-            var file = items[i].getAsFile();
-            if (file) files.push(file);
-          }
-        }
-        if (!files.length && clipboard.files) {
-          for (var j = 0; j < clipboard.files.length; j++) {
-            if (isClipboardImageMimeType(clipboard.files[j].type)) {
-              files.push(clipboard.files[j]);
-            }
-          }
-        }
-        return files;
-      }
-
       export function handlePtyImagePaste(event) {
         var sessionId = ptyPasteTargetSessionId(event);
         if (!sessionId || !runningPtyAttachmentSession(sessionId)) return false;
-        var files = clipboardImageFiles(event);
+        var files = clipboardFiles(event.clipboardData);
         if (!files.length) return false;
         event.preventDefault();
         return pasteFilesIntoPty(files, sessionId);
       }
 
       export function handleInputPaste(event) {
-        var imageFiles = clipboardImageFiles(event);
-        if (imageFiles.length) {
+        if (event.defaultPrevented) return;
+        var files = clipboardFiles(event.clipboardData);
+        if (files.length) {
           event.preventDefault();
-          addPendingAttachments(imageFiles);
+          addPendingAttachments(files);
           return;
         }
         var pasted = event.clipboardData && event.clipboardData.getData("text");
         if (!pasted) return;
         event.preventDefault();
+        const localInput = event.target as HTMLTextAreaElement;
+        if (localInput?.dataset?.localPathDraft || /(?:^|\s)@/.test(pasted)) {
+          localInput.dataset.localPathDraft = "true";
+          replaceComposerSelection(localInput, pasted);
+          localInput.dispatchEvent(new Event("input", { bubbles: true }));
+          return;
+        }
         if (state.terminalInteractive) {
           // Preserve browser paste semantics across the remote PTY. Codex uses
           // this event boundary for large-paste handling and image-path attach.

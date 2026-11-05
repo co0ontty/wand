@@ -133,6 +133,10 @@ export function registerUploadRoutes(
   };
 
   const upload = multer({
+    // Browser FormData, OkHttp and Apple clients send UTF-8 filename bytes.
+    // Decode at the multipart boundary, not by reinterpreting already-decoded
+    // names (filename* carries its own charset and remains authoritative).
+    defParamCharset: "utf8",
     storage,
     limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES },
   });

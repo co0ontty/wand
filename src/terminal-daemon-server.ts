@@ -586,7 +586,8 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
 
   const stopSocketKeepalive = keepUnixSocketAlive(server, paths.socketPath, () => {
     chmodSync(paths.socketPath, 0o600);
-  });
+    restoreDaemonOwnershipFiles(paths, { token, pid: process.pid });
+  }, 1_000, () => restoreDaemonOwnershipFiles(paths, { token, pid: process.pid }));
   let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;
@@ -618,6 +619,28 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
  * 「进程活着但凭据不见了」，所有终端永久断联。所以凭据按**内容**判归属，不是自己写的就不动。
  * socket 仍然照删：它属于本进程的监听（真正被占时 bind 会 EADDRINUSE）。
  */
+export function restoreDaemonOwnershipFiles(
+  paths: { tokenPath: string; pidPath: string },
+  owner: { token: string; pid: number },
+): void {
+  const entries = [[paths.tokenPath, owner.token], [paths.pidPath, String(owner.pid)]] as const;
+  const missing: Array<readonly [string, string]> = [];
+  // The caller first proves socket ownership. Never replace another owner's
+  // credentials, including when only one of its two files has been published.
+  for (const [file, value] of entries) {
+    try {
+      if (readFileSync(file, "utf8").trim() !== value) return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      missing.push([file, value]);
+    }
+  }
+  for (const [file, value] of missing) {
+    try { writeFileSync(file, `${value}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") return; throw error; }
+  }
+}
+
 function cleanupDaemonFiles(
   paths: { socketPath: string; tokenPath: string; pidPath: string },
   owner: { token: string; pid: number },

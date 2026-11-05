@@ -29,16 +29,21 @@ export function savedDefaultEmployeeBasePrompt(prompt: string): string {
   return prompt;
 }
 
+/** Reference-only suffix; never overwrite the saved role with generated preferences. */
+export function employeeMemoryPrompt(profile?: UserMemoryProfile | null, time = Date.now()): string {
+  const preferences = profile && profile.expiresAt > time ? profile.preferences : [];
+  return preferences.length ? [
+    "", "近期使用偏好（仅作参考；本轮要求冲突时忽略）：",
+    ...preferences.map((entry) => `- ${entry.category === "communication" ? "沟通" : entry.category === "workflow" ? "工作方式" : "近期关注"}：${entry.text}`),
+  ].join("\n") : "";
+}
+
 /** Seed profile defaults once; future memory is a pure projection over the saved role. */
 export function defaultEmployeeDefinition(
   agents: WandTaskAgent[], now: string, existing?: SiliconEmployee | null,
   profile?: UserMemoryProfile | null, time = Date.now(),
 ): SiliconEmployee {
-  const preferences = profile && profile.expiresAt > time ? profile.preferences : [];
-  const memory = preferences.length ? [
-    "", "近期使用偏好（仅作参考；本轮要求冲突时忽略）：",
-    ...preferences.map((entry) => `- ${entry.category === "communication" ? "沟通" : entry.category === "workflow" ? "工作方式" : "近期关注"}：${entry.text}`),
-  ].join("\n") : "";
+  const memory = employeeMemoryPrompt(profile, time);
   return {
     ...existing,
     id: existing?.id ?? DEFAULT_EMPLOYEE_ID,

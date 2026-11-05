@@ -615,8 +615,15 @@ async function callTextCandidates<T>(
   const call = async (candidate: import("./types.js").AiCliCandidate): Promise<string> => {
     const free = freeLeaves.has(candidate);
     const candidateDeadline = free ? Math.min(deadline, Date.now() + 20_000) : deadline;
-    if (candidate.engine !== "sdk") return callCliAiText(request, cwd, language, { ...candidateOptions(opts, candidate),
-      ...(free ? { opencodeRuntime: opts.opencodeFree!.execution } : {}), deadline: candidateDeadline });
+    if (candidate.engine !== "sdk") {
+      trace?.systemPromptSubmitted?.(systemPromptFlag(candidate.provider) ?? "用户消息前缀兜底（非原生系统通道）", [
+        ...(candidate.provider === "claude" && language ? [{ source: "系统调用语言规则", text: buildLanguageDirective(language) }] : []),
+        ...(candidate.provider === "opencode" ? [{ source: "OpenCode 文本生成 Agent 规则", text: "Return only the requested text. Do not use tools." }] : []),
+        { source: "系统调用实际规则（含员工角色/操作人格）", text: request.system },
+      ]);
+      return callCliAiText(request, cwd, language, { ...candidateOptions(opts, candidate),
+        ...(free ? { opencodeRuntime: opts.opencodeFree!.execution } : {}), deadline: candidateDeadline });
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new QuickCommitError("Wand Agent 调用超时。", "CLAUDE_TIMEOUT")), Math.max(1, deadline - Date.now()));
     const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
@@ -624,6 +631,7 @@ async function callTextCandidates<T>(
       const generate = await abortableEmployeeText(prepareEmployeeTextCandidate({
         ...opts.employeeText,
         callSessionId: trace?.sessionId,
+        onSystemPrompt: text => trace?.systemPromptSubmitted?.("SDK systemPrompt", [{ source: "系统调用实际规则（含员工角色/操作人格）", text }]),
         onUsage: usage => { opts.employeeText?.onUsage?.(usage); trace?.usageReported(usage); },
         config: { ...opts.employeeText?.config, defaultCwd: cwd, inheritEnv: opts.inheritEnv ?? opts.employeeText?.config.inheritEnv, modelGroups },
       }, { ...candidate, model: candidate.model ?? "default", thinkingEffort: candidate.thinkingEffort ?? opts.thinkingEffort ?? "off", mode: "default", kind: "structured" }, request, signal), signal);

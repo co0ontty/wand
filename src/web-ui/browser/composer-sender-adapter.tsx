@@ -58,6 +58,8 @@ const projection: SenderProjection = {
   subscribe: composer.subscribe.bind(composer),
   revision: () => composer.read(state.selectedId).revision,
   text: () => composer.read(state.selectedId).text,
+  cwd: () => state.sessions.find(session => session.id === state.selectedId)?.cwd ?? "",
+  identity: () => state.selectedId ?? "",
   isComposing: () => state.composerComposing,
   attachments: () => composer.read(state.selectedId).attachments,
   addAttachment: (file: File) => addPendingAttachment(file),
@@ -107,18 +109,20 @@ export function mountComposerSender(resize: ResizeInput): void {
   if (!target) return;
   const structured = session?.sessionKind === "structured";
   const previous = roots.get(target);
-  if (!structured) {
-    if (previous) {
-      const active = document.activeElement === previous.input;
-      const parent = target as HTMLElement & { moveBefore?(node: Node, child: Node | null): void };
-      if (parent.moveBefore) parent.moveBefore(previous.input, null);
-      else { target.appendChild(previous.input); if (active) previous.input.focus({ preventScroll: true }); }
-      previous.root.unmount(); previous.chrome.remove(); roots.delete(target);
-      previous.input.className = "input-textarea";
-    }
+  if (previous && previous.chrome.dataset.structured !== String(structured)) {
+    const active = document.activeElement === previous.input;
+    const parent = target as HTMLElement & { moveBefore?(node: Node, child: Node | null): void };
+    if (parent.moveBefore) parent.moveBefore(previous.input, null);
+    else { target.appendChild(previous.input); if (active) previous.input.focus({ preventScroll: true }); }
+    previous.root.unmount(); previous.chrome.remove(); roots.delete(target);
+    previous.input.className = "input-textarea";
+  }
+  const current = roots.get(target);
+  if (current && hostModule) {
+    const { ComposerSender } = hostModule;
+    flushSync(() => current.root.render(<WandUiProvider><ComposerSender input={current.input} resize={resize} projection={projection} structured={structured}/></WandUiProvider>));
     return;
   }
-  if (previous) return;
   if (!hostModule) {
     // 组件还没到：先挂起这次挂载，模块到达后按当前会话状态重放一次。
     hostRetry = resize;
@@ -131,8 +135,8 @@ export function mountComposerSender(resize: ResizeInput): void {
   }
   const input = target.querySelector<HTMLTextAreaElement>("#input-box");
   if (!input) return;
-  const chrome = document.createElement("div"); target.appendChild(chrome);
+  const chrome = document.createElement("div"); chrome.dataset.structured = String(structured); target.appendChild(chrome);
   const root = createRoot(chrome); roots.set(target, { root, chrome, input });
   const { ComposerSender } = hostModule;
-  flushSync(() => root.render(<WandUiProvider><ComposerSender input={input} resize={resize} projection={projection}/></WandUiProvider>));
+  flushSync(() => root.render(<WandUiProvider><ComposerSender input={input} resize={resize} projection={projection} structured={structured}/></WandUiProvider>));
 }

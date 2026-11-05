@@ -68,8 +68,13 @@ export function startEmployeeKnowledgeRunner(
   observer: StructuredRunnerObserver,
   webLoginGrant?: (sessionId: string, employeeId: string) => { proof: string; revoke(): void },
 ): StructuredRunnerExecution {
+  const auditedRunner: StructuredRunnerAdapter = {
+    start: (submitted, nextObserver) => runner.start({ ...submitted,
+      onSystemPrompt: (channel, parts) => storage.recordExecutionPrompt(submitted.session, channel, parts, submitted.env),
+    }, nextObserver),
+  };
   return startTaskWorkflowRunner(storage, {
-    start: (nextContext, nextObserver) => startKnowledgeRunner(storage, runner, nextContext, nextObserver, webLoginGrant),
+    start: (nextContext, nextObserver) => startKnowledgeRunner(storage, auditedRunner, nextContext, nextObserver, webLoginGrant),
   }, context, observer);
 }
 

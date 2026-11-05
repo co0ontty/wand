@@ -1,11 +1,11 @@
-import { taskAiVerified, taskHumanAccepted, taskWorkflowStage, type TaskAcceptance, type WandTask } from "../../../task-types";
+import { taskAiVerified, taskCompleted, taskHumanAccepted, taskWorkflowStage, type TaskAcceptance, type WandTask } from "../../../task-types";
 import type { IssueSessionSummary } from "./task-board-repository";
 
 type TaskDeliveryState = Pick<WandTask, "status" | "acceptance" | "verification" | "deliveryRevision">;
 
 /** Work is explicitly submitted for review; idle sessions and archival prove neither stage. */
 export function taskWorkLabel(task: TaskDeliveryState): string {
-  if (taskHumanAccepted(task)) return "已完成";
+  if (taskCompleted(task)) return "已完成";
   if (taskWorkflowStage(task.status) === "review") return "交付已提交";
   if (task.status === "ready") return "等待人工确认";
   if (task.status === "doing") return "执行中";
@@ -16,6 +16,7 @@ export function taskWorkLabel(task: TaskDeliveryState): string {
 
 export function taskReviewLabel(task: TaskDeliveryState): string {
   if (taskHumanAccepted(task)) return "人工已确认";
+  if (taskCompleted(task)) return "独立验收通过 · 已完成";
   if (task.status === "ready" && taskAiVerified(task)) return "AI 已通过 · 等你确认";
   if (taskWorkflowStage(task.status) === "review") return "等待 AI 验收";
   return task.acceptance?.blocker?.trim() ? "有待处理项" : "未验收";
@@ -24,6 +25,7 @@ export function taskReviewLabel(task: TaskDeliveryState): string {
 /** Execution facts and explicit acceptance are orthogonal; never inspect model text. */
 export function taskAcceptanceLabel(acceptance?: TaskAcceptance | null, task?: TaskDeliveryState): string {
   if (task ? taskHumanAccepted(task) : acceptance?.acceptedAt && acceptance.confirmedRevision !== undefined) return "人工已确认 · 已完成";
+  if (task && taskCompleted(task)) return "独立验收通过 · 已自动完成";
   if (task && taskAiVerified(task)) return "AI 已通过 · 等你确认";
   if (acceptance?.acceptedAt) return "历史验收记录 · 待核对";
   if (acceptance?.blocker?.trim()) return "待处理 · 有验收缺口";

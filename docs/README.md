@@ -1,6 +1,6 @@
 # Wand 文档索引
 
-根 [README](../README.md) 是安装与使用入口，[AGENTS.md](../AGENTS.md) 是项目规则真源，[DESIGN.md](../DESIGN.md) 与 [PRODUCT.md](../PRODUCT.md) 分别记录视觉与产品上下文。本页按主题索引 `docs/`；标注「提案」或「历史」的文档不属于当前实现合同。
+根 [README](../README.md) 是安装与使用入口，[AGENTS.md](../AGENTS.md) 记录项目操作与交付边界，[DESIGN.md](../DESIGN.md) 与 [PRODUCT.md](../PRODUCT.md) 分别记录可随需求演进的视觉与产品上下文。当前说明用于理解实现，不自动覆盖新需求；历史报告不是回归验收清单。本页按主题索引 `docs/`；标注「提案」或「历史」的文档不属于当前实现合同。
 
 ## 使用与协作
 
@@ -10,9 +10,9 @@
 
 ## 会话与执行
 
+- [架构参考](architecture-reference.md)：从根规则拆出的实现快照，相关任务按需查阅，不锁定实现路线。
+
 - [服务端接口功能索引](server-api-map.md)：按功能与注册模块梳理 HTTP 接口、共享逻辑和归一化边界。
-- [服务端归一化复查](server-normalization-review.md)：业务层重复、实际分叉修复、保留边界及验证范围。
-- [服务端逐文件复查](server-file-review.md)：44 个装配/路由文件的检查结论、合并依据、保留边界和未闭环项。
 - [tmux 执行与恢复](tmux-execution.md)：CLI 所有权、执行切换与安全重启。
 - [新建会话契约](session-creation.md)：`POST /api/sessions` 的 `kind`、回执与错误语义。
 - [删除会话时清理 CLI 文件](cli-session-cleanup.md)：按 provider 原生 session ID 清理的范围。
@@ -44,6 +44,10 @@
 - [测试策略](testing-policy.md)：分层入口与「测试服务于需求」的取舍。
 
 ## 提案与历史记录
+
+- [服务端归一化复查](server-normalization-review.md)：业务层重复、实际分叉修复、保留边界及验证范围。
+- [服务端逐文件复查](server-file-review.md)：44 个装配/路由文件的检查结论、合并依据、保留边界和未闭环项。
+- [统一会话侧栏验收](../design-qa.md)：2026-10-31 的局部验收，非当前布局规范。
 
 - [Web 更新事务设计提案](web-update-transaction-design.md)：尚未实现的事务式更新合同；当前行为见 `web-updates.md`。
 - [React Generative UI 可行性研究](research/generative-ui-feasibility.md)：历史研究，未进入当前实现范围。

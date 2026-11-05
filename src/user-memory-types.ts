@@ -1,4 +1,4 @@
-/** Single-owner, config-directory-local short-term memory. No credentials or raw tool output. */
+/** Per-employee, config-directory-local short-term memory. No credentials or raw tool output. */
 export const USER_MEMORY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const USER_MEMORY_MAX_EVENTS = 1000;
 export const USER_MEMORY_TEXT_MAX_CHARS = 600;
@@ -34,6 +34,7 @@ export interface UserMemoryState {
 }
 
 export interface UserMemoryView {
+  employeeId: string;
   enabled: boolean;
   retentionDays: number;
   eventCount: number;

@@ -549,4 +549,38 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
   `) },
   { version: 31, name: "task-comment-execution-owner", up: db => db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN execution_task_id TEXT") },
   { version: 32, name: "task-comment-submission-source", up: db => db.exec("ALTER TABLE wand_task_comments ADD COLUMN submission_source TEXT") },
+  { version: 33, name: "employee-execution-prompts", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS execution_prompts (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      employee_id TEXT NOT NULL,
+      record TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_execution_prompts_employee ON execution_prompts(employee_id, sequence DESC);
+  `) },
+  { version: 34, name: "employee-memory-opt-in", up: db => db.exec(`
+    CREATE TABLE employee_memory_state (
+      employee_id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      revision INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at INTEGER NOT NULL DEFAULT 0,
+      source_id INTEGER NOT NULL DEFAULT 0,
+      profile_json TEXT
+    );
+    CREATE TABLE employee_memory_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      text TEXT NOT NULL,
+      dedup_key TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_employee_memory_events ON employee_memory_events(employee_id, id DESC);
+    INSERT INTO employee_memory_state (employee_id, enabled, revision, last_attempt_at, source_id, profile_json)
+      SELECT 'e_wand_default', 0, revision + 1, last_attempt_at, source_id, profile_json FROM user_memory_state WHERE id = 1;
+    INSERT INTO employee_memory_events (id, employee_id, feature, text, dedup_key, created_at)
+      SELECT id, 'e_wand_default', feature, text, dedup_key, created_at FROM user_memory_events;
+    UPDATE user_memory_state SET enabled = 0, revision = revision + 1 WHERE id = 1;
+  `) },
+
 ];

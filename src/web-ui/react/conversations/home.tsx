@@ -25,6 +25,7 @@ import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { WandButton, WandIcon, WandIconButton, WandInput, WandSelect, WandPopover } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_RESULT_SENTENCE_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { ConversationApprovalButton, ConversationMorphIcon, ConversationPanel, ConversationSubmitButton, type ConversationSubmitPhase } from "./controls";
+import { FilePathSuggestions } from "../file-path-suggestions";
 import { pasteFilesInto } from "../composer-paste";
 import { employeeProfile } from "../agents/employee-profile-state";
 import { ConversationDirectory } from "./directory";
@@ -524,7 +525,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           {feedback && feedback !== selected.unavailableReason ? <Typography.Text type="secondary" role="status">{feedback}</Typography.Text> : null}
         </div> : null}
         <div ref={composerSurface} className="conversation-input-wrap" data-editor-expanded={editor.expanded} data-composer-expanded={minimal.expanded}>
-        <Sender ref={sender} value={draft.text} className="conversation-sender" readOnly={!!selected?.unavailableReason || !selected} placeholder={inputPlaceholder} autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 10 }} suffix={false}
+        <FilePathSuggestions identity={draftKey} cwd={layer === "task" ? projects.find(p => p.id === projectId)?.cwd : chatCwd || defaultCwd}><Sender ref={sender} value={draft.text} className="conversation-sender" readOnly={!!selected?.unavailableReason || !selected} placeholder={inputPlaceholder} autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 10 }} suffix={false}
           header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((a, index) => ({ index, name: a.name, sizeLabel: `${a.size} B`, previewUrl: a.previewUrl ?? null }))}
             onRemove={index => teamChatComposer.edit(draftKey, { removeAttachment: index })}/> : null}
           onPaste={pasteFilesInto(addFiles)}
@@ -582,7 +583,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
                 { key: "version", label: "成员版本", children: capturedVersion }, { key: "approval", label: "计划审批", children: selected?.team?.requirePlanApproval === false ? "沿用团队模板自动开工" : "需用户明确批准" }]}/>
             </div>
           </ConversationPanel>
-        </Flex>}/>
+        </Flex>}/></FilePathSuggestions>
         </div>
         {/* 面板外只留真实上下文：用量/执行状态与目录，和新工作页同一行位置。 */}
         <div className="wand-composer-context">

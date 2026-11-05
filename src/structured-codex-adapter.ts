@@ -55,6 +55,10 @@ export class CodexRunner implements StructuredRunnerAdapter {
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
     const launch = buildCodexLaunch(context.session, context.prompt, context.env);
+    context.onSystemPrompt?.("developerInstructions", [
+      { source: "会话角色/规则快照", text: context.session.systemPrompt?.trim() ?? "" },
+      { source: "本轮运行规则与知识快照", text: context.session.runtimeSystemPrompt?.trim() ?? "" },
+    ]);
     const reducer = new CodexAppProtocolReducer(context.session);
     let unparsedStdout = false;
     let protocolEventObserved = false;

@@ -62,6 +62,8 @@ export interface StructuredPermissionRequest {
 export interface StructuredRunnerContext {
   session: SessionSnapshot;
   prompt: string;
+  /** Adapter reports only the actual Wand-owned instruction channel at submission. */
+  onSystemPrompt?(channel: string, parts: import("./execution-prompt-types.js").ExecutionPromptPart[]): void;
   env: NodeJS.ProcessEnv;
   /** Execution-only group boundary; never persisted/projected to session DTOs. */
   modelGroupModels?: readonly string[];

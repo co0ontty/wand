@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import { redactSystemAiText } from "../system-ai-redaction.js";
+import type { SessionSnapshot } from "../types.js";
+import type { ExecutionPromptPart, ExecutionPromptRecord, EmployeeExecutionPrompts } from "../execution-prompt-types.js";
 import { formatGlobalKnowledge, isGlobalKnowledgeInstallation, readGlobalKnowledgeSync, syncGlobalKnowledgeFiles } from "../global-knowledge.js";
 import type { DatabaseSync } from "node:sqlite";
 import type { WandStorage } from "../storage.js";
@@ -16,6 +19,34 @@ const spec = (scope: KnowledgeScope) => scope === "global"
 
 export class KnowledgeRepository {
   constructor(private readonly db: DatabaseSync, private readonly s: WandStorage) {}
+
+  recordExecutionPrompt(session: SessionSnapshot, channel: string, parts: ExecutionPromptPart[], env: NodeJS.ProcessEnv = {}): void {
+    if (!session.employeeId) return;
+    const redact = (value: string): string => {
+      let text = value;
+      for (const [key, secret] of Object.entries(env)) {
+        if (/(?:KEY|TOKEN|PASSWORD|SECRET|AUTH|COOKIE|CREDENTIAL|PROOF)/i.test(key) && secret && secret.length >= 6) text = text.split(secret).join("[已脱敏]");
+      }
+      return redactSystemAiText(text);
+    };
+    const record: ExecutionPromptRecord = {
+      id: crypto.randomUUID(), employeeId: session.employeeId, sessionId: session.id,
+      executedAt: new Date().toISOString(), provider: session.provider ?? "unknown",
+      tool: session.sessionKind === "pty" ? "PTY" : session.structuredState?.engine === "core" ? "Wand Agent" : session.runner ?? "CLI",
+      model: session.selectedModel || "默认模型（未显式指定）", channel,
+      parts: parts.filter(part => part.text.trim()).map(part => ({ source: part.source, text: redact(part.text) })),
+    };
+    this.db.prepare("INSERT INTO execution_prompts(id, employee_id, record) VALUES (?, ?, ?)").run(record.id, record.employeeId, JSON.stringify(record));
+  }
+
+  employeeExecutionPrompts(employeeId: string, before?: number): EmployeeExecutionPrompts {
+    this.#owner("personal", employeeId);
+    const rows = this.db.prepare("SELECT sequence, record FROM execution_prompts WHERE employee_id = ? AND sequence < ? ORDER BY sequence DESC LIMIT 21")
+      .all(employeeId, before ?? Number.MAX_SAFE_INTEGER) as unknown as Array<{ sequence: number; record: string }>;
+    return { employeeId, currentPrompt: redactSystemAiText(this.s.getSiliconEmployeeDefinition(employeeId)?.prompt ?? ""),
+      records: rows.slice(0, 20).map(row => JSON.parse(row.record) as ExecutionPromptRecord),
+      nextCursor: rows.length > 20 ? rows[19].sequence : null };
+  }
 
   #owner(scope: KnowledgeScope, ownerId: string): { name: string; readOnly: boolean } {
     if (scope === "global") {

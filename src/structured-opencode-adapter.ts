@@ -160,6 +160,10 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
 
   private startCli(context: StructuredRunnerContext, observer: StructuredRunnerObserver, major: number): StructuredRunnerExecution {
     const args = buildOpenCodeArgs(context.session, major);
+    context.onSystemPrompt?.("用户消息前缀兜底（非原生系统通道）", [
+      { source: "首轮会话角色/规则快照", text: (context.session.messages?.length ?? 0) <= 1 ? context.session.systemPrompt?.trim() ?? "" : "" },
+      { source: "本轮运行规则与知识快照", text: context.session.runtimeSystemPrompt?.trim() ?? "" },
+    ]);
     const state: OpenCodeTurnState = {
       blocks: [],
       result: "",
