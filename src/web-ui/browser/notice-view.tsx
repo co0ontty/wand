@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { Alert, Button, Card, Flex, Spin, Tag, Typography, theme } from "../react/design-library";
+import { Alert, Button, Card, Flex, Spin, Tag, Typography, theme } from "antd";
 import { WandUiProvider } from "../react/theme";
 import { WandIcon, type WandIconName } from "../react/ui/icons";
 

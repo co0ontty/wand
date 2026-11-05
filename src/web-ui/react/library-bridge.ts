@@ -1,8 +1,8 @@
 import {
-  Alert, Avatar, Badge, Button, Card, Checkbox, Collapse, DatePicker, Descriptions, Dropdown, Empty, Flex,
-  Form, Input, InputNumber, List, Progress, Space, Spin, Tabs, Tag, Timeline, Tooltip, Typography,
-} from "./design-library";
-import { Bubble, FileCard, Sender, Think } from "./x-library";
+  Alert, Avatar, Badge, Button, Card, Checkbox, Collapse, Descriptions, Empty, Flex,
+  Input, InputNumber, List, Space, Spin, Tabs, Tag, Timeline, Tooltip, Typography,
+} from "antd";
+import { FileCard, Sender } from "@ant-design/x";
 import * as ui from "./ui";
 import * as theme from "./theme";
 import * as styles from "./styles";
@@ -10,16 +10,15 @@ import * as motion from "./ui/motion-tokens";
 import * as portal from "./ui/portal-context";
 import * as popup from "./ui/popup-lifecycle";
 
-// Only the current independent IIFE's consumed controls are eagerly shared.
-// The public library barrels keep their exports; unused controls can tree-shake
-// from the cold bundle rather than being retained by a namespace import.
-const antd = { Alert, Avatar, Badge, Button, Card, Checkbox, Collapse, DatePicker, Descriptions, Dropdown, Empty,
-  Flex, Form, Input, InputNumber, List, Progress, Space, Spin, Tabs, Tag, Timeline, Tooltip, Typography };
-const x = { Bubble, FileCard, Sender, Think };
+// Ant Design is the common control system; X supplies only its chat extensions.
+// Share exactly what the team IIFE consumes. Re-export barrels and unused
+// controls would retain extra implementations in this lazy shared module.
+const antd = { Alert, Avatar, Badge, Button, Card, Checkbox, Collapse, Descriptions, Empty,
+  Flex, Input, InputNumber, List, Space, Spin, Tabs, Tag, Timeline, Tooltip, Typography };
+const x = { FileCard, Sender };
 
 const sharedModules: Record<string, object> = {
   antd, "@ant-design/x": x,
-  "design-library": antd, "x-library": x,
   ui, theme, styles,
   "ui/motion-tokens": motion, "ui/portal-context": portal, "ui/popup-lifecycle": popup,
 };

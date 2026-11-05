@@ -51,8 +51,7 @@ export async function createBrowserModuleImportsPlugin(root, production, cssCand
         for (const statement of ast.statements) {
           if (!ts.isImportDeclaration(statement) || !statement.importClause || statement.importClause.isTypeOnly) continue;
           const specifier = statement.moduleSpecifier.text;
-          const library = specifier === "antd" || /(?:^|\/)design-library(?:\.js)?$/.test(specifier) ? "antd"
-            : specifier === "@ant-design/x" || /(?:^|\/)x-library(?:\.js)?$/.test(specifier) ? "@ant-design/x" : null;
+          const library = libraries.has(specifier) ? specifier : null;
           const bindings = statement.importClause.namedBindings;
           if (!library || !bindings || !ts.isNamedImports(bindings)) continue;
           if (statement.importClause.name) throw new Error(`Mixed default/named import not supported: ${specifier}`);

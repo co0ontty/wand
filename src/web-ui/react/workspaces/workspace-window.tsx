@@ -1,5 +1,5 @@
 import { WandButton, WandIconButton, WandIcon, WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator } from "../ui";
-import { Alert, Empty, Flex, Spin, Splitter, Typography } from "../design-library";
+import { Alert, Empty, Flex, Spin, Splitter, Typography } from "antd";
 import { ensureTerminalLibrary } from "../../vendor-loader.js";
 // 活动工作窗口为 split 时取代单例终端槽位：split 节点递归渲染两个窗格和可拖拽 sash，
 // pane 节点只显示窗格标题/窗口控制（不是第二层 Tab）。终端实例来自 terminal-pool，

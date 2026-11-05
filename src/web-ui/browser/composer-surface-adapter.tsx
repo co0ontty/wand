@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { Card } from "../react/design-library";
+import { Card } from "antd";
 import { WandUiProvider } from "../react/theme";
 import { installChatComposerStyles } from "../react/chat-composer-styles";
 

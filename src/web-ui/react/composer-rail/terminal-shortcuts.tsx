@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { Button, Flex } from "../design-library";
+import { Button, Flex } from "antd";
 import { WandButton } from "../ui/button.js";
 import { WandIcon } from "../ui/icons.js";
 import { WandPopover } from "../ui/popover.js";

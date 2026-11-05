@@ -38,7 +38,7 @@ const CHUNK_FILES = new Set([
 ]);
 const HOST_PACKAGES = new Set(["react", "react/jsx-runtime"]);
 const SHARED_LIBRARY_KEYS = new Set([
-  "ui", "theme", "styles", "design-library", "x-library",
+  "ui", "theme", "styles",
   "ui/motion-tokens", "ui/portal-context", "ui/popup-lifecycle",
 ]);
 const HOST_NAMESPACE = "wand-ai-teams-host";
