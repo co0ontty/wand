@@ -83,6 +83,8 @@ function outputEventShapeMismatch(
 
 interface WsClient {
   ws: WebSocket;
+  sessionToken?: string;
+  isAuthorized(): boolean;
   sendQueue: string[];
   /** Bytes currently held in sendQueue; bounded by MAX_QUEUE_BYTES. */
   queuedBytes: number;
@@ -155,14 +157,15 @@ export class WsBroadcastManager {
 
   private getCardDefaults: () => CardExpandDefaults;
   private useHttps: boolean;
-  private authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession">>;
+  private authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession" | "onRevokeSession" | "onRevokeAll">>;
+  private readonly authDisposers: Array<() => void> = [];
   private authenticateRequest?: (req: IncomingMessage) => boolean;
 
   constructor(
     wss: WebSocketServer,
     getCardDefaults?: () => CardExpandDefaults,
     useHttps = false,
-    authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession">>,
+    authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession" | "onRevokeSession" | "onRevokeAll">>,
     authenticateRequest?: (req: IncomingMessage) => boolean,
   ) {
     this.wss = wss;
@@ -170,6 +173,14 @@ export class WsBroadcastManager {
     this.useHttps = useHttps;
     this.authService = authService;
     this.authenticateRequest = authenticateRequest;
+    const single = authService?.onRevokeSession?.((token) => {
+      for (const client of this.clients) {
+        if (client.sessionToken === token) this.discardClient(client, true);
+      }
+    });
+    const all = authService?.onRevokeAll?.(() => this.disconnectAll());
+    if (single) this.authDisposers.push(single);
+    if (all) this.authDisposers.push(all);
   }
 
   /** Immediately disconnect all authenticated clients after global revocation. */
@@ -183,6 +194,8 @@ export class WsBroadcastManager {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const dispose of this.authDisposers) dispose();
+    this.authDisposers.length = 0;
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
@@ -214,6 +227,12 @@ export class WsBroadcastManager {
 
       const client: WsClient = {
         ws,
+        sessionToken: cookieOk ? sessionToken : undefined,
+        // Pin the credential selected at handshake: revoked cookies cannot fall
+        // through to a different credential carried on the original request.
+        isAuthorized: cookieOk
+          ? () => !!this.authService?.validateSession(sessionToken)
+          : () => !!this.authenticateRequest?.(req),
         sendQueue: [],
         queuedBytes: 0,
         sendInProgress: false,
@@ -242,6 +261,7 @@ export class WsBroadcastManager {
       });
 
       ws.on("message", (data) => {
+        if (!this.authorizeClient(client)) return;
         // 任意应用层消息都说明对端还在，先刷新心跳计时。
         client.lastSeenAt = Date.now();
         try {
@@ -348,6 +368,7 @@ export class WsBroadcastManager {
   private runHeartbeatTick(): void {
     const now = Date.now();
     for (const client of this.clients) {
+      if (!this.authorizeClient(client)) continue;
       if (client.ws.readyState !== WebSocket.OPEN) {
         // 已经不是 OPEN 了，close handler 通常会清理；这里兜底防止集合里
         // 留下僵尸 entry。
@@ -602,7 +623,7 @@ export class WsBroadcastManager {
       return turnWindowedEvent;
     };
     for (const client of this.clients) {
-      if (client.ws.readyState !== WebSocket.OPEN) continue;
+      if (!this.authorizeClient(client) || client.ws.readyState !== WebSocket.OPEN) continue;
       if (isRawPtyOutput && !client.ptySubscriptions.has(event.sessionId)) continue;
 
       const subscription = client.ptySubscriptions.get(event.sessionId);
@@ -688,6 +709,7 @@ export class WsBroadcastManager {
    * 关闭它（它重连后会拿到完整 init），不在内存里无限积压。返回 false 表示已丢弃该客户端。
    */
   private enqueueFrame(client: WsClient, frame: string): boolean {
+    if (!this.authorizeClient(client)) return false;
     const bytes = Buffer.byteLength(frame);
     if (client.queuedBytes + bytes > MAX_QUEUE_BYTES) {
       this.discardClient(client, false);
@@ -699,10 +721,22 @@ export class WsBroadcastManager {
     return true;
   }
 
+  private authorizeClient(client: WsClient): boolean {
+    if (this.disposed || !this.clients.has(client)) return false;
+    if (client.isAuthorized()) return true;
+    this.discardClient(client, true);
+    return false;
+  }
+
   private discardClient(client: WsClient, terminate: boolean): void {
     client.sendQueue.length = 0;
     client.queuedBytes = 0;
     client.pendingResyncSessions.clear();
+    for (const subscription of client.ptySubscriptions.values()) {
+      if (subscription.resyncTimer) clearTimeout(subscription.resyncTimer);
+    }
+    client.ptySubscriptions.clear();
+    client.toolNamesBySession.clear();
     client.sendInProgress = false;
     client.backpressurePaused = false;
     this.clients.delete(client);
@@ -762,13 +796,14 @@ export class WsBroadcastManager {
   }
 
   private sendPtyError(client: WsClient, sessionId: string, error: unknown): void {
+    if (!this.authorizeClient(client)) return;
     if (client.ws.readyState !== WebSocket.OPEN) return;
     const message = error instanceof Error ? error.message : String(error);
     client.ws.send(JSON.stringify({ type: "pty_error", sessionId, error: message }));
   }
 
   private processWsQueue(client: WsClient): void {
-    if (this.disposed) return;
+    if (!this.authorizeClient(client)) return;
     if (client.sendInProgress || client.sendQueue.length === 0) {
       return;
     }

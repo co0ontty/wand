@@ -58,7 +58,17 @@ export class AuthService {
   private disposed = false;
   private readonly revokeAllListeners = new Set<() => void>();
 
-  onRevokeAll(listener: () => void): void { this.revokeAllListeners.add(listener); }
+  private readonly revokeListeners = new Set<(token: string) => void>();
+
+  onRevokeAll(listener: () => void): () => void {
+    this.revokeAllListeners.add(listener);
+    return () => { this.revokeAllListeners.delete(listener); };
+  }
+
+  onRevokeSession(listener: (token: string) => void): () => void {
+    this.revokeListeners.add(listener);
+    return () => { this.revokeListeners.delete(listener); };
+  }
 
   constructor(
     private readonly storage: WandStorage,
@@ -90,10 +100,9 @@ export class AuthService {
         this.sessions.set(token, cached);
       }
     }
-    if (!cached || cached.expiresAt < Date.now()) {
+    if (!cached || cached.expiresAt <= Date.now()) {
       if (cached) {
-        this.sessions.delete(token);
-        this.storage.deleteAuthSession(token);
+        this.revokeSession(token);
       }
       return null;
     }
@@ -113,6 +122,7 @@ export class AuthService {
     if (!token || this.disposed) return;
     this.sessions.delete(token);
     this.storage.deleteAuthSession(token);
+    for (const listener of this.revokeListeners) listener(token);
   }
 
   revokeAllSessions(): void {
@@ -129,13 +139,14 @@ export class AuthService {
     this.sessions.clear();
     for (const listener of this.revokeAllListeners) listener();
     this.revokeAllListeners.clear();
+    this.revokeListeners.clear();
   }
 
   private cleanupExpiredSessions(): void {
     if (this.disposed) return;
     const now = Date.now();
     for (const [token, cached] of this.sessions) {
-      if (cached.expiresAt < now) this.sessions.delete(token);
+      if (cached.expiresAt <= now) this.revokeSession(token);
     }
     this.storage.deleteExpiredAuthSessions(now);
   }

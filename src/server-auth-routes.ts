@@ -146,7 +146,8 @@ export function registerAuthRoutes(app: Express, deps: AuthRouteDependencies): v
         return;
       }
       if (password !== effectivePassword) {
-        if (!appToken) recordFailedPassword(clientIp);
+        // Token-only retries do not guess a password; mixed requests do.
+        if (!appToken || password !== undefined) recordFailedPassword(clientIp);
         res.status(401).json({ error: "密码错误，请重试。", code: "invalid_credentials" });
         return;
       }
