@@ -203,6 +203,19 @@ export class SessionRepository {
     });
   }
 
+  /** Ownership probes must not hydrate transcripts or trigger legacy migration. */
+  hasSession(id: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM command_sessions WHERE id = ?").get(id);
+  }
+
+  /** Startup discovery only needs IDs, including archived records still running. */
+  runningPtySessionIds(): string[] {
+    const rows = this.db.prepare(`SELECT id FROM command_sessions
+      WHERE status = 'running' AND COALESCE(session_kind, 'pty') = 'pty'
+      ORDER BY started_at DESC`).all() as Array<{ id: string }>;
+    return rows.map(row => row.id);
+  }
+
   getSessionDisplaySnapshot(id: string): SessionSnapshot | null {
     const fields = sessionSelectFields(false).replace(/\bmessages,/, "NULL AS messages,");
     const row = this.db.prepare(`SELECT ${fields} FROM command_sessions WHERE id = ?`).get(id) as SessionRow | undefined;

@@ -456,9 +456,7 @@ export async function startServer(
     config,
     repositoryUrl: PKG_REPO_URL,
   });
-  const knownPtySessionIds = storage.loadSessions()
-    .filter((session) => (session.sessionKind ?? "pty") === "pty" && session.status === "running")
-    .map((session) => session.id);
+  const knownPtySessionIds = storage.sessions.runningPtySessionIds();
   const useTmux = tmuxEnabled();
   // tmux owns new executions by default. Legacy/Render only connect when they
   // already own work; disabling tmux starts the configured daemon backend.

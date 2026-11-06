@@ -176,7 +176,7 @@ export class SessionRegistry {
   ownerOf(id: string): SessionOwner | null {
     if (this.structured.get(id)) return "structured";
     if (this.processes.getOwned(id)) return "pty";
-    return this.storage.getSession(id) ? "storage" : null;
+    return this.storage.sessions.hasSession(id) ? "storage" : null;
   }
 
   get(id: string): SessionSnapshot | null {
