@@ -1,6 +1,6 @@
 # 后端整改记录（2026-11-06）
 
-本轮授权：只改源码、隔离验证和 Git 提交/push；不打 tag、不部署、不重启实际 Wand/客户端，不调用真实付费模型。真实服务最终验收尚未通过：需要部署新版本，用户本轮明确禁止部署/重启。
+本轮授权：只改源码、隔离验证和 Git 提交/push；不打 tag、不部署、不重启实际 Wand/客户端，不调用真实付费模型。真实服务最终验收尚未通过：需要部署新版本，本轮尚未获得部署/重启授权。
 
 ## 输入与基线
 
@@ -49,4 +49,19 @@
 - `tsx output/dot-backend-review-2026-11-06/query-fixture.mts`：通过；临时 SQLite 固定 80 会话、2 running（其中 1 structured）、包含 archived running，历史从每会话 0 到 20,000 字符。旧发现加载消息 80 次，窄查询 0 次；旧发现 49.892/81.453 ms，新查询 0.044/0.154 ms；80 次 owner 查询旧 4.348/8.049 ms，新 0.515/0.444 ms。缺失会话返回 null。
 - 这是单进程合成微基准，不是全服务启动收益；maxRSS 是同一进程累计峰值（约 113–132 MiB），不能据此声称节省了多少内存。
 - Q2 记录 40/500 turn 简单文本的投影、二次 enrich、cache hit 与无关设置写入：500 turn 依次约 0.337/0.251/0.081/0.197 ms。简单文本二次 enrich 等价，但尚不足以覆盖跨 turn 决策、迟到结果、图片/compact/窗口边界；本轮不据此删除 enrich 或重写缓存。A2 同样没有生命周期基线支持拆整层；只通过本批窄 repository 查询减少读取面。
-- 本批 `npm run typecheck`、`npm run check`、`npm run build` 通过；文档末尾空行导致首次 `git diff --check` 失败，修正后重跑。
+- 本批 `npm run typecheck`、`npm run check`、`npm run build` 通过；文档末尾空行导致首次 `git diff --check` 失败，修正后重跑通过。
+
+## 第五批：K1 统一写入与受支持调用方
+
+修改 `src/storage/knowledge-repository.ts`、`src/storage/employees-repository.ts`、`src/server-employee-routes.ts`、`src/employee-knowledge-cli.ts`、`src/employee-knowledge-types.ts`、`src/web-ui/react/knowledge/repository.ts`、`src/web-ui/react/agents/employee-knowledge.tsx`。
+
+- EmployeeRepository 保留兼容方法，但委托 KnowledgeRepository 创建/删除；不再直接写 employee_knowledge。旧读 DTO 增加 revision，保持按创建时间倒序、正文 Unicode 搜索、去重与配额。
+- 旧单条 DELETE 接受 `{revision}`，缺失/过期 revision 返回明确 409；CLI legacy capability 分支同样转交 `--revision`，不跳过版本检查。权限/员工选择不变。
+- 旧批量 DELETE 接受 `{entries:[{id,revision}]}`。事务内先验证整份快照再删除；任何条目冲突整批回滚；提交前新增加但不在快照中的知识保留，响应返回真实剩余列表，不冒充清空。空快照不删任何条目；缺快照不执行。
+- Web `EmployeeKnowledge.clear` 现在传入已读取的 `view.entries`，namespace 不匹配不提交；共享 repository 序列化 id/revision。更新确认说明，不改变控件或动效。普通 Web 单条删除原本已走新 API 并携带 revision。
+- 本机已检出 Android：`android/app/src/main/java/com/wand/app/data/WandApi.kt:184–199`；iOS：`ios/Wand/KnowledgeLibrary.swift:84–123`；macOS：`macos/Wand/KnowledgeLibrary.swift:84–123`，均走 `/api/knowledge`，删除已携带 revision，未发现旧知识删除/清空调用，无需为本批改客户端或构建原生包。此为源码兼容核对，不是原生运行验收。
+- 未知历史客户端仍可能调用旧无 revision 删除，安全契约是返回 409、保留数据，需读取并提交 revision；不静默采用服务端最新版本代删，也不宣布旧 API 退役。
+
+验证：`tsx output/dot-backend-review-2026-11-06/knowledge-fixture.mts` 通过。临时数据库和回环 HTTP，真实新旧路由、Web repository、CLI 子进程：旧读→新改→旧删 409；新旧正常添加/删除；Web 普通删除和清空快照；新增条目保留；整批冲突原子性；跨员工拒绝；Unicode 搜索；重复正文；200 条配额；旧/新 capability CLI 正常删除；修改后旧 capability 迟到写入被拒；员工删除后写入被拒。未读取任何真实员工知识或聊天。
+
+本批 `npm run typecheck` 初次发现 Web 调用方缺 snapshot 参数，修正真实组件调用后 `typecheck`、`check`、`build` 全通过，`git diff --check` 通过。真实安装服务 / 浏览器按钮 / 原生运行验收未运行，受本轮未部署限制。

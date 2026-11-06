@@ -29,10 +29,10 @@ export function EmployeeKnowledge({ employeeId, active, disabled = false, onOpen
   }, [active, employeeId, refresh]);
   React.useEffect(() => { setPending(false); }, [employeeId, active]);
   const clear = async (): Promise<void> => {
-    if (!view || pending) return;
+    if (!view || view.scope !== "personal" || view.ownerId !== employeeId || pending) return;
     if (!armed) { setArmed(true); return; }
     setPending(true); setError("");
-    try { await knowledgeRepository.clearPersonal(employeeId); }
+    try { await knowledgeRepository.clearPersonal(employeeId, view.entries); }
     catch (cause) { if (owner.current === employeeId) setError(cause instanceof Error ? cause.message : "清空失败，请重试。"); }
     finally { if (owner.current === employeeId) { setPending(false); setArmed(false); } }
   };
@@ -48,7 +48,7 @@ export function EmployeeKnowledge({ employeeId, active, disabled = false, onOpen
         <WandButton size="small" kind="ghost" disabled={pending} onClick={() => setRefresh(value => value + 1)}>刷新知识</WandButton>
         <WandButton size="small" kind="ghost" disabled={!view?.total || pending} onClick={() => void clear()}>{pending ? "处理中…" : armed ? "确认清空" : "清空知识库"}</WandButton>
       </Flex>
-      {armed && <Typography.Text type="secondary">再次点击确认，只清空此员工的知识库。</Typography.Text>}
+      {armed && <Typography.Text type="secondary">再次点击确认，只删除此员工当前已读取的知识；之后新增的条目会保留。</Typography.Text>}
       {error && <Alert type="error" showIcon role="alert" title={error}/>}
     </Flex>
   </Card>;

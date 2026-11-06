@@ -80,9 +80,9 @@ export async function runEmployeeKnowledgeCli(command: string, args: string[]): 
         { content, title: opts.title ?? previous.title, folder: opts.folder ?? previous.folder }, token) };
     } else if (command === "knowledge:forget") {
       if (opts.stdin || opts.title !== undefined || opts.folder !== undefined || opts.positional.length !== 1) throw new Error("用法：knowledge:forget <id> --revision <读取的版本>。");
-      if (legacy) result = { deleted: storage.forgetEmployeeKnowledge(legacy, id!, token) };
+      if (opts.revision === undefined) throw new KnowledgeError("删除文档必须传入 --revision，请先读取并核对。");
+      if (legacy) result = { deleted: storage.forgetEmployeeKnowledge(legacy, id!, token, opts.revision) };
       else {
-        if (opts.revision === undefined) throw new KnowledgeError("删除文档必须传入 --revision，请先读取并核对。");
         storage.deleteKnowledgeDocument(opts.scope, ownerId, id!, opts.revision, token);
         result = { deleted: true };
       }

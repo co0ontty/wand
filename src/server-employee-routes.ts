@@ -39,6 +39,7 @@ import type { TaskExecutionQueue } from "./task-execution-queue.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, WandConfig } from "./types.js";
 import { badRequest } from "./http-error.js";
+import { KnowledgeError } from "./knowledge-types.js";
 import { systemAiSessions } from "./system-ai-session-recorder.js";
 
 export function parseSystemSessionLimit(value: unknown, existing?: SiliconEmployee | null): number | null {
@@ -88,6 +89,10 @@ export interface EmployeeDraftRequest {
 }
 
 function sendEmployeeError(res: Response, error: unknown, context?: { expectation?: string }): void {
+  if (error instanceof KnowledgeError) {
+    res.status(error.status).json({ error: error.message });
+    return;
+  }
   const message = getErrorMessage(error, "硅基员工操作失败。");
   const status = /不存在/.test(message) ? 404 : 400;
   const code = error instanceof SiliconEmployeeDraftError ? error.code : undefined;
@@ -375,7 +380,7 @@ export function registerSiliconEmployeeRoutes(
 
   app.delete("/api/silicon-employees/:id/knowledge/:entryId", (req, res) => {
     try {
-      const deleted = storage.forgetEmployeeKnowledge(req.params.id, req.params.entryId);
+      const deleted = storage.forgetEmployeeKnowledge(req.params.id, req.params.entryId, undefined, req.body?.revision);
       if (!deleted) { res.status(404).json({ error: "该知识不属于当前员工或已删除。" }); return; }
       res.json({ deleted: true });
     } catch (error) { sendEmployeeError(res, error); }
@@ -383,8 +388,10 @@ export function registerSiliconEmployeeRoutes(
 
   app.delete("/api/silicon-employees/:id/knowledge", (req, res) => {
     try {
-      storage.clearEmployeeKnowledge(req.params.id);
-      res.json({ employeeId: req.params.id, entries: [], total: 0, maxEntries: EMPLOYEE_KNOWLEDGE_MAX_ENTRIES });
+      storage.clearEmployeeKnowledge(req.params.id, req.body?.entries);
+      res.json({ employeeId: req.params.id,
+        entries: storage.listEmployeeKnowledge(req.params.id, "", EMPLOYEE_KNOWLEDGE_MAX_ENTRIES),
+        total: storage.countEmployeeKnowledge(req.params.id), maxEntries: EMPLOYEE_KNOWLEDGE_MAX_ENTRIES });
     } catch (error) { sendEmployeeError(res, error); }
   });
 

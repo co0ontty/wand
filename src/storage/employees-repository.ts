@@ -5,8 +5,7 @@ import { DEFAULT_EMPLOYEE_KEY, DEFAULT_MAX_CONCURRENT_TASKS, isBuiltinSiliconEmp
 import { decisionExpertDefinition } from "../decision-expert-employee.js";
 import { DECISION_EXPERT_KEY } from "../decision-expert-identity.js";
 import { defaultEmployeeDefinition, employeeMemoryPrompt, savedDefaultEmployeeBasePrompt } from "../default-employee.js";
-import { normalizeEmployeeKnowledge } from "../employee-knowledge-content.js";
-import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "../employee-knowledge-types.js";
+import type { EmployeeKnowledgeEntry } from "../employee-knowledge-types.js";
 import { FIXED_EMPLOYEE_AVATARS, employeeAvatarValue, fixedEmployeeAvatar, isFixedAvatarEmployee } from "../fixed-employee-avatar.js";
 import { HR_EMPLOYEE_KEY } from "../hr-employee-identity.js";
 import { hrEmployeeDefinition } from "../hr-employee.js";
@@ -240,19 +239,7 @@ export class EmployeeRepository {
   }
 
   listEmployeeKnowledge(employeeId: string, query = "", limit = 20): EmployeeKnowledgeEntry[] {
-    this.requireKnowledgeEmployee(employeeId);
-    const normalizedQuery = query.trim().slice(0, 200).toLowerCase();
-    const boundedLimit = Math.max(1, Math.min(Math.floor(limit), EMPLOYEE_KNOWLEDGE_MAX_ENTRIES));
-    // SQLite lower() is ASCII-only. Load at most this.s employee's fixed quota,
-    // perform Unicode case folding, and apply the result limit after filtering.
-    const rows = this.db.prepare(`SELECT id, employee_id, content, created_at FROM employee_knowledge
-      WHERE employee_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`)
-      .all(employeeId, EMPLOYEE_KNOWLEDGE_MAX_ENTRIES) as
-      Array<{ id: string; employee_id: string; content: string; created_at: string }>;
-    return rows.filter((row) => row.content.toLowerCase().includes(normalizedQuery))
-      .slice(0, boundedLimit).map((row) => ({
-        id: row.id, employeeId: row.employee_id, content: row.content, createdAt: row.created_at,
-      }));
+    return this.s.knowledge.listLegacyEmployeeKnowledge(employeeId, query, limit);
   }
 
   countEmployeeKnowledge(employeeId: string): number {
@@ -262,47 +249,15 @@ export class EmployeeRepository {
   }
 
   rememberEmployeeKnowledge(employeeId: string, value: string, accessToken?: string): EmployeeKnowledgeEntry {
-    const content = normalizeEmployeeKnowledge(value);
-    const hash = crypto.createHash("sha256").update(content).digest("hex");
-    return this.s.transaction(() => {
-      this.requireKnowledgeEmployee(employeeId);
-      if (accessToken && this.resolveEmployeeKnowledgeAccess(accessToken) !== employeeId) {
-        throw new Error("知识库访问已失效，请等待新的会话执行。");
-      }
-      const existing = this.db.prepare("SELECT id, content, created_at FROM employee_knowledge WHERE employee_id = ? AND content_hash = ?")
-        .get(employeeId, hash);
-      if (existing) return { id: String(existing.id), employeeId,
-        content: String(existing.content), createdAt: String(existing.created_at) };
-      if (this.countEmployeeKnowledge(employeeId) >= EMPLOYEE_KNOWLEDGE_MAX_ENTRIES) {
-        throw new Error("该员工知识库已满，请先删除不需要的内容，不会自动丢弃旧知识。");
-      }
-      const entry = { id: `k_${crypto.randomUUID().replace(/-/g, "")}`, employeeId,
-        content, createdAt: new Date().toISOString() };
-      this.db.prepare(`INSERT INTO employee_knowledge (id, employee_id, content, content_hash, created_at)
-        VALUES (?, ?, ?, ?, ?)`).run(entry.id, employeeId, content, hash, entry.createdAt);
-      return entry;
-    });
+    return this.s.knowledge.rememberLegacyEmployeeKnowledge(employeeId, value, accessToken);
   }
 
-  forgetEmployeeKnowledge(employeeId: string, entryId: string, accessToken?: string): boolean {
-    return this.s.transaction(() => {
-      this.requireKnowledgeEmployee(employeeId);
-      if (accessToken && this.resolveEmployeeKnowledgeAccess(accessToken) !== employeeId) {
-        throw new Error("知识库访问已失效，请等待新的会话执行。");
-      }
-      const deleted = this.db.prepare("DELETE FROM employee_knowledge WHERE employee_id = ? AND id = ?")
-        .run(employeeId, entryId).changes === 1;
-      if (deleted) this.s.invalidateKnowledgeNamespace("personal", employeeId);
-      return deleted;
-    });
+  forgetEmployeeKnowledge(employeeId: string, entryId: string, accessToken?: string, revision?: number): boolean {
+    return this.s.knowledge.forgetLegacyEmployeeKnowledge(employeeId, entryId, accessToken, revision);
   }
 
-  clearEmployeeKnowledge(employeeId: string): void {
-    this.s.transaction(() => {
-      this.requireKnowledgeEmployee(employeeId);
-      this.db.prepare("DELETE FROM employee_knowledge WHERE employee_id = ?").run(employeeId);
-      this.s.invalidateKnowledgeNamespace("personal", employeeId);
-    });
+  clearEmployeeKnowledge(employeeId: string, entries?: Array<{ id: string; revision: number }>): void {
+    this.s.knowledge.clearLegacyEmployeeKnowledge(employeeId, entries);
   }
 
   /** Opaque per-execution capability: no employee selector, app token or DB secret in model prompts. */

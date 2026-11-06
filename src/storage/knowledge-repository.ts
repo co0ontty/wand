@@ -7,7 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { WandStorage } from "../storage.js";
 import { isGlobalWorkspace } from "../workspace-binding.js";
 import { normalizeEmployeeKnowledge } from "../employee-knowledge-content.js";
-import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "../employee-knowledge-types.js";
+import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "../employee-knowledge-types.js";
 import { GLOBAL_KNOWLEDGE_MAX_BYTES, GLOBAL_KNOWLEDGE_OWNER_ID, KnowledgeError, type KnowledgeAccess, type KnowledgeDocument, type KnowledgeDocumentInput, type KnowledgeLibrary, type KnowledgeScope } from "../knowledge-types.js";
 
 type Row = { id: string; content: string; title: string; folder: string; revision: number; created_at: string; updated_at: string | null };
@@ -207,6 +207,70 @@ export class KnowledgeRepository {
       this.invalidateKnowledgeNamespace(scope, ownerId);
     });
     if (scope === "global") this.syncGlobalKnowledge();
+  }
+
+  /** Legacy DTO/order/search are adapters; this repository owns all document writes. */
+  listLegacyEmployeeKnowledge(employeeId: string, query = "", limit = 20): EmployeeKnowledgeEntry[] {
+    this.#owner("personal", employeeId);
+    const normalizedQuery = query.trim().slice(0, 200).toLowerCase();
+    const boundedLimit = Math.max(1, Math.min(Math.floor(limit), EMPLOYEE_KNOWLEDGE_MAX_ENTRIES));
+    const rows = this.db.prepare(`SELECT * FROM employee_knowledge WHERE employee_id = ?
+      ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(employeeId, EMPLOYEE_KNOWLEDGE_MAX_ENTRIES) as unknown as Row[];
+    return rows.filter(row => row.content.toLowerCase().includes(normalizedQuery)).slice(0, boundedLimit)
+      .map(row => ({ id: row.id, employeeId, content: row.content, createdAt: row.created_at, revision: row.revision }));
+  }
+
+  #legacyAccess(employeeId: string, accessToken?: string): void {
+    this.#owner("personal", employeeId);
+    if (accessToken && this.s.resolveEmployeeKnowledgeAccess(accessToken) !== employeeId) {
+      throw new KnowledgeError("知识库访问已失效，请等待新的会话执行。", 403);
+    }
+  }
+
+  #legacyRevision(revision?: number): number {
+    if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) {
+      throw new KnowledgeError("删除必须携带读取时的 revision；请重新读取并核对，不会自动删除新版知识。", 409);
+    }
+    return revision;
+  }
+
+  rememberLegacyEmployeeKnowledge(employeeId: string, content: string, accessToken?: string): EmployeeKnowledgeEntry {
+    return this.s.transaction(() => {
+      this.#legacyAccess(employeeId, accessToken);
+      const { entry } = this.createKnowledgeDocument("personal", employeeId, { content });
+      return { id: entry.id, employeeId, content: entry.content, createdAt: entry.createdAt, revision: entry.revision };
+    });
+  }
+
+  forgetLegacyEmployeeKnowledge(employeeId: string, id: string, accessToken?: string, revision?: number): boolean {
+    return this.s.transaction(() => {
+      this.#legacyAccess(employeeId, accessToken);
+      const expected = this.#legacyRevision(revision);
+      const exists = this.db.prepare("SELECT 1 FROM employee_knowledge WHERE employee_id = ? AND id = ?").get(employeeId, id);
+      if (!exists) return false;
+      this.deleteKnowledgeDocument("personal", employeeId, id, expected);
+      return true;
+    });
+  }
+
+  /** Delete only the explicitly reviewed snapshot; concurrent additions survive. */
+  clearLegacyEmployeeKnowledge(employeeId: string, entries?: Array<{ id: string; revision: number }>): void {
+    this.s.transaction(() => {
+      this.#owner("personal", employeeId);
+      if (!Array.isArray(entries) || entries.length > EMPLOYEE_KNOWLEDGE_MAX_ENTRIES) {
+        throw new KnowledgeError("清空必须提供已读取的 entries（id/revision）快照；不会盲删当前全部知识。", 409);
+      }
+      const ids = new Set<string>();
+      for (const entry of entries) {
+        if (!entry || typeof entry.id !== "string" || !entry.id || ids.has(entry.id)) throw new KnowledgeError("知识快照无效。", 409);
+        ids.add(entry.id);
+        const expected = this.#legacyRevision(entry.revision);
+        if (this.getKnowledgeDocument("personal", employeeId, entry.id).revision !== expected) {
+          throw new KnowledgeError("知识快照已变化，请重新读取后确认；未删除任何条目。", 409);
+        }
+      }
+      for (const entry of entries) this.deleteKnowledgeDocument("personal", employeeId, entry.id, entry.revision);
+    });
   }
 
   invalidateKnowledgeNamespace(scope: KnowledgeScope, ownerId: string): void {

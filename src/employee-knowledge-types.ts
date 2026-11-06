@@ -7,6 +7,7 @@ export interface EmployeeKnowledgeEntry {
   employeeId: string;
   content: string;
   createdAt: string;
+  revision: number;
 }
 
 export interface EmployeeKnowledgeView {

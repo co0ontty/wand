@@ -37,8 +37,10 @@ export const knowledgeRepository = {
     await requestJson(`/api/knowledge/${encodeURIComponent(entry.id)}`, jsonBody({ scope: entry.scope, ownerId: entry.ownerId, revision: entry.revision }, "DELETE"));
     notifyKnowledgeChanges(entry);
   },
-  async clearPersonal(ownerId: string): Promise<void> {
-    await requestJson(`/api/silicon-employees/${encodeURIComponent(ownerId)}/knowledge`, { method: "DELETE" });
+  async clearPersonal(ownerId: string, entries: readonly KnowledgeDocument[]): Promise<void> {
+    if (entries.some(entry => entry.scope !== "personal" || entry.ownerId !== ownerId)) throw new Error("知识快照归属不一致，请重新读取。");
+    await requestJson(`/api/silicon-employees/${encodeURIComponent(ownerId)}/knowledge`,
+      jsonBody({ entries: entries.map(({ id, revision }) => ({ id, revision })) }, "DELETE"));
     notifyKnowledgeChanges({ scope: "personal", ownerId });
   },
 };
