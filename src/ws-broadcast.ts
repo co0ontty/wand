@@ -295,7 +295,7 @@ export class WsBroadcastManager {
             if (snapshot) {
               this.sendInit(client, msg.sessionId, snapshot, false);
             } else {
-              ws.send(JSON.stringify({
+              this.sendAuthorizedFrame(client, JSON.stringify({
                 type: "error",
                 sessionId: msg.sessionId,
                 error: "Session not found",
@@ -380,10 +380,10 @@ export class WsBroadcastManager {
         continue;
       }
       try {
-        client.ws.send(JSON.stringify({ type: "ping", t: now }));
+        this.sendAuthorizedFrame(client, JSON.stringify({ type: "ping", t: now }));
       } catch { /* ignore */ }
       try {
-        client.ws.ping();
+        if (this.authorizeClient(client)) client.ws.ping();
       } catch { /* ignore */ }
     }
   }
@@ -506,7 +506,7 @@ export class WsBroadcastManager {
     const terminalState = (snapshot.sessionKind ?? "pty") === "pty"
       ? this.port?.getTerminalState?.(sessionId) ?? undefined
       : undefined;
-    client.ws.send(JSON.stringify({
+    this.sendAuthorizedFrame(client, JSON.stringify({
       type: "init",
       sessionId,
       seq,
@@ -721,6 +721,13 @@ export class WsBroadcastManager {
     return true;
   }
 
+  /** Check at the transport boundary, after snapshot/serialization work. */
+  private sendAuthorizedFrame(client: WsClient, frame: string, callback?: (error?: Error) => void): boolean {
+    if (!this.authorizeClient(client) || client.ws.readyState !== WebSocket.OPEN) return false;
+    client.ws.send(frame, callback);
+    return true;
+  }
+
   private authorizeClient(client: WsClient): boolean {
     if (this.disposed || !this.clients.has(client)) return false;
     if (client.isAuthorized()) return true;
@@ -799,7 +806,7 @@ export class WsBroadcastManager {
     if (!this.authorizeClient(client)) return;
     if (client.ws.readyState !== WebSocket.OPEN) return;
     const message = error instanceof Error ? error.message : String(error);
-    client.ws.send(JSON.stringify({ type: "pty_error", sessionId, error: message }));
+    this.sendAuthorizedFrame(client, JSON.stringify({ type: "pty_error", sessionId, error: message }));
   }
 
   private processWsQueue(client: WsClient): void {
@@ -839,7 +846,7 @@ export class WsBroadcastManager {
 
     for (const msg of batch) {
       try {
-        client.ws.send(msg, settleSend);
+        if (!this.sendAuthorizedFrame(client, msg, settleSend)) return;
       } catch (error) {
         settleSend(error instanceof Error ? error : new Error(String(error)));
       }

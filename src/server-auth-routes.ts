@@ -152,9 +152,11 @@ export function registerAuthRoutes(app: Express, deps: AuthRouteDependencies): v
         return;
       }
       principal = browserAdminPrincipal();
+      // Only proof of the admin password clears its guessing budget. A
+      // restricted app token must not let its holder reset that budget.
+      resetPasswordRateLimit(clientIp);
     }
 
-    resetPasswordRateLimit(clientIp);
     const token = authService.createSession(principal);
     issueSessionCookies(res, token, useHttps);
     res.json({
