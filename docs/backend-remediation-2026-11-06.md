@@ -145,6 +145,59 @@ C4/C5 核对覆盖源码、脚本、CI、文档及已检出 Android/iOS/macOS，
 
 直接以 SQLite readOnly + query_only 打开默认本机数据库，只返回聚合：execution_prompts 9 条、record JSON 合计 69,905 bytes、孤儿员工记录 0；command_sessions 438 条、非空旧 messages 39 条、format_version=1 的 normalized heads 438 条。未输出 prompt/聊天/员工身份/凭据，不运行迁移。单点采样不能计算增长率；存在旧 payload 不等于可删。旧 owner 实时 inventory 与 A1 凭据分布未读取，不以 UI idle 或数据库状态替代真实运行所有权。
 
+## 第八批：隔离运行补验与可追溯重建（仅验收文档提交）
+
+本节更新上文“未尝试运行”的状态，不追溯改写旧产物来源。实现代码 SHA 为 `18819ad6b691daabe4d38558a31f48b4a8836471`；后续本节文档提交不是构建输入，不声称产物由文档提交生成。
+
+### 现有最终安装目录的 PTY 唯一一次尝试
+
+对象：`/tmp/wand-final-production.YJ5Ws0`，安装来源旧 packed-final 包 SHA-256 `2b73de1dd5c085ec2664d222031497eee9ab791ff84634928a57aadf99c98271`（旧 stamp 是 2694a29，不称干净 18819ad 产物）。
+
+`node /tmp/wand-final-production.YJ5Ws0/pty-acceptance.mjs`：**失败**，公开 node-pty API 的 spawn(`/bin/sh`, [`-c`, `printf WAND_PACKED_PTY_OK`]) 抛出 `Error: posix_spawnp failed.`，没有 code 值，退出 1。临时 cwd，env 仅 HOME/TMPDIR/PATH/TERM 合成值，不继承凭据；不接已有会话、不写输入。失败后立即停止，未 chmod、rebuild、执行 lifecycle scripts、另找二进制或重试。日志 `/tmp/wand-final-pty.log`。当前不能从这条错误单独证明具体是权限或缺失文件；不猜测根因。
+
+### 现有 packed 模块真实网络验证
+
+`node /tmp/wand-final-production.YJ5Ws0/network-acceptance.mjs`：**通过**，直接 import 已安装 dist 的 auth/routes/WS/storage；Express/WS 也从生产安装目录解析。临时 SQLite、回环随机端口、fake execution port：HTTP 登录/注销、认证 metadata（显式隔离 fixture 路由）、WS init、允许输入、同 token 两连接撤权、不同 token 隔离、全部撤权、自然 TTL 均通过；有效输入计数 2，未授权输入计数 0。未启动完整生产 server、daemon 或模型。日志 `/tmp/wand-final-network.log`。这是真实网络的 packed 组件集成，不是 source fixture，也不是完整 Web 服务验收。
+
+### 干净实现 SHA 重新构建/打包
+
+构建前后 `git diff --quiet` / tracked status 干净，只保留指定未跟踪目录。执行 `npm run build`、`npm pack --ignore-scripts --pack-destination output/dot-backend-review-2026-11-06/packed-18819ad --json`：通过。
+
+- 实现 SHA：`18819ad6b691daabe4d38558a31f48b4a8836471`
+- 包：`output/dot-backend-review-2026-11-06/packed-18819ad/co0ontty-wand-4.107.1.tgz`
+- SHA-256：`5f6f1f5d964b36ee2023f3877cd86471d4923a6963606a56e312c1d52473ec41`
+- 包内 `dist/build-info.json`：commit 同上，builtAt `2026-11-06T01:12:56.146Z`，version `4.107.1`，channel `stable`。channel 是构建元数据，不代表发布。
+
+未重新 npm install。新包解压到 `/tmp/wand-final-production.YJ5Ws0/artifact-18819ad/package/`，使用上级已存在的临时生产 node_modules。只更换受验包代码，不借用其他原生二进制，不再次尝试 PTY。
+
+- `node .../network-acceptance.mjs ./artifact-18819ad/package/`：新包真实网络流程通过；日志 `/tmp/wand-18819ad-network.log`。
+- `node .../artifact-18819ad/package/artifact-smoke.mjs` 与已缓存 `npm exec --offline --yes --package=node@22.19.0 -- node .../artifact-smoke.mjs`：Node 24.21.0 / 22.19.0 均通过；强断言包内 stamp、显式 SDK/marked 和全部 Pi pins、生产依赖解析、临时 SQLite/auth/metadata、packed Markdown 标题/强调/表格/代码及危险 HTML/URL。日志 `/tmp/wand-18819ad-smoke24.log`、`/tmp/wand-18819ad-smoke22.log`。
+- 新包没有重复干净安装；其依赖沿用先前已核验临时目录。旧包安装证据与新包代码运行证据分别记录，不能混称一次全新 lifecycle 安装。
+
+### 已配置扩展入口与实际加载边界
+
+只读取资源 manifest 和有界扩展源码，未 import 执行以下入口。12 项配置中 `@sentiolabs/pi-frontend-design` 无扩展入口，其余 11 个声明为：
+
+| 包/版本 | 相对包根的入口 |
+| --- | --- |
+| pi-web-access 0.42.0 | `dist`（已发现 index.js 与 mcp-cli.js，具体目录发现规则仍须沿 Pi loader 核对） |
+| pi-subagents 0.79.1 | `index.js`，按 env 动态导入 extension/index 或 herdr bridge |
+| @juicesharp/rpiv-todo 2.13.9 | `index.ts` |
+| pi-image-paste 1.0.0 | `src/index.ts` |
+| pi-dynamic-workflows 1.0.1 | `extensions/workflow.ts` |
+| @injaneity/pi-computer-use 0.5.1 | `extensions`（computer-use.ts） |
+| pi-advisor 0.3.0 | `index.ts` |
+| pi-team 0.6.11 | `src/index.ts` |
+| pi-goal-x 0.32.3 | `extensions/goal.ts` |
+| pi-cc-extensions 1.0.8 | `extensions/index.ts` |
+| pi-context-view 0.7.2 | `src/index.ts` |
+
+具体源码证据：pi-advisor/index.ts:213 初始化 loadConfig，session_start 重新读取配置并调整工具注册；pi-team/src/index.ts:260 的 session_start 枚举 cwd 团队运行、读状态并启动 monitor；pi-web-access/dist/index.js 包含 fetchWithCredentialRedirects、curl spawn、gh execFile 与环境/配置路径；computer-use.ts 注册 launch_browser 和系统 UI 操作并处理 session_start；image-paste 注册 session_start/input/shutdown；workflow 注册工具并在 session_start 修改活动工具集合。这里不是说所有行为都在 import 时立即发生，而是加载+生命周期不是无副作用静态读取。仅换 HOME 也不足以证明转义绝对路径、OS 凭据或子进程副作用被阻断。
+
+最小许可请求：允许逐个入口在临时 HOME/agentDir/cwd、无凭据环境且有实际网络/子进程阻断的隔离进程中做注册加载（不用真实 session_start/工具调用），按结果再申请必要生命周期。尚未建立并验证此阻断环境，因此未加载；不能把“manifest 可读 / SDK 可导入”写成实际扩展加载通过，也不使用加载检查派发 agent 或付费模型。
+
+结论：新包隔离网络已通过；PTY 已真实尝试并失败；扩展注册执行、浏览器完整功能和真实服务未验。四项 lifecycle scripts 仍未执行。D4 不继续换 fetch 或删除显式 SDK，等待用户具体选择。整体仍未通过，不进入 Prediction。
+
 ## 监督范围更新
 
 Prediction/预测下一条后续操作暂停：不实现、不登记新任务、不派发，不以其他路径或会话替代。MCP Apps 保留/下线未定，暂不修改。继续范围限于不相关的 K1、依赖和有界清理。K2 retention、凭据存储迁移及兼容后端退役仍不执行删除或生命周期变更。
