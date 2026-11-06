@@ -81,7 +81,6 @@
     "multer": "^2.1.1",
     "neo-blessed": "^0.2.0",
     "node-pty": "^1.1.0",
-    "pi-agent-browser-native": "^0.9.6",
     "stream-chain": "4.2.5",
     "stream-json": "3.7.0",
     "ws": "^8.19.0"

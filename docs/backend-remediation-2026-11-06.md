@@ -65,3 +65,17 @@
 验证：`tsx output/dot-backend-review-2026-11-06/knowledge-fixture.mts` 通过。临时数据库和回环 HTTP，真实新旧路由、Web repository、CLI 子进程：旧读→新改→旧删 409；新旧正常添加/删除；Web 普通删除和清空快照；新增条目保留；整批冲突原子性；跨员工拒绝；Unicode 搜索；重复正文；200 条配额；旧/新 capability CLI 正常删除；修改后旧 capability 迟到写入被拒；员工删除后写入被拒。未读取任何真实员工知识或聊天。
 
 本批 `npm run typecheck` 初次发现 Web 调用方缺 snapshot 参数，修正真实组件调用后 `typecheck`、`check`、`build` 全通过，`git diff --check` 通过。真实安装服务 / 浏览器按钮 / 原生运行验收未运行，受本轮未部署限制。
+
+## 第六批：D1/D2 直接依赖清理
+
+- 仅移除 Wand 的 `pi-agent-browser-native` 直接依赖；manifest/lock 共删除 65 行、3 个安装位置，不改全局 Pi 或用户独立扩展。仓库源码、脚本、CI、文档及三个 bin 名无消费者；本机资源配置无该包和 Wand node_modules 路径引用；对 12 项已配置扩展包做有界源码核验（1,199 文件），无候选引用。未读取私人聊天、知识正文、auth.json 或 models.json。
+- 解除该包 Node >=24.21.0 与 Wand >=22.19.0 的直接声明冲突；不提高 Wand 最低版本。未声称整个传递闭包已全面通过最低版本验证。
+- `npm uninstall pi-agent-browser-native --ignore-scripts --no-audit --no-fund`：移除 3 包；`npm run typecheck`、`npm run check`、`npm run build`、`git diff --check` 通过。
+- `npm pack --ignore-scripts --pack-destination output/dot-backend-review-2026-11-06/packed-d1 --json`：通过。随机 `/tmp/wand-d1-production.*` 中干净 `npm install --omit=dev --no-audit --no-fund <tgz>`：安装 214 包成功。npm 报告 node-pty/esbuild/@google/genai/protobufjs 四项安装脚本尚未 allow；未批准、绕过或重试脚本执行。
+- packed CLI `--help`、server/storage/auth/ws-broadcast/models 模块导入、临时 SQLite、认证创建/撤销及 Q1 查询：Node 24.21.0 与最低 Node 22.19.0 均通过；证据脚本 `output/dot-backend-review-2026-11-06/packed-smoke.mjs`。22.19.0 通过隔离 npm exec 获取，未更改全局 Node 或服务配置。
+- 未完成：packed 服务 HTTP/WS 全流程、node-pty 实际 spawn、已配置扩展实际加载及真实服务验收；不能把导入通过等同于这些流程通过。安装脚本权限保持原样。
+- C5 两个兼容 shim 暂留：仓内无引用，但发布包公开 deep-import 外部消费者尚未核实。D3/D4 尚未改动。
+
+## 监督范围更新
+
+Prediction/预测下一条后续操作暂停：不实现、不登记新任务、不派发，不以其他路径或会话替代。MCP Apps 保留/下线未定，暂不修改。继续范围限于不相关的 K1、依赖和有界清理。K2 retention、凭据存储迁移及兼容后端退役仍不执行删除或生命周期变更。
