@@ -63,7 +63,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.81.0",
+    "@anthropic-ai/sdk": "0.129.0",
     "@earendil-works/chord": "1.0.2",
     "@earendil-works/pi-agent-core": "1.0.2",
     "@earendil-works/pi-ai": "1.0.2",

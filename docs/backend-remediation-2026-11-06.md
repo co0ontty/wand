@@ -76,6 +76,75 @@
 - 未完成：packed 服务 HTTP/WS 全流程、node-pty 实际 spawn、已配置扩展实际加载及真实服务验收；不能把导入通过等同于这些流程通过。安装脚本权限保持原样。
 - C5 两个兼容 shim 暂留：仓内无引用，但发布包公开 deep-import 外部消费者尚未核实。D3/D4 尚未改动。
 
+## 第七批：依赖与最终回归复核
+
+### D3：保留 marked 生产依赖（未提交分类变更）
+
+源码仅 Web 聊天 Markdown 与文件预览直接引用，浏览器构建 bundle:true；不能因此推断所有已发布叶模块均无运行依赖。最终 packed artifact 含 `dist/web-ui/markdown.js`（bare marked import）及 `.d.ts`（只引用 MessageFileContext，不直接 import marked）。manifest 发布 dist 且无 exports 封装；未取得明确的叶模块支持/退役契约。本轮选择保留显式生产依赖 ^18.0.14，不删除路径、不借 Pi 的 marked 18.0.11 hoist。此为有界兼容取舍，不宣称已证明后端入口需要 marked，也不把所有 dist 叶模块永远锁定为公共 API。
+
+分类实验的 npm 命令曾解析到 18.1.3；已恢复原 18.0.14 和原范围，最终 diff 无 marked 改动。`markdown-fixture.mts` 的聊天/预览标题、强调、代码、表格、相对文件、恶意 HTML/链接通过。首次 fixture 表格断言漏考虑 class，修正断言后通过。最终生产包真实 markdown.js 导入和表格渲染通过。浏览器资产打包/预算通过，真实浏览器功能验收未运行，不以源码 fixture 代替。
+
+### D4：显式 Anthropic SDK 对齐
+
+package.json/package-lock.json 将直接 SDK 从 ^0.81.0 对齐到精确 0.129.0，与 Pi AI 1.0.2 的要求一致；锁图由两份变一份。八项 @earendil-works/* 1.0.2 pins 逐项对比未改。模型目录生产适配器源码未改，保留 CLI/Core 隔离。
+
+`HOME=<新临时空目录> tsx output/dot-backend-review-2026-11-06/sdk-fixture.mts`：本地 HTTP + fake commandRunner，无真实 CLI/付费模型：
+- 真实生产 ModelCatalogService + 默认 SDK 适配器：baseURL 子路径、两页 auto-pagination；401 fallback（1 请求），429/500 fallback（各 3 请求，包含 SDK 默认重试）通过。
+- SDK timeout=40ms/maxRetries=0，经现有 modelsApi 注入接入真实目录服务：超时、连接断开均保留持久缓存，通过。这是短超时 fixture，不宣称生产默认十分钟 timeout 已实等完。
+- 无凭据请求在网络发送前拒绝。初次错误假设构造函数立刻拒绝，实际校验在发请求时；修正 fixture 后通过。
+
+### 最终产物和回归
+
+- `npm run typecheck`、`npm run check`、`npm run build`：通过，日志 `/tmp/wand-final-{typecheck,check,build}.log`。
+- `/tmp/wand-security-review/review.mts`、本机 `security-fixture.mts`、`query-fixture.mts`、`knowledge-fixture.mts`：最终依赖变更后全部退出 0；日志 `/tmp/wand-final-{security,http-security,query,knowledge}.log`。本机最终复跑当前独立 review.mts 为 18/18（日志已逐项读取核对）；监督另确认 Q1 owner 优先级等检查。
+- `npm pack --ignore-scripts`：1,141 文件，8,115,816 bytes（解包 19,767,430 bytes）。清单 `/tmp/wand-final-pack.json`，包在 `output/dot-backend-review-2026-11-06/packed-final/`。
+- `/tmp/wand-final-production.YJ5Ws0` 全新 `npm install --omit=dev --ignore-scripts --no-audit --no-fund <tgz>`：213 包；明确跳过脚本，不宣称完整生命周期安装通过。
+- 最终生产包 Node 22.19.0 / 24.21.0：server/models/ws 导入、临时 SQLite、auth create/revoke、Q1 查询通过。ESM 逐项解析全部直接生产依赖均在临时目录，固定 Pi SDK import 通过（不是扩展实际加载）。初次以 require.resolve 检查 ESM-only Pi 报 ERR_PACKAGE_PATH_NOT_EXPORTED，改用真实 ESM 解析后通过，不是产品故障。失败发生在同一 bash 调用的第三段 CJS 解析检查，不是此前两个 Node 版本的 packed-smoke.mjs；后者均退出 0。packed-smoke 修改仅允许传最终目录路径，未移除断言。
+- 实际 PTY spawn、实际配置扩展加载、真实已安装服务和浏览器验收未运行。没有借其他目录二进制、手动跑安装脚本、改 npm allowScripts 或换安装器。
+
+### 安装脚本授权请求（未执行）
+
+已向监督提交，等待用户明确许可；拟仅限临时验收安装，源码来自 npm lock 所记 registry.npmmirror.com：
+
+| 包 | 精确命令 | 行为与风险 |
+| --- | --- | --- |
+| node-pty 1.1.0 | `node scripts/prebuild.js || node-gyp rebuild`；`node scripts/post-install.js` | 检查 prebuild，必要时编译；清理包内 build/Release 非保留文件。可能下载 Node headers / 写编译缓存。 |
+| esbuild 0.28.2 | `node install.js` | 配置并校验二进制，缺失时可能 npm 或 registry.npmjs.org 下载，写包内文件并运行版本检查。 |
+| @google/genai 2.21.0 | `echo 'preinstall: no-op'` | 只输出提示。 |
+| protobufjs 7.6.6 | `node scripts/postinstall` | 读包元数据并打印版本兼容警告。 |
+
+未设置全局/持久白名单。原目录 `/tmp/wand-d1-production.DKHPug`，最终目录如上；编译/下载可能写用户缓存，不能声称所有副作用只在临时目录。收到授权前不执行；实际 PTY 如获准也只新建隔离子进程，绝不向真实 owner 输入。
+
+## 原报告逐项状态（不等同整体验收通过）
+
+| 编号 | 当前分类 | 证据或具体剩余边界 |
+| --- | --- | --- |
+| S1/S2 | 已修且隔离验证 | 最终安全回归通过；真实服务未部署。生产改密原有 disconnectAll，不夸大基线。 |
+| C1 Prediction | 需要用户决策/权限 | 暂停，不实现、不登记、不派发；独立整改验收之前不得开始。 |
+| C1 MCP Apps | 需要用户决策/权限 | 恢复或完整下线未定；无路由与现有 UI 的契约问题尚未闭环。 |
+| C2 | 确认保留且证据充分 | 两路共享 sendMessage，但 202/问题 ID/Pi autoResources/PTY 恢复与错误映射不同；无确定接口漂移，保留语义，不盲合并。未改代码。 |
+| C3 | 已修且验证 | 旧录制显式 legacy、默认不录 Qoder，spawn 前 guard 通过；没有声称 ACP 真实执行通过。 |
+| D1/D2 | 未完成 | 已删闲置依赖、构建/最低 Node 入口通过；实际 PTY/扩展与安装脚本授权仍缺。 |
+| D3 | 确认保留且证据充分（本轮保守分类） | Web bundle 是主消费者，但已发布 JS 叶模块可加载且依赖 marked；没有必要为减包改变未经确认的路径契约。 |
+| D4 | 已修且隔离验证 | 显式 SDK 0.129.0 与 Pi 对齐，分页/baseURL/失败 fallback 通过；无真实模型调用。 |
+| C4 host-boot | 需要兼容证据，保留 | 仓内无生产调用；发布 JS/d.ts 真实存在，涉及 PID/重启所有权；未证明外部消费者与替代覆盖，不能凭零引用删除。 |
+| C4 codex-image-content | 需要兼容证据，保留 | 仓内无外部调用；发布 JS/d.ts 真实存在；未验证当前图片链路全部替代、未取得产品退役决定。 |
+| C4 platform-action 三模块 | 需要产品/兼容决定，保留 | service 明示未接 HTTP/CLI，内部引用 catalog/types；三个均已发布，不能把未接线骨架擅自当已退役。 |
+| C5 两个 shim | 需要兼容证据，保留 | 仓内调用已转 subagent-meta/local-model-process，shim 明确标注 compatibility 且发布 JS/d.ts；未知外部 deep-import，收益仅 4 行，不盲删。 |
+| Q1 | 已修且验证 | 零消息加载、归档 running/owner 优先级监督已复核；最终 fixture 复跑通过。 |
+| Q2 | 未完成基线，不改架构 | 简单文本微基准不足以覆盖跨 turn/迟到/窗口；保留 enrich 与缓存，不把大改视为必要清理。 |
+| K1 | 已修且隔离验证 | 新旧 API/CLI/Web repository、revision、快照、归属与迟到写入通过；原生源码兼容已核对，真实按钮/客户端运行未验。 |
+| K2 | 需要用户决策 | retention 天数/条数/容量、员工删除语义、审计保全与写失败策略未定；不删记录。 |
+| A1 | 需要用户决策 | 密码 hash 迁移需解耦设备 token，决定旧设备继续有效/重配及回滚窗口；不改凭据。 |
+| A2 | 未完成基线，保留现层次 | 未取得 stop/delete/迟到 callback/Core drain 全套行为及性能基线，无证据支持整层拆写；只完成 Q1 窄查询增量。 |
+| R1 | 确认保留且证据充分 | 多 owner 恢复、unknown delivery 与历史迁移仍有职责；没有 owner 归零/支持矩阵/回滚窗口证据，不退休后端或删除历史列。 |
+
+C4/C5 核对覆盖源码、脚本、CI、文档及已检出 Android/iOS/macOS，搜索文件名与导出标识符（含 hostBootId、belongsToPreviousHostBoot、readCodexImagePart、codexInlineImagePart、PlatformActionRegistry）；没有把搜索无命中等同外部契约证明。
+
+### 只读统计（本轮采样，不读取正文）
+
+直接以 SQLite readOnly + query_only 打开默认本机数据库，只返回聚合：execution_prompts 9 条、record JSON 合计 69,905 bytes、孤儿员工记录 0；command_sessions 438 条、非空旧 messages 39 条、format_version=1 的 normalized heads 438 条。未输出 prompt/聊天/员工身份/凭据，不运行迁移。单点采样不能计算增长率；存在旧 payload 不等于可删。旧 owner 实时 inventory 与 A1 凭据分布未读取，不以 UI idle 或数据库状态替代真实运行所有权。
+
 ## 监督范围更新
 
 Prediction/预测下一条后续操作暂停：不实现、不登记新任务、不派发，不以其他路径或会话替代。MCP Apps 保留/下线未定，暂不修改。继续范围限于不相关的 K1、依赖和有界清理。K2 retention、凭据存储迁移及兼容后端退役仍不执行删除或生命周期变更。
