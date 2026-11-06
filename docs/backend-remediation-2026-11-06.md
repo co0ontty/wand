@@ -153,7 +153,9 @@ C4/C5 核对覆盖源码、脚本、CI、文档及已检出 Android/iOS/macOS，
 
 对象：`/tmp/wand-final-production.YJ5Ws0`，安装来源旧 packed-final 包 SHA-256 `2b73de1dd5c085ec2664d222031497eee9ab791ff84634928a57aadf99c98271`（旧 stamp 是 2694a29，不称干净 18819ad 产物）。
 
-`node /tmp/wand-final-production.YJ5Ws0/pty-acceptance.mjs`：**失败**，公开 node-pty API 的 spawn(`/bin/sh`, [`-c`, `printf WAND_PACKED_PTY_OK`]) 抛出 `Error: posix_spawnp failed.`，没有 code 值，退出 1。临时 cwd，env 仅 HOME/TMPDIR/PATH/TERM 合成值，不继承凭据；不接已有会话、不写输入。失败后立即停止，未 chmod、rebuild、执行 lifecycle scripts、另找二进制或重试。日志 `/tmp/wand-final-pty.log`。当前不能从这条错误单独证明具体是权限或缺失文件；不猜测根因。
+`node /tmp/wand-final-production.YJ5Ws0/pty-acceptance.mjs`：**失败**，公开 node-pty API 的 spawn(`/bin/sh`, [`-c`, `printf WAND_PACKED_PTY_OK`]) 抛出 `Error: posix_spawnp failed.`，没有 code 值，退出 1。临时 cwd，env 仅 HOME/TMPDIR/PATH/TERM 合成值，不继承凭据；不接已有会话、不写输入。失败后立即停止，未 chmod、rebuild、执行 lifecycle scripts、另找二进制或重试。日志 `/tmp/wand-final-pty.log`。该错误本身不能单独确定根因。后续只读定位确认同目录 `node-pty/prebuilds/darwin-arm64/spawn-helper` 为 0644，缺执行位。原仓已有 `ensure-node-pty-helper.ts`；正常 CLI 与 TerminalHost 会调用运行时准备逻辑恢复执行位。因此本次限定“裸 node-pty API、不得 chmod”的失败只证明未做 Wand 运行时准备的依赖不能启动，**不构成 18819ad 新增 Wand 产品缺陷的证据**。node-pty 自带 prebuild/postinstall 脚本不执行 chmod，也不能声称批准这些脚本即可解决此失败。
+
+后续正式 TerminalHost 验证尚未执行：监督正核实是否允许仅在临时目录使用既有 Wand helper 修复执行位，并禁止 copy fallback。现有 helper 的 chmod 失败分支会尝试复制到可写缓存，故不能在范围未确认时直接调用以替代许可。当前只读 stat/源码核对，未调用 helper、未 chmod、未复制、未重跑 PTY；等待明确范围。
 
 ### 现有 packed 模块真实网络验证
 
