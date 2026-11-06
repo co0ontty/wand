@@ -8,6 +8,7 @@ import { buildCodexArgs, buildCodexLaunch } from "../src/structured-codex-adapte
 import { buildGrokArgs } from "../src/structured-grok-adapter.js";
 import { buildOpenCodeArgs } from "../src/structured-opencode-adapter.js";
 import { buildPiArgs } from "../src/structured-pi-adapter.js";
+// Legacy stream-json recorder only; production structured Qoder uses ACP.
 import { buildQoderArgs } from "../src/structured-qoder-adapter.js";
 import type { SessionSnapshot } from "../src/types.js";
 
@@ -34,6 +35,9 @@ const OMIT_KEY = new Set([
   "tools", "slash_commands", "agents", "skills", "plugins", "capabilities",
 ]);
 const ONLY = process.argv.find((arg) => arg.startsWith("--only="))?.slice("--only=".length);
+if (ONLY === "qoder" && !process.argv.includes("--legacy-qoder")) {
+  throw new Error("Qoder production uses ACP. Legacy stream-json recording requires --only=qoder --legacy-qoder and does not validate ACP.");
+}
 const requestedTimeout = Number(process.argv.find((arg) => arg.startsWith("--timeout-ms="))?.split("=")[1]);
 const TIMEOUT_MS = Number.isFinite(requestedTimeout) && requestedTimeout >= 5_000 && requestedTimeout <= 180_000
   ? requestedTimeout : 90_000;
@@ -188,7 +192,7 @@ async function record(provider: string): Promise<boolean> {
     if (valid) {
       mkdirSync(OUT, { recursive: true });
       const safeArgs = args.map((arg) => arg === PROMPT ? "<FIXTURE_PROMPT>" : arg);
-      const fixture = { provider, scenario: "normal", args: safeArgs, stdinData: stdinData ? "<FIXTURE_PROMPT>" : null,
+      const fixture = { provider, ...(provider === "qoder" ? { protocol: "legacy-stream-json", validatesProductionAcp: false } : {}), scenario: "normal", args: safeArgs, stdinData: stdinData ? "<FIXTURE_PROMPT>" : null,
         events, nonJsonLines, stderrPresent: stderrBytes > 0, exitCode: exit.code, signal: exit.signal };
       writeFileSync(path.join(OUT, `${provider}-normal.json`), JSON.stringify(fixture, null, 2) + "\n", { mode: 0o600 });
     }
@@ -210,7 +214,7 @@ async function record(provider: string): Promise<boolean> {
 }
 
 let ok = true;
-for (const provider of ONLY ? [ONLY] : ["codex", "opencode", "qoder", "pi"]) {
+for (const provider of ONLY ? [ONLY] : ["codex", "opencode", "pi"]) {
   if (!await record(provider)) ok = false;
 }
 if (!ok) process.exitCode = 1;

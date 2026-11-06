@@ -1,6 +1,7 @@
 import { systemPromptArgs, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
 import type { SessionSnapshot } from "./types.js";
 
+/** Legacy stream-json capture only. Production structured sessions use QoderAcpRunner. */
 export function buildQoderArgs(session: SessionSnapshot, prompt: string): string[] {
   const args = ["-p", prompt, "--output-format", "stream-json"];
   const model = session.selectedModel?.trim();
@@ -8,8 +9,8 @@ export function buildQoderArgs(session: SessionSnapshot, prompt: string): string
   const effort = thinkingEffortToQoderEffort(session.thinkingEffort);
   if (effort) args.push("--reasoning-effort", effort);
 
-  // 与 PTY runner 一致：Qoder 一律以 yolo（bypass_permissions）启动。结构化 runner 没有
-  // 权限桥，--print 下未批准的调用只会被拒绝，因此不做任何模式降级。
+  // Historical print protocol has no permission bridge. This is not the ACP
+  // permission policy and must not be used to launch production structured runs.
   args.push("--permission-mode", "bypass_permissions");
   args.push(...systemPromptArgs(session));
   if (session.claudeSessionId) args.push("-r", session.claudeSessionId);

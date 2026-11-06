@@ -11,7 +11,7 @@
 
 修改 `src/server-auth-routes.ts`、`src/auth.ts`、`src/ws-broadcast.ts`。
 
-- S1 保留有效 app token 优先和失败后的密码回退；实际提供错误密码的混合请求累计失败，纯 stale token 不累计；成功仍重置密码桶。
+- S1 保留有效 app token 优先和失败后的密码回退；实际提供错误密码的混合请求累计失败，纯 stale token 不累计；仅成功管理员密码认证重置密码桶，有效低权限 token 登录不重置。
 - S2 AuthService 提供单 token / 全量撤销通知；WS 固定握手选中的认证来源，单 token 撤销只断其所有 socket，全量撤销包含 Bearer socket。消息入口、心跳及业务发送出口校验有效性，清空撤权后的队列与延迟 resync，避免关闭与消息到达竞争。Cookie 校验复用内存认证缓存。
 - 不改 token 存储格式、权限配置、daemon 生命周期或输入交付协议。
 
@@ -23,4 +23,20 @@
 - `npm run typecheck`、`npm run check`、`npm run build`、`git diff --check`：通过。
 - fixture 保存在本机报告目录，非恢复 `tests/` 套件。所有凭据均为 fixture 合成值，未输出真实凭据。
 
+### 独立复核补修
+
+首批提交 `cd1b3c9df09018b773f6f82e99343fe9e84d1272` 后，监督新增三项失败：低权限 token 可重置密码桶、同步快照准备跨 TTL 后 missing-session 仍发送、batch 第一帧后跨 TTL 仍发后两帧。
+
+- `src/server-auth-routes.ts`：重置只位于实际管理员密码验证成功分支。
+- `src/ws-broadcast.ts`：所有 direct send 收敛到 `sendAuthorizedFrame`，在序列化/快照准备后、每帧实际进入传输层前校验；协议 ping 同样补末端检查。不承诺撤回已进入传输层的帧。
+- `tsx /tmp/wand-security-review/review.mts`：15/15 通过，含上述三项。证据 `/tmp/wand-security-review/fixed.log`。原隔离 HTTP/WS fixture 复跑通过。
+- 人工时钟跨界只证明精确边界，未证明生产存在同等大小窗口。manager 单独全量撤销的基线失败不等于生产改密漏洞；生产改密原本已有显式 disconnectAll。
+
 提交 SHA 与远端核对在本会话逐批报告；不在本文件写自身提交 SHA，避免自引用。
+
+## 第二批：C1/C2/C3 契约核对
+
+- C1 仍存在 Web 请求和 UI，但 `src/server*.ts` 没有 Prediction / MCP Apps 路由；不是可直接删除的死代码。阻塞选择：A 恢复已有能力（需要明确模型费用授权、可用 Codex 协议及面板安全/回收契约）；B 完整退役（需明确批准移除 UI/客户端契约）。本轮未擅自接入付费执行或删除产品入口。
+- C2 两入口确实共享 StructuredSessionManager.sendMessage；通用入口额外承担 expectedQuestionId、异步接受/202、Pi autoResources、PTY 恢复、not-sent 重试，结构化入口承担同步结果和独立 conflict 映射。未发现可以确定为接口漂移的证据，保留两种外部语义，不为减少行数改写输入交付机制。
+- C3 修改 `scripts/capture-structured-cli-fixtures.ts` 和 `src/structured-qoder-adapter.ts`：保留历史录制能力，明确标注 legacy stream-json，不宣称代表生产 ACP；Qoder 从默认真实录制列表移出，须显式 `--only=qoder --legacy-qoder --record`；输出标记 `validatesProductionAcp: false`。
+- `tsx scripts/capture-structured-cli-fixtures.ts --record --only=qoder`：预期在 spawn 前拒绝（退出 1），检查通过；未运行任何 provider CLI。ACP 真实录制未运行（无付费模型授权）。
