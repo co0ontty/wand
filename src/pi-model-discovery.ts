@@ -203,21 +203,71 @@ function pageUrl(endpoint: PiEndpoint, cursor: string): URL | null {
   return url;
 }
 
+function cancelResponseBody(body: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<Uint8Array>): void {
+  // Cancellation is best-effort: a provider's cancel hook must not delay discovery.
+  try {
+    void body.cancel().catch(() => {});
+  } catch {
+    // Also tolerate a synchronous cancellation failure.
+  }
+}
+
+async function readResponseText(response: Response, signal: AbortSignal): Promise<string | null> {
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder(); // Matches Response.text(): UTF-8 with initial BOM removed.
+  const parts: string[] = [];
+  let bytes = 0;
+  let done = false;
+  let cancelled = false;
+  const cancel = (): void => {
+    if (cancelled) return;
+    cancelled = true;
+    cancelResponseBody(reader);
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    while (!signal.aborted) {
+      const chunk = await reader.read();
+      if (signal.aborted) return null;
+      if (chunk.done) {
+        done = true;
+        parts.push(decoder.decode());
+        return parts.join("");
+      }
+      bytes += chunk.value.byteLength;
+      // Bound application accumulation, not allocations made by fetch for a single chunk.
+      if (bytes > MAX_RESPONSE_BYTES) return null;
+      parts.push(decoder.decode(chunk.value, { stream: true }));
+    }
+    return null;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    if (!done) cancel();
+    reader.releaseLock();
+  }
+}
+
 async function fetchJson(
   fetchImpl: typeof fetch,
   url: URL,
   headers: Record<string, string>,
 ): Promise<unknown | null> {
   try {
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const response = await fetchImpl(url, {
       method: "GET",
       headers: { accept: "application/json", ...headers },
       redirect: "error",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal,
     });
-    if (!response.ok) return null;
-    const text = await response.text();
-    if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) return null;
+    if (!response.ok) {
+      if (response.body) cancelResponseBody(response.body);
+      return null;
+    }
+    const text = await readResponseText(response, signal);
+    // Preserve the old decoded UTF-8 budget, including replacement characters for invalid bytes.
+    if (text === null || Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) return null;
     return JSON.parse(text) as unknown;
   } catch {
     // Provider errors can echo private endpoint URLs or request credentials. Discovery is

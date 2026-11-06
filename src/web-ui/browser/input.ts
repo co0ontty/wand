@@ -16,7 +16,7 @@ import "./file-browser";
 import "./git-commit";
 import { showToast, wandConfirm } from "./notifications";
 import { getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, COMPOSER_IDLE_HINT, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, isStructuredSession, selectSession, loadOutput, refreshAll, renderAttachmentPreview, restoreComposerStateForSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, COMPOSER_IDLE_HINT, dismissDrawerIfOverlay, getComposerConfigBlockReason, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, isStructuredSession, selectSession, loadOutput, refreshAll, renderAttachmentPreview, restoreComposerStateForSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
 import { clearRunningStatusBar, paintRunningStatusBar } from "./running-status-adapter.js";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
@@ -732,6 +732,10 @@ import { compactSessionFetch } from "./session-fetch.js";
             });
           })
           .then(function(uploadedFiles) {
+            // 配置也可能在附件上传期间开始；拒绝本次提交，由 composer 恢复输入，
+            // 不等待配置后暗中补发。
+            var configBlockReason = getComposerConfigBlockReason(sessionId);
+            if (configBlockReason) throw new Error(configBlockReason);
             var hasText = !!value.trim();
             var finalValue = buildAttachmentPrefix(uploadedFiles)
               + (hasText ? value : (uploadedFiles.length ? "请查看附件。" : ""));
@@ -795,6 +799,8 @@ import { compactSessionFetch } from "./session-fetch.js";
             }
 
             return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
+              var configBlockReason = getComposerConfigBlockReason(sessionId);
+              if (configBlockReason) throw new Error(configBlockReason);
               if (!readySession) {
                 // 具体原因已由 ensureSessionReadyForInput 原位播报，这里只负责中断发送，
                 // 不能再把它覆盖成泛化文案。
@@ -1163,9 +1169,11 @@ import { compactSessionFetch } from "./session-fetch.js";
         var line = document.getElementById("composer-status-line");
         if (line) {
           var isResult = phase === "sending" || phase === "sent" || phase === "failed";
-          var nextText = isResult && text ? text : composerIdleHint(isCodex);
+          var configBlockReason = state.terminalInteractive ? "" : getComposerConfigBlockReason();
+          var nextText = configBlockReason || (isResult && text ? text : composerIdleHint(isCodex));
           if (line.textContent !== nextText) line.textContent = nextText;
-          var tone = isResult ? phase : "";
+          // 保留非空 tone，让折叠 / 窄屏宿主也显示配置阻塞原因。
+          var tone = configBlockReason ? "config" : (isResult ? phase : "");
           var toneChanged = (line.getAttribute("data-tone") || "") !== tone;
           if (toneChanged) line.removeAttribute("data-tone");
           if (tone && toneChanged) {
@@ -2499,6 +2507,8 @@ import { compactSessionFetch } from "./session-fetch.js";
           var sessionUnavailable = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
           var composerValue = composer ? composer.value : "";
           var currentAttachments = getPendingAttachments(state.selectedId);
+          var configBlockReason = state.terminalInteractive ? "" : getComposerConfigBlockReason();
+          var composerHasDraft = !!composerValue.trim() || currentAttachments.length > 0;
           var composerCanSend = canSendComposer(composerValue, state.selectedId);
           var duplicateInFlight = !!(composerCanSend && composerStore.pendingSubmission(
             state.selectedId, { text: composerValue, attachments: currentAttachments },
@@ -2512,7 +2522,7 @@ import { compactSessionFetch } from "./session-fetch.js";
           var resultOwned = composerResultOwns();
           var phaseText = resultOwned ? composerResultText : "";
           var sendPhase: ComposerSendPhase = (resultOwned && composerResultPhase)
-            || composerBaseSendPhase(selectedSession, composerCanSend);
+            || composerBaseSendPhase(selectedSession, composerHasDraft);
           // 「停止」是这一相位下唯一的动作，原来那颗独立停止按钮从来没有禁用逻辑；
           // 空草稿不算「不能点」，否则在跑会话的唯一出口又被发条件锁死。
           if (sendPhase === "running") sendDisabled = false;
@@ -2529,6 +2539,9 @@ import { compactSessionFetch } from "./session-fetch.js";
             ? "正在优化提示词"
             : (structuredInFlight ? "加入发送队列" : "发送消息");
           var phaseLabels = composerPhaseLabels(sendPhase, sendTitle, sendLabel, phaseText);
+          if (configBlockReason && sendPhase !== "running") {
+            phaseLabels = { title: configBlockReason, label: configBlockReason };
+          }
           if (sendBtn.title !== phaseLabels.title) sendBtn.title = phaseLabels.title;
           if (sendBtn.getAttribute("aria-label") !== phaseLabels.label) sendBtn.setAttribute("aria-label", phaseLabels.label);
           // queue-mode 只描述「点下去是排队」这一语义；露出停止 glyph 时不参与。
@@ -2603,6 +2616,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         if (session.status !== "running") return;
         if (key === "enter") {
           if (state.composerComposing || state.terminalComposing) return;
+          if (!state.terminalInteractive && getComposerConfigBlockReason(session.id)) return;
           // The composer owns pending text/attachments and the separate CR packet.
           var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (state.terminalInteractive || canSendComposer(inputBox ? inputBox.value : "", session.id)) {

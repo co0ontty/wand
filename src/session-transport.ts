@@ -148,6 +148,10 @@ export function toSessionListItemDTO(
 export interface SessionDetailDTOOptions {
   output?: string;
   messages?: ConversationTurn[];
+  /** Default raw preserves the public API. Projected accepts only the server's
+   * full-history enriched read model (including its transport-safe images and
+   * stripped host references), possibly windowed/compacted; never provider input. */
+  messageProjection?: "raw" | "projected";
   messageOffset?: number;
   messageTotal?: number;
   leadingBlockOffset?: number;
@@ -170,7 +174,7 @@ export function toSessionDetailDTO(
     outputOffset,
     outputTotal: rawOutput.length,
     outputTruncated: outputOffset > 0,
-    ...(options.messages !== undefined ? { messages: enrichStructuredMessages(options.messages, snapshot.id) } : {}),
+    ...(options.messages !== undefined ? { messages: options.messageProjection === "projected" ? options.messages : enrichStructuredMessages(options.messages, snapshot.id) } : {}),
     ...(options.messageOffset !== undefined ? { messageOffset: options.messageOffset } : {}),
     ...(options.messageTotal !== undefined ? { messageTotal: options.messageTotal } : {}),
     ...(options.leadingBlockOffset !== undefined ? { leadingBlockOffset: options.leadingBlockOffset } : {}),

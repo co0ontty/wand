@@ -516,6 +516,7 @@ export class WsBroadcastManager {
           output: client.omitStructuredOutput && snapshot.sessionKind === "structured" ? "" : snapshot.output,
           outputLimit: terminalState ? 16_000 : undefined,
           ...windowed,
+          messageProjection: "projected",
         }),
         terminalState,
       },
@@ -609,7 +610,7 @@ export class WsBroadcastManager {
         } as ProcessEvent;
       }
       if (!turnWindowedEvent) {
-        const w = windowMessagesForTransport(rawMessages, this.getCardDefaults());
+        const w = this.windowForClient(client, event.sessionId, rawMessages);
         turnWindowedEvent = {
           ...boundedEvent,
           data: {

@@ -117,6 +117,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
           config.cardDefaults ?? {},
         );
         res.status(201).json(toSessionDetailDTO(snapshot, {
+          messageProjection: "projected",
           messages: windowed.messages, messageOffset: windowed.messageOffset, messageTotal: windowed.messageTotal,
         }));
         return;

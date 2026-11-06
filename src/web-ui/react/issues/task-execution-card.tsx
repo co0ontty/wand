@@ -69,7 +69,7 @@ export function TaskExecutionCard({ comment, result, onOpenSession, onLocateComm
   const status = dispatch.status ?? dispatch.state ?? "unknown";
   const breakdown = taskExecutionActionBreakdown(result);
   const elapsed = taskExecutionElapsed(result);
-  const delivered = dispatch.state === "accepted" || dispatch.state === "pending";
+  const delivered = dispatch.state === "accepted";
   const queued = dispatch.state === "queued";
   const replyText = result?.messages
     .filter(turn => turn.role === "assistant")
@@ -81,7 +81,7 @@ export function TaskExecutionCard({ comment, result, onOpenSession, onLocateComm
       <span className="task-execution-card-avatar"><TaskPersonAvatar kind="employee" id={dispatch.employeeId} name={dispatch.employeeName}/></span>
       <span className="task-execution-card-name">{dispatch.employeeName}</span>
       <Tag color={statusTone[status] ?? "default"}>{status === "done" ? "本轮已结束" : statusLabel(status)}</Tag>
-      {dispatch.deliveryStatus && <Tag color={dispatch.deliveryStatus === "submitted" ? "green" : "warning"}>{dispatch.deliveryStatus === "submitted" ? "交付已提交" : "尚未提交交付"}</Tag>}
+      <Tag color={dispatch.deliveryStatus === "submitted" ? "green" : dispatch.deliveryStatus === "unsubmitted" ? "warning" : "default"}>{dispatch.deliveryStatus === "submitted" ? "任务当前交付已提交" : dispatch.deliveryStatus === "unsubmitted" ? "任务当前交付尚未提交" : "提交记录未确认"}</Tag>
       <div className="task-execution-card-meta">
         {breakdown.total > 0 ? <WandButton kind="ghost" size="small" className="task-execution-card-actions-toggle" aria-expanded={open}
           onClick={() => setOpen(value => !value)}>{breakdown.total} 个动作</WandButton> : null}

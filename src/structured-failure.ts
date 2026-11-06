@@ -75,7 +75,7 @@ export function cliUnacceptedFacts(input: {
 export function isTransportFailure(message: string | null | undefined): boolean {
   const text = message?.trim() ?? "";
   if (!text) return false;
-  return /\bfetch failed\b|\bECONN\w*|socket hang up|\bnetwork error\b|\btimed?\s*out\b|\b408\b|\b409\b/i.test(text);
+  return /\bfetch failed\b|\bECONN\w*|\bEPIPE\b|\bbroken\s+pipe\b|socket hang up|\bnetwork error\b|\btimed?\s*out\b|\b408\b|\b409\b/i.test(text);
 }
 
 /** Assemble common CLI exit fields while the adapter retains protocol/error observations. */

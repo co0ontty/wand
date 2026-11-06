@@ -1,7 +1,7 @@
 import { parseTaskAgent } from "./task-agent-parsing.js";
 import crypto from "node:crypto";
 import type { Express, Request, Response } from "express";
-import { AgentDispatchPreflightError, dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
+import { AgentDispatchAcceptanceError, AgentDispatchPreflightError, dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
 import { asyncRoute } from "./express-async.js";
 import { badRequest, HttpError } from "./http-error.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
@@ -54,6 +54,28 @@ export function projectTaskComment(deps: TaskRouteDependencies, comment: WandTas
   const saved = dispatch.sessionId ? storage.getSessionSlim(dispatch.sessionId) : null;
   const anchor = dispatch.resultAnchor;
   const frozenOutcome = anchor && anchor.endIndex !== null && anchor.outcome ? anchor.outcome : null;
+  const executionTask = storage.getWandTask(dispatch.executionTaskId ?? comment.taskId);
+  // Project the task's current delivery, including queue/cancellation receipts. Never retain a stale label.
+  delete dispatch.deliveryStatus;
+  const revision = executionTask?.deliveryRevision;
+  if (executionTask && typeof revision === "number" && Number.isInteger(revision) && revision >= 0) {
+    const verification = executionTask.verification, acceptance = executionTask.acceptance;
+    const validRevision = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
+    const current = verification?.revision === revision;
+    const failed = current && verification?.verdict === "failed";
+    const confirmed = !!acceptance?.acceptedAt && acceptance.confirmedRevision === revision;
+    const conflict = !!verification && (!validRevision(verification.revision) || verification.revision > revision)
+      || !!acceptance?.acceptedAt && (!validRevision(acceptance.confirmedRevision) || acceptance.confirmedRevision > revision)
+      || confirmed && (failed || !Number.isFinite(Date.parse(acceptance!.acceptedAt!))
+        || typeof acceptance?.evidence !== "string" || !acceptance.evidence.trim() || typeof acceptance.blocker !== "string" || !!acceptance.blocker.trim())
+      || current && verification?.verdict === "passed" && (typeof verification.evidence !== "string" || !verification.evidence.trim()
+        || typeof verification.blocker !== "string" || !!verification.blocker.trim());
+    if (!conflict) {
+      if (failed || ["backlog", "todo", "doing"].includes(executionTask.status)) dispatch.deliveryStatus = "unsubmitted";
+      // An external block in review does not withdraw a submit. Null actor/session is still a receipt.
+      else if (storage.taskDeliverySubmitter(executionTask.id, revision) !== null) dispatch.deliveryStatus = "submitted";
+    }
+  }
   // 排队还没有会话：保留明确的排队文案，不能落到“会话不可用/历史会话”。
   if (dispatch.state === "queued" || dispatch.state === "paused") return { ...comment, ...(referencedTaskIdentifiers.length ? { referencedTaskIdentifiers } : {}),
     dispatch: { ...dispatch, status: dispatch.state } };
@@ -64,8 +86,6 @@ export function projectTaskComment(deps: TaskRouteDependencies, comment: WandTas
       : live.permissionBlocked || live.pendingEscalation ? "blocked"
         : live.structuredState?.inFlight || live.ptyBusy || live.ptyCommandRunning ? "running"
           : live.structuredState?.lastError ? "failed" : dispatch.status ?? live.status);
-  const executionTask = storage.getWandTask(dispatch.executionTaskId ?? comment.taskId);
-  dispatch.deliveryStatus = executionTask?.status === "review" || executionTask?.status === "ready" || executionTask?.status === "archived" ? "submitted" : "unsubmitted";
   dispatch.blocker = executionTask?.acceptance?.blocker || executionTask?.verification?.blocker || "";
   const reviewWritebackPending = comment.purpose === "review" && Boolean(frozenOutcome) && Boolean(dispatch.sessionId)
     && !storage.hasTaskReviewReceipt(comment.taskId, dispatch.sessionId!, comment.reviewRevision ?? -1);
@@ -148,7 +168,8 @@ export async function submitTaskComment(deps: TaskRouteDependencies, taskId: str
       // Creation is not delivery. A crash before send/return must remain pending/unknown, never idle/completed.
       storage.updateTaskCommentDispatch(comment.id, "accepted", sessionId);
     } catch (error) {
-      const rejected = error instanceof AgentDispatchPreflightError && !sessionId;
+      const rejected = error instanceof AgentDispatchAcceptanceError
+        || error instanceof AgentDispatchPreflightError && !sessionId;
       storage.updateTaskCommentDispatch(comment.id, rejected ? "failed" : "unknown", sessionId,
         rejected ? error.message : "执行送达未确认，请核对关联会话；不会自动重放。");
     }

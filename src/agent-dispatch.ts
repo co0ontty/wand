@@ -17,6 +17,30 @@ export class AgentDispatchPreflightError extends Error {
   readonly failure: StructuredFailure = { kind: "preflight", delivery: "rejected", retryable: true };
 }
 
+/** sendMessage rejected before its durable acceptance callback. */
+export class AgentDispatchAcceptanceError extends Error {}
+
+/** Completion is observed, but only onAccepted can release the dispatch. */
+function waitForAcceptance(
+  send: (onAccepted: () => void) => Promise<unknown>,
+  label: string,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let accepted = false;
+    const onAccepted = () => { accepted = true; resolve(); };
+    const failed = (cause: unknown) => {
+      if (accepted) console.error(`[AgentDispatch] ${label} execution failed after acceptance:`, cause);
+      else reject(new AgentDispatchAcceptanceError("输入持久接受失败，未启动执行。", { cause }));
+    };
+    try {
+      void send(onAccepted).then(() => {
+        // A completion without the acceptance signal is not proof of delivery.
+        if (!accepted) reject(new Error("输入接受状态未确认；不会自动重放。"));
+      }, failed);
+    } catch (cause) { failed(cause); }
+  });
+}
+
 export interface AgentDispatchDeps {
   storage: WandStorage;
   config: WandConfig;
@@ -136,8 +160,9 @@ async function dispatchAgentForTaskInternal(
   input.sessionCreated?.(session);
   if (agent.kind !== "pty") {
     const origin = input.origin ?? { kind: "task_dispatch" as const, triggerName: null, taskId: input.task.id, taskIdentifier: input.task.identifier, commentId: "", entrySessionId: null };
-    const completion = structured!.sendMessage(session.id, input.prompt, { teamRequestStarted: input.teamRequestStarted, origin });
-    completion.catch((error) => console.error(`[AgentDispatch] ${input.automationId} failed:`, error));
+    await waitForAcceptance(onAccepted => structured!.sendMessage(session.id, input.prompt, {
+      teamRequestStarted: input.teamRequestStarted, origin, onAccepted,
+    }), input.automationId);
   }
   return { session, cwd, workspaceId: group.workspaceId };
 }
@@ -153,10 +178,9 @@ export async function sendToAgentSession(
   teamRequestStarted?: (sessionId: string, requestId: string) => void,
 ): Promise<void> {
   if (deps.sessions.ownerOf(sessionId) === "structured") {
-    const completion = teamRequestStarted
-      ? deps.structured!.sendMessage(sessionId, text, { teamRequestStarted })
-      : deps.structured!.sendMessage(sessionId, text);
-    completion.catch((error) => console.error(`[AgentDispatch] message to ${sessionId} failed:`, error));
+    await waitForAcceptance(onAccepted => deps.structured!.sendMessage(sessionId, text, {
+      teamRequestStarted, onAccepted,
+    }), `message to ${sessionId}`);
     return;
   }
   if (!deps.processes) throw new Error("当前服务未启用终端会话。");

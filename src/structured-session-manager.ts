@@ -158,9 +158,8 @@ interface StreamingTurnState extends StructuredRunnerTurnState {}
 const STREAM_EMIT_DEBOUNCE_MS = 16;
 
 /**
- * 员工候选链的启动看门狗：CLI 进程起来后这么久没有任何协议事件，就认定这一候选本轮没有开始
- * 执行（无输出、无用量、无工具调用），按未接受输入处理并沿候选链降级，而不是让会话无限停在
- * 「运行中」。取 3 分钟：慢模型的首个事件与真正卡死之间留出足够余量。
+ * 员工多候选会话的启动看门狗：CLI 进程启动后 3 分钟没有 stdout/onUpdate 就请求中断。
+ * 静默不能证明输入未被接受；保留 runner 的交付判定，并等待真实退出后再释放所有权。
  */
 const EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS = 180_000;
 /** Min interval between full saveSession() calls for an in-progress streaming turn.
@@ -3543,9 +3542,8 @@ export class StructuredSessionManager {
     const provider = options.provider ?? "claude";
     const commandLabel = options.commandLabel ?? "claude -p";
     const logKind = options.logKind ?? "claude-print";
-    // 只在有多条候选可退的员工会话上看门：单候选会话没有可退的下一条链路，终止它只会丢工作。
+    // 仅保留员工多候选会话的启动看门策略；超时中断不代表可以沿候选链重放。
     const candidateChain = !!session.employeeId && (session.employeeCandidates?.length ?? 0) > 1;
-    let startupTimedOut = false;
     let turnCompleted = false;
     const disarmStartupWatchdog = (): void => this.disarmCandidateStartupWatchdog(sessionId);
     if (provider === "codex") {
@@ -3613,7 +3611,6 @@ export class StructuredSessionManager {
     if (candidateChain) {
       this.armCandidateStartupWatchdog(sessionId, () => {
         if (turnCompleted || !this.isCurrentRequest(sessionId, requestId)) return;
-        startupTimedOut = true;
         execution.interrupt();
       });
     }
@@ -3647,19 +3644,6 @@ export class StructuredSessionManager {
       return;
     }
     flushEmit();
-
-    // 看门狗只在本轮确实没有产出任何东西时才算「未开始执行」；已经出过内容的那一轮维持原判定。
-    // retryForbidden 是适配器自己的硬边界（免费价、资源准备失败），看门狗不得把它改写成可重放。
-    if (startupTimedOut && !result.retryForbidden && !hasStructuredExecutionProgress(result.state)) {
-      const unaccepted: StructuredFailure = { kind: "preflight", delivery: "rejected", retryable: true };
-      result = {
-        ...result,
-        inputAccepted: false,
-        primaryError: result.primaryError?.trim()
-          || `${commandLabel} 在 ${EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS / 1000} 秒内没有任何协议输出，本轮未开始执行。`,
-        failure: unaccepted,
-      };
-    }
 
     if (provider === "codex") {
       this.settleNativeInputs(sessionId, requestId, result.state);

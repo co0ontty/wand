@@ -121,15 +121,20 @@ export async function coreHarnessRuntime(config: Pick<HarnessConfig, "agentDir">
 async function loadHandle(agentDir: string): Promise<CoreHarnessHandle> {
   if (handlePromise && cachedAgentDir === agentDir) return handlePromise;
   cachedAgentDir = agentDir;
-  handlePromise = (async () => {
+  const promise = (async () => {
     const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
     const runtime = await ModelRuntime.create({
       authPath: path.join(agentDir, "auth.json"),
       modelsPath: path.join(agentDir, "models.json"),
     });
     return { runtime, agentDir };
-  })();
-  return handlePromise;
+  })().catch((error: unknown) => {
+    // Only evict this failed generation; a reset or directory switch may have replaced it.
+    if (handlePromise === promise && cachedAgentDir === agentDir) handlePromise = null;
+    throw error;
+  });
+  handlePromise = promise;
+  return promise;
 }
 
 /**

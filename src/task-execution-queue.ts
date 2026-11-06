@@ -1,5 +1,5 @@
 import { taskDispatchFence } from "./task-execution-fence.js";
-import { AgentDispatchPreflightError, dispatchAgentForTask } from "./agent-dispatch.js";
+import { AgentDispatchAcceptanceError, AgentDispatchPreflightError, dispatchAgentForTask } from "./agent-dispatch.js";
 import { agentKey } from "./ai-team-types.js";
 import { DEFAULT_MAX_CONCURRENT_TASKS } from "./employee-types.js";
 import { employeeInputPriority, type EmployeeInputScheduling } from "./employee-input-scheduling.js";
@@ -214,7 +214,8 @@ export class TaskExecutionQueue {
       );
       this.deps.storage.updateTaskCommentDispatch(comment.id, "accepted", sessionId);
     } catch (error) {
-      const rejected = error instanceof AgentDispatchPreflightError && !sessionId;
+      const rejected = error instanceof AgentDispatchAcceptanceError
+        || error instanceof AgentDispatchPreflightError && !sessionId;
       this.deps.storage.updateTaskCommentDispatch(comment.id, rejected ? "failed" : "unknown", sessionId,
         rejected ? error.message : "执行送达未确认，请核对关联会话；不会自动重放。");
     } finally {

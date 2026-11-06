@@ -17,19 +17,19 @@ export function TaskBoardAgentChips({ sessions, assigned, subject, assignee, com
 }): React.ReactElement {
   const { employees } = useSiliconEmployees();
   const executors = taskExecutors(sessions, assigned, subject, employees, assignee);
-  if (!executors.length) return <Typography.Text type="secondary">待指派</Typography.Text>;
+  if (!executors.length) return <Typography.Text type="secondary">未配置负责人</Typography.Text>;
   const personChip = (person: typeof executors[number]) => <Tag key={person.key} style={{ maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere" }}>
     <Flex align="center" gap={6}>
       <PersonMark person={person}/>
       <Flex vertical style={{ minWidth: 0 }}>
-        <span>{person.name} · {person.state === "running" ? "运行中" : person.state === "assigned" ? "已指派 · 未启动" : "历史执行"}</span>
+        <span>{person.name} · {person.state === "running" ? "运行中" : person.state === "current" ? `${person.configured ? "负责人" : "会话"} · ${person.activity}` : person.state === "assigned" ? "负责人已配置 · 暂无关联会话" : "历史执行"}</span>
         {person.employeeId || person.key.startsWith("legacy-employee:") ? <Typography.Text type="secondary">{taskExecutorToolLabels(person).join(" · ")}</Typography.Text> : null}
       </Flex>
     </Flex>
   </Tag>;
   if (compact) {
     const person = executors[0]!;
-    const state = person.state === "running" ? "运行中" : person.state === "assigned" ? "已指派" : "历史执行";
+    const state = person.state === "running" ? "运行中" : person.state === "current" ? `${person.configured ? "负责人" : "会话"} · ${person.activity}` : person.state === "assigned" ? "负责人已配置" : "历史执行";
     return <Flex align="center" gap={4} className="task-board-executors-compact" aria-label="任务执行者">
       <span className="task-board-executor-summary" title={`${person.name} · ${state} · ${taskExecutorToolLabels(person).join(" · ")}`}>
         <PersonMark person={person}/>

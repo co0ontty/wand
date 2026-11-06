@@ -35,6 +35,20 @@ import { notifyTasksChanged } from "../react/task-changes";
 import { invalidateSessionList } from "../react/session-list-snapshot";
 import { compactSessionFetch } from "./session-fetch.js";
 
+const SESSION_CONFIG_FIELDS = ["selectedModel", "thinkingEffort", "mode", "autoApprovePermissions", "provider", "runner", "piSettings"] as const;
+
+// Preserve wire values (including null/false), but never project absent or private fields.
+function projectSessionConfig(data: any, snapshot: any): boolean {
+  var projected = false;
+  for (const field of SESSION_CONFIG_FIELDS) {
+    if (data && Object.prototype.hasOwnProperty.call(data, field) && data[field] !== undefined) {
+      snapshot[field] = data[field];
+      projected = true;
+    }
+  }
+  return projected;
+}
+
 let hasOpenedSocket = false;
 
 /** Login teardown starts a new socket lifetime; the first open is not a resync. */
@@ -374,6 +388,7 @@ function projectSelectedChat(sessionId: string): any {
             if (msg.data && msg.sessionId) {
               var isIncremental = !!msg.data.incremental;
               var snapshot: any = { id: msg.sessionId };
+              var configMetadataChanged = projectSessionConfig(msg.data, snapshot);
               var topicMetadataChanged = false;
 
               // Carry over small metadata fields present in both modes
@@ -466,7 +481,7 @@ function projectSelectedChat(sessionId: string): any {
                 && !msg.data.lastMessage && !snapshot.messages
                 && snapshot.output === undefined
                 && !msg.data.structuredState && !msg.data.sessionKind
-                && !topicMetadataChanged;
+                && !topicMetadataChanged && !configMetadataChanged;
 
               if (isChunkOnly) {
                 // Only update permissionBlocked if it actually changed
@@ -477,7 +492,8 @@ function projectSelectedChat(sessionId: string): any {
                     if (msg.sessionId === state.selectedId) updateTaskDisplay();
                   }
                 }
-              } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined || snapshot.title || snapshot.description || snapshot.titleGenerating !== undefined) {
+              } else if ((configMetadataChanged || snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined || snapshot.title || snapshot.description || snapshot.titleGenerating !== undefined)
+                && (!configMetadataChanged || state.sessions.some(session => session.id === msg.sessionId))) {
                 updateSessionSnapshot(snapshot, "latest", msg);
                 if (topicMetadataChanged) scheduleSessionListUpdate();
                 if (msg.sessionId === state.selectedId) {
@@ -557,6 +573,7 @@ function projectSelectedChat(sessionId: string): any {
             var endedStatus = (msg.data && msg.data.status) ? msg.data.status : "exited";
             var endedPermBlocked = (msg.data && Object.prototype.hasOwnProperty.call(msg.data, "permissionBlocked")) ? !!msg.data.permissionBlocked : false;
             var endedSnapshot: any = { id: msg.sessionId, status: endedStatus, permissionBlocked: endedPermBlocked };
+            var endedConfigChanged = projectSessionConfig(msg.data, endedSnapshot);
             for (const field of ["completionRevision", "viewedCompletionRevision"]) {
               if (typeof msg.data?.[field] === "number") endedSnapshot[field] = msg.data[field];
             }
@@ -575,7 +592,10 @@ function projectSelectedChat(sessionId: string): any {
             if (msg.data && msg.data.queuedMessages) {
               endedSnapshot.queuedMessages = msg.data.queuedMessages;
             }
-            updateSessionSnapshot(endedSnapshot, "latest", msg);
+            // Do not resurrect a removed session from late configuration metadata.
+            if (!endedConfigChanged || state.sessions.some(session => session.id === msg.sessionId)) {
+              updateSessionSnapshot(endedSnapshot, "latest", msg);
+            }
             if (typeof msg.data?.completionRevision === "number") notifyTasksChanged();
             if (state.currentView === "terminal") {
               void markSessionCompletionViewed(state.sessions.find((session) => session.id === msg.sessionId));
@@ -717,6 +737,7 @@ function projectSelectedChat(sessionId: string): any {
           case 'status':
             if (msg.sessionId && msg.data) {
               var statusUpdate: any = { id: msg.sessionId };
+              var statusConfigChanged = projectSessionConfig(msg.data, statusUpdate);
               for (const field of ["completionRevision", "viewedCompletionRevision"]) {
                 if (typeof msg.data[field] === "number") statusUpdate[field] = msg.data[field];
               }
@@ -839,7 +860,9 @@ function projectSelectedChat(sessionId: string): any {
                   if (typeof msg.data[field] === "number") statusUpdate[field] = msg.data[field];
                 });
               }
-              updateSessionSnapshot(statusUpdate, "latest", msg);
+              if (!statusConfigChanged || state.sessions.some(session => session.id === msg.sessionId)) {
+                updateSessionSnapshot(statusUpdate, "latest", msg);
+              }
               if (typeof msg.data.completionRevision === "number") {
                 notifyTasksChanged();
                 if (state.currentView === "terminal") {

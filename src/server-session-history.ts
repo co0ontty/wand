@@ -35,6 +35,6 @@ export function sendSessionHistory(req: Request, res: Response, ctx: SessionRout
   const page = reader.readSessionMessagePage(snapshot.id, defaults, options);
   res.setHeader("Cache-Control", "no-store");
   if (pageOnly) res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, ...page, offset: page.messageOffset, total });
-  else res.json(toSessionDetailDTO(snapshot, { ...page, ...(req.query.output === "omit" ? { output: "" } : {}) }));
+  else res.json(toSessionDetailDTO(snapshot, { ...page, messageProjection: "projected", ...(req.query.output === "omit" ? { output: "" } : {}) }));
   return true;
 }

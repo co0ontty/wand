@@ -257,6 +257,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
         );
         res.json(toSessionDetailDTO(snapshot, {
           output: transcriptOutput,
+          messageProjection: "projected",
           messages: windowed.messages,
           messageOffset: windowed.messageOffset,
           messageTotal: windowed.messageTotal,
@@ -273,6 +274,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
       );
       res.json(toSessionDetailDTO(snapshot, {
         output: transcriptOutput,
+        messageProjection: "projected",
         messages: windowed.messages,
         messageOffset: windowed.messageOffset,
         messageTotal: windowed.messageTotal,
@@ -340,10 +342,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
           cardDefaults, visibleBudget, messageWindowByteBudget(req.query.byteBudget), true).leadingBlockOffset
         : alignedBlockStart(turn.content, cardDefaults, blockStart, blockEnd,
           Math.min(128 * 1024, messageWindowByteBudget(req.query.byteBudget)));
-      const blocks = enrichStructuredMessages([{
-        ...turn,
-        content: sliceTurnBlocksForTransport(turn, startOffset, blockEnd, cardDefaults),
-      }], snapshot.id)[0].content;
+      const blocks = sliceTurnBlocksForTransport(turn, startOffset, blockEnd, cardDefaults);
       res.json({
         wandProtocolVersion: WAND_PROTOCOL_VERSION,
         turnIndex,
@@ -360,7 +359,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
     const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 40, 1), 200);
     const offset = Math.min(Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0), total);
     const end = Math.min(offset + limit, total);
-    const slice = enrichStructuredMessages(truncateMessagesForTransport(all.slice(offset, end), config.cardDefaults ?? {}), snapshot.id);
+    const slice = truncateMessagesForTransport(all.slice(offset, end), config.cardDefaults ?? {});
     res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, messages: slice, offset, total });
   });
 }

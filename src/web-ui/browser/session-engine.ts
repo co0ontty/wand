@@ -389,7 +389,9 @@ function sessionProjectionSignature(session: any): string {
       // 会按用户操作顺序落盘；只有最新 revision 的回包可以合并全量快照。
       var sessionConfigMutationTails = Object.create(null);
       var sessionConfigMutationRevisions = Object.create(null);
+      var sessionConfigFieldRevisions = Object.create(null);
       var pendingSessionConfig = Object.create(null);
+      var sessionConfigFailures = Object.create(null);
       const sessionToolSwitches = new Map<string, { pending: boolean; status: string; failed: boolean }>();
 
       export async function onChatToolChange(toolId: string): Promise<void> {
@@ -442,46 +444,77 @@ function sessionProjectionSignature(session: any): string {
         if (!sessionId) return;
         var pending = pendingSessionConfig[sessionId] || (pendingSessionConfig[sessionId] = {});
         pending[key] = value;
+        if (sessionConfigFailures[sessionId]) delete sessionConfigFailures[sessionId][key];
+        updateInteractiveControls();
       }
 
       function clearPendingSessionConfig(sessionId) {
-        if (sessionId) delete pendingSessionConfig[sessionId];
+        if (sessionId) {
+          delete pendingSessionConfig[sessionId];
+        }
+        updateInteractiveControls();
       }
 
-      function enqueueSessionConfigMutation(sessionId, task) {
+      function enqueueSessionConfigMutation(sessionId, task, field?) {
         var revision = (sessionConfigMutationRevisions[sessionId] || 0) + 1;
         sessionConfigMutationRevisions[sessionId] = revision;
+        var fields = sessionConfigFieldRevisions[sessionId] || (sessionConfigFieldRevisions[sessionId] = {});
+        if (field) fields[field] = revision;
+        // 全量快照按会话代次合并；单字段结果只能被同字段的新选择替代。
+        function outcome(value, failed) {
+          return { data: failed ? undefined : value, error: failed ? value : undefined, field: field,
+            get latest() { return sessionConfigMutationRevisions[sessionId] === revision; },
+            get latestField() { return !field || fields[field] === revision; } };
+        }
         var previous = sessionConfigMutationTails[sessionId] || Promise.resolve();
         var request = previous.catch(function() {}).then(task);
         sessionConfigMutationTails[sessionId] = request.catch(function() {});
         return request.then(function(data) {
-          return { data: data, latest: sessionConfigMutationRevisions[sessionId] === revision };
+          return outcome(data, false);
         }, function(error) {
-          return Promise.reject({ error: error, latest: sessionConfigMutationRevisions[sessionId] === revision });
+          return Promise.reject(outcome(error, true));
         });
       }
 
-      function recoverLatestSessionConfigMutation(sessionId, message) {
-        clearPendingSessionConfig(sessionId);
+      function recoverLatestSessionConfigMutation(sessionId, message, field, latest) {
+        if (latest) delete pendingSessionConfig[sessionId];
+        else if (pendingSessionConfig[sessionId]) delete pendingSessionConfig[sessionId][field];
+        if (!state.sessions.some(function(session) { return session.id === sessionId; })) {
+          clearPendingSessionConfig(sessionId);
+          delete sessionConfigFailures[sessionId];
+          return;
+        }
+        var failures = sessionConfigFailures[sessionId] || (sessionConfigFailures[sessionId] = {});
+        failures[field] = message + "；请重新选择配置，成功后再发送。";
+        updateInteractiveControls();
         // 旧 revision 成功、最新 revision 失败时，本地故意没合并旧快照。重拉一次
         // 才能同时恢复服务端已落盘的前序修改和本次失败的回滚状态。
-        Promise.resolve(loadSessions())
-          .catch(function() {})
-          .finally(function() { refreshAllChatModeTrios(); });
+        if (latest) {
+          Promise.resolve(loadSessions())
+            .catch(function() {})
+            .finally(function() { refreshAllChatModeTrios(); });
+        } else refreshAllChatModeTrios();
         showToast(message, "error");
       }
 
       function applyLatestSessionConfigSnapshot(sessionId, outcome) {
-        if (!outcome.latest) return false;
+        if (!outcome.latestField) return false;
+        if (!state.sessions.some(function(session) { return session.id === sessionId; })) {
+          delete sessionConfigFailures[sessionId];
+          clearPendingSessionConfig(sessionId);
+          return false;
+        }
         var data = outcome.data;
         if (data && data.error) {
-          recoverLatestSessionConfigMutation(sessionId, data.error);
+          recoverLatestSessionConfigMutation(sessionId, data.error, outcome.field, outcome.latest);
           return false;
         }
-        if (!data || !data.id) {
-          recoverLatestSessionConfigMutation(sessionId, "会话设置更新失败");
+        if (!data || data.id !== sessionId) {
+          recoverLatestSessionConfigMutation(sessionId, "会话设置更新失败", outcome.field, outcome.latest);
           return false;
         }
+        if (sessionConfigFailures[sessionId]) delete sessionConfigFailures[sessionId][outcome.field];
+        if (!outcome.latest) return false;
         updateSessionSnapshot(data);
         clearPendingSessionConfig(sessionId);
         refreshAllChatModeTrios();
@@ -814,15 +847,15 @@ function sessionProjectionSignature(session: any): string {
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
             body: JSON.stringify({ thinkingEffort: normalized })
-          }).then(function(res) { return res.json(); });
-        })
+          }).then(function(res) { return parseJsonResponse<any>(res); });
+        }, "thinking")
         .then(function(outcome) {
           if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast === "function") {
             showToast(successMessage || ("已切换思考深度 → " + getThinkingCompactLabel(normalized, getSelectedSession())), "success");
           }
         })
         .catch(function(failure) {
-          if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "切换思考深度失败");
+          if (failure && failure.latestField) recoverLatestSessionConfigMutation(session.id, "切换思考深度失败", "thinking", failure.latest);
         });
       }
 
@@ -950,15 +983,14 @@ function sessionProjectionSignature(session: any): string {
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
             body: JSON.stringify({ model: normalized || null })
-          }).then(function(res) { return res.json(); }).then(function(data) {
-            prerequisite.ok = !!(data && data.id && !data.error);
+          }).then(function(res) { return parseJsonResponse<any>(res); }).then(function(data) {
+            prerequisite.ok = !!(data && data.id === session.id && !data.error);
             prerequisite.error = data && data.error ? data.error : "";
             return data;
           });
-        })
+        }, "model")
         .then(function(outcome) {
-          if (thinkingFallback) return;
-          if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast === "function") {
+          if (applyLatestSessionConfigSnapshot(session.id, outcome) && !thinkingFallback && typeof showToast === "function") {
             var display = getModelDisplayLabel(normalized, getSelectedSession() || session);
             var hint = session.provider === "codex" ? "（下次对话生效）" : "";
             showToast("已切换模型 → " + display + hint, "success");
@@ -966,8 +998,8 @@ function sessionProjectionSignature(session: any): string {
         })
         .catch(function(failure) {
           prerequisite.ok = false;
-          if (!thinkingFallback && failure && failure.latest) {
-            recoverLatestSessionConfigMutation(session.id, "切换模型失败");
+          if (failure && failure.latestField) {
+            recoverLatestSessionConfigMutation(session.id, "切换模型失败", "model", failure.latest);
           }
         });
 
@@ -995,20 +1027,22 @@ function sessionProjectionSignature(session: any): string {
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
             body: JSON.stringify({ mode: normalized })
-          }).then(function(res) { return res.json(); });
-        })
+          }).then(function(res) { return parseJsonResponse<any>(res); });
+        }, "mode")
         .then(function(outcome) {
           if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast === "function") {
             var updated = state.sessions.find(function(item) { return item.id === session.id; }) || session;
             var effectiveMode = updated.mode || normalized;
-            state.chatMode = getSafeModeForTool(updated.provider || getPreferredTool(), effectiveMode);
+            if (state.selectedId === session.id) {
+              state.chatMode = getSafeModeForTool(updated.provider || getPreferredTool(), effectiveMode);
+            }
             refreshAllChatModeTrios();
             var hint = session.provider === "codex" ? "（Codex 固定全权限）" : "";
             showToast("已切换模式 → " + effectiveMode + hint, "success");
           }
         })
         .catch(function(failure) {
-          if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "切换模式失败");
+          if (failure && failure.latestField) recoverLatestSessionConfigMutation(session.id, "切换模式失败", "mode", failure.latest);
         });
       }
 
@@ -2871,11 +2905,17 @@ function sessionProjectionSignature(session: any): string {
         renderAttachmentPreview();
       }
 
+      export function getComposerConfigBlockReason(sessionId = state.selectedId): string {
+        if (!sessionId) return "";
+        if (getPendingSessionConfig(sessionId)) return "正在更新会话配置，请完成后再次发送。";
+        return Object.values(sessionConfigFailures[sessionId] || {}).join(" ");
+      }
+
       export function canSendComposer(value, sessionId?) {
         var id = sessionId === undefined ? state.selectedId : sessionId;
         const session = state.sessions.find(session => session.id === id);
-        if (session?.historyOnly || isSystemAiCall(session)) return false;
-        if (sessionToolSwitches.get(id)?.pending) return false;
+        if ((id && !session) || session?.historyOnly || isSystemAiCall(session)) return false;
+        if (sessionToolSwitches.get(id)?.pending || getComposerConfigBlockReason(id)) return false;
         return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
       }
 

@@ -1,6 +1,7 @@
 import type { TaskExecutionSubject, WandTaskAgent } from "../../../task-types";
 import type { IssueSessionSummary } from "./task-board-repository";
-import { issueAgentLabel, issueSessionRunning } from "./task-board-agent";
+import { taskSessionActivity, taskSessionIsRunning } from "./task-delivery-state";
+import { issueAgentLabel } from "./task-board-agent";
 
 export interface TaskExecutor {
   key: string;
@@ -9,7 +10,9 @@ export interface TaskExecutor {
   avatar?: string;
   provider: string;
   engine?: "cli" | "sdk";
-  state: "running" | "history" | "assigned";
+  state: "running" | "current" | "history" | "assigned";
+  activity?: string;
+  configured?: boolean;
   sessions: IssueSessionSummary[];
 }
 
@@ -35,8 +38,19 @@ export function taskExecutors(sessions: readonly IssueSessionSummary[], assigned
       avatar: employee?.avatar || boundAssignee?.avatar || snapshot?.avatar || session.employeeAvatar,
       provider: session.provider, engine: session.engine, state: "history", sessions: [] };
     current.sessions.push(session);
-    if (issueSessionRunning(session.status)) current.state = "running";
+    current.configured = subject?.type === "employee" && subject.id === session.employeeId
+      || (!subject || subject.type === "cli") && !session.employeeId && !session.employeeName
+        && (subject?.id ?? assigned?.provider) === session.provider
+        && (assigned?.engine ?? "cli") === (session.engine ?? "cli");
     result.set(key, current);
+  }
+  // Aggregate after grouping: array order must not let an idle session hide work or approval.
+  const activityOrder = ["运行中", "等待授权", "等待输入", "失败", "排队中", "空闲", "已停止", "已结束", "状态未确认"];
+  for (const executor of result.values()) {
+    const live = executor.sessions.filter(session => !session.archived && (session.source === "structured" || session.source === "pty"));
+    executor.state = live.some(taskSessionIsRunning) ? "running" : live.length || executor.configured ? "current" : "history";
+    executor.activity = live.length ? [...new Set(live.map(taskSessionActivity))]
+      .sort((a, b) => activityOrder.indexOf(a) - activityOrder.indexOf(b)).join(" / ") : "当前活动未确认";
   }
   if (subject?.type === "employee" && !result.has(`employee:${subject.id}`)) {
     const employee = employees.find(item => item.id === subject.id) ?? (assignee?.id === subject.id ? assignee : undefined);
@@ -44,11 +58,15 @@ export function taskExecutors(sessions: readonly IssueSessionSummary[], assigned
       provider: assigned?.provider ?? "", engine: assigned?.engine, state: "assigned", sessions: [] });
   } else if (subject?.type === "team") {
     result.set(`team:${subject.id}`, { key: `team:${subject.id}`, name: assignee?.id === subject.id ? assignee.name : "已指派团队", provider: "", state: "assigned", sessions: [] });
-  } else if ((!subject || subject.type === "cli") && !sessions.length && assigned) {
-    result.set(`tool:${assigned.provider}`, { key: `tool:${assigned.provider}`, name: issueAgentLabel(assigned.provider, assigned.engine), provider: assigned.provider, engine: assigned.engine, state: "assigned", sessions: [] });
+  } else if ((!subject || subject.type === "cli") && (assigned || subject?.id)) {
+    const provider = subject?.id ?? assigned!.provider;
+    const key = `tool:${provider}:${assigned?.engine ?? "cli"}`;
+    if (!result.has(key)) result.set(key, { key, name: issueAgentLabel(provider, assigned?.engine), provider,
+      engine: assigned?.engine, state: "assigned", sessions: [] });
   }
   // The current assignee must remain visible even when three historical executors fill the card.
-  const currentKey = subject ? `${subject.type === "cli" ? "tool" : subject.type}:${subject.id}` : null;
+  const currentKey = subject?.type === "cli" || !subject && assigned
+    ? `tool:${subject?.id ?? assigned!.provider}:${assigned?.engine ?? "cli"}` : subject ? `${subject.type}:${subject.id}` : null;
   return [...result.values()].sort((a, b) => Number(b.key === currentKey) - Number(a.key === currentKey));
 }
 

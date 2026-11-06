@@ -398,13 +398,9 @@ export class TaskRepository {
 
   /** Bind the first structured request to its stable message index exactly once. */
   bindTaskCommentResultStart(sessionId: string, requestId: string, startIndex: number): void {
-    const session = this.db.prepare("SELECT messages FROM command_sessions WHERE id = ?").get(sessionId) as { messages: string | null } | undefined;
-    if (!session?.messages) return;
-    let messages: unknown;
-    try { messages = JSON.parse(session.messages); } catch { return; }
-    const turns = Array.isArray(messages) ? messages as Array<{ role?: unknown; requestId?: unknown }> : null;
-    const turn = turns?.[startIndex];
-    if (!Number.isInteger(startIndex) || startIndex < 0 || turn?.role !== "user" || turn.requestId !== requestId) return;
+    if (!Number.isInteger(startIndex) || startIndex < 0) return;
+    const turn = this.s.readSessionRawMessageRange(sessionId, startIndex, startIndex + 1)[0];
+    if (turn?.role !== "user" || turn.requestId !== requestId) return;
     // Bind once. Candidate fallback explicitly reopens this anchor only after the
     // runner reports a verified pre-execution rejection.
     const fingerprint = crypto.createHash("sha256").update(JSON.stringify(turn)).digest("hex");
@@ -429,21 +425,17 @@ export class TaskRepository {
 
   /** Freeze end-exclusive message boundary only on an explicit terminal event, once. */
   freezeTaskCommentResult(sessionId: string, endIndex: number, outcome: "done" | "failed" | "stopped", requestId?: string | null): void {
-    const session = this.db.prepare("SELECT messages FROM command_sessions WHERE id = ?").get(sessionId) as { messages: string | null } | undefined;
-    if (!session?.messages) return;
-    let messages: unknown;
-    try { messages = JSON.parse(session.messages); } catch { return; }
-    if (!Array.isArray(messages) || !Number.isInteger(endIndex) || endIndex < 0 || endIndex > messages.length) return;
-    const turns = messages as Array<{ role?: unknown; requestId?: unknown }>;
+    if (!Number.isInteger(endIndex) || endIndex < 0) return;
     const bindings = this.db.prepare(`SELECT comment_id, result_start_index, result_request_id, result_start_fingerprint FROM wand_task_comment_dispatches
       WHERE session_id = ? AND result_start_index IS NOT NULL AND result_end_index IS NULL`).all(sessionId) as Array<{ comment_id: string; result_start_index: number; result_request_id: string; result_start_fingerprint: string | null }>;
     for (const binding of bindings) {
       const startIndex = Number(binding.result_start_index);
-      if (startIndex < 0 || endIndex <= startIndex || turns[startIndex]?.role !== "user"
-        || turns[startIndex]?.requestId !== binding.result_request_id || (requestId && requestId !== binding.result_request_id)) continue;
-      const startFingerprint = crypto.createHash("sha256").update(JSON.stringify(turns[startIndex])).digest("hex");
+      if (startIndex < 0 || endIndex <= startIndex || (requestId && requestId !== binding.result_request_id)) continue;
+      const range = this.s.readSessionRawMessageRange(sessionId, startIndex, endIndex);
+      if (range.length !== endIndex - startIndex || range[0]?.role !== "user"
+        || range[0].requestId !== binding.result_request_id) continue;
+      const startFingerprint = crypto.createHash("sha256").update(JSON.stringify(range[0])).digest("hex");
       if (startFingerprint !== binding.result_start_fingerprint) continue;
-      const range = turns.slice(startIndex, endIndex);
       // A later user request means the original terminal event was missed; never widen its result into another round.
       if (range.some((turn, index) => index > 0 && turn.role === "user")) continue;
       const fingerprint = crypto.createHash("sha256").update(JSON.stringify(range)).digest("hex");

@@ -57,6 +57,9 @@ export interface TaskWorkflowPatch {
 }
 
 export interface IssueSessionSummary {
+  source?: "structured" | "pty" | "storage" | "unknown";
+  lastActivityAt?: string | null;
+  turnStartedAt?: string | null;
   employeeId?: string;
   employeeName?: string;
   employeeAvatar?: string;

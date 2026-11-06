@@ -41,7 +41,7 @@ export const TaskCommentBubble = React.forwardRef<HTMLDivElement, {
           <DeferredMarkdownPreview content={comment.body} variant="inline" wrap renderText={value => <TaskReferenceText text={value} onOpenTask={onOpenTask}/>}/>
         </div>
         {(overflows || expanded) && <WandButton kind="ghost" size="small" aria-expanded={Boolean(expanded)} onClick={event => preserveDisclosurePosition(event.currentTarget, () => onExpanded(!expanded))}>{expanded ? "收起全文" : "展开全文"}</WandButton>}
-        {dispatch && <div className="task-comment-bubble-receipt">已指派给 {dispatch.employeeName} · {dispatch.status === "done" ? "本轮已结束" : statusLabel(dispatch.status ?? dispatch.state)}{dispatch.deliveryStatus ? ` · ${dispatch.deliveryStatus === "submitted" ? "交付已提交" : "尚未提交交付"}` : ""}{dispatch.error ? ` · ${dispatch.error}` : ""}</div>}
+        {dispatch && <div className="task-comment-bubble-receipt">已指派给 {dispatch.employeeName} · {dispatch.status === "done" ? "本轮已结束" : statusLabel(dispatch.status ?? dispatch.state)}{` · ${dispatch.deliveryStatus === "submitted" ? "任务当前交付已提交" : dispatch.deliveryStatus === "unsubmitted" ? "任务当前交付尚未提交" : "提交记录未确认"}`}{dispatch.error ? ` · ${dispatch.error}` : ""}</div>}
         {comment.reviewWritebackPending && <div role="status">验收结论待回填</div>}
       </div>
       {/* 动作与来源同一行：回复/派发/查看执行在左，来源说明收在右侧，展开时另起整行。 */}

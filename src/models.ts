@@ -44,6 +44,10 @@ const CLAUDE_VERIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
 const MAX_CLAUDE_MODEL_PROBES = 12;
 const CLAUDE_PROBE_CONCURRENCY = 3;
+// One budget for the complete API catalog, not a fresh timeout for each page.
+const CLAUDE_CATALOG_TIMEOUT_MS = 10_000;
+const CLAUDE_CATALOG_MAX_PAGES = 40;
+const CLAUDE_CATALOG_MAX_ENTRIES = 2000;
 
 interface ModelCacheStorage {
   getConfigValue(key: string): string | null;
@@ -75,7 +79,7 @@ interface ClaudeModelsApiEntry {
 }
 
 interface ClaudeModelsApi {
-  list(): AsyncIterable<ClaudeModelsApiEntry>;
+  list(signal: AbortSignal): AsyncIterable<ClaudeModelsApiEntry>;
 }
 
 export interface ModelRefreshOptions {
@@ -580,9 +584,33 @@ async function probeEffortList(
 }
 
 function createOfficialModelsApi(apiKey: string, baseURL?: string): ClaudeModelsApi {
-  const client = new Anthropic({ apiKey, baseURL: baseURL || undefined });
+  const client = new Anthropic({
+    apiKey, baseURL: baseURL || undefined,
+    maxRetries: 0, timeout: CLAUDE_CATALOG_TIMEOUT_MS, logLevel: "off",
+  });
   return {
-    list: () => client.models.list({ limit: 100 }) as AsyncIterable<ClaudeModelsApiEntry>,
+    async *list(signal) {
+      let afterId: string | undefined;
+      const cursors = new Set<string>();
+      for (let pages = 0; pages < CLAUDE_CATALOG_MAX_PAGES; pages++) {
+        signal.throwIfAborted();
+        const page = await client.models.list(
+          { limit: 100, ...(afterId ? { after_id: afterId } : {}) },
+          { signal },
+        );
+        signal.throwIfAborted();
+        for (const entry of page.data) yield entry;
+        if (!page.has_more) return;
+        // Do not let SDK auto-pagination silently end an incomplete catalog
+        // (empty page/missing cursor), or repeatedly request the same cursor.
+        if (!page.data.length || !page.last_id || cursors.has(page.last_id)) {
+          throw new Error("Claude catalog pagination did not advance.");
+        }
+        cursors.add(page.last_id);
+        afterId = page.last_id;
+      }
+      throw new Error("Claude catalog page limit exceeded.");
+    },
   };
 }
 
@@ -617,18 +645,34 @@ async function listClaudeModelsFromApi(
   options: ModelRefreshOptions,
   env: NodeJS.ProcessEnv,
 ): Promise<ProbeResult<ClaudeModelsApiEntry[]>> {
+  if (options.signal?.aborted) return { ok: false };
   const { apiKey, baseURL } = resolveClaudeAuth(options, env);
   if (!apiKey) return { ok: false };
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, CLAUDE_CATALOG_TIMEOUT_MS);
   try {
     const api = options.modelsApi ?? createOfficialModelsApi(apiKey, baseURL);
     const models: ClaudeModelsApiEntry[] = [];
-    for await (const model of api.list()) {
+    let rawEntries = 0;
+    for await (const model of api.list(controller.signal)) {
+      controller.signal.throwIfAborted();
+      if (++rawEntries > CLAUDE_CATALOG_MAX_ENTRIES) {
+        throw new Error("Claude catalog entry limit exceeded.");
+      }
       const id = normalizeClaudeModelId(model?.id);
       if (id) models.push({ id, ...(typeof model.display_name === "string" ? { display_name: model.display_name } : {}) });
     }
+    controller.signal.throwIfAborted();
     return { ok: true, value: models };
   } catch {
+    // Failure never publishes a truncated catalog or exposes transport details.
     return { ok: false };
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
+    controller.abort();
   }
 }
 

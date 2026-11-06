@@ -7,9 +7,12 @@ import type { WandStorage } from "./storage.js";
 import { type WandTask } from "./task-types.js";
 import type { SessionSnapshot } from "./types.js";
 
+export type TaskSessionSource = "structured" | "pty" | "storage" | "unknown";
+
 /** Request-scoped projection, never an authority for mutations or a cross-request cache. */
 export class TaskReadModel {
   readonly sessions: SessionSnapshot[];
+  readonly sessionSources = new Map<string, TaskSessionSource>();
   readonly sessionsById: Map<string, SessionSnapshot>;
   readonly sessionsByTask = new Map<string, SessionSnapshot[]>();
   readonly tasks;
@@ -25,6 +28,7 @@ export class TaskReadModel {
     this.sessions = snapshots ?? registry?.listSlim() ?? storage.loadSessionsSlim();
     this.sessionsById = new Map(this.sessions.map(session => [session.id, session]));
     for (const session of this.sessions) {
+      this.sessionSources.set(session.id, registry ? registry.ownerOf(session.id) ?? "unknown" : snapshots ? "unknown" : "storage");
       if (!session.workspaceTaskId) continue;
       const bucket = this.sessionsByTask.get(session.workspaceTaskId) ?? [];
       bucket.push(session);

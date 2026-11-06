@@ -704,10 +704,12 @@ export function registerWorkspaceRoutes(
     };
     const taskLimit = parseBoundedCount(req.query.limit);
     const sessionLimit = parseBoundedCount(req.query.maxSessions);
-    const snapshots = sessions?.listSlim();
+    const model = new TaskReadModel(storage, sessions);
+    const snapshots = model.sessions;
     const revision = crypto.createHash("sha256").update(JSON.stringify({
       storage: storage.projectionRevision(),
-      projection: "workspace-work-sessions-v6-task-list-snapshot",
+      projection: "workspace-work-sessions-v7-task-session-source",
+      sources: [...model.sessionSources],
       query: { includeArchived, workspaceFilter, taskLimit, sessionLimit },
       runtime: snapshots,
     })).digest("base64url");
@@ -715,7 +717,6 @@ export function registerWorkspaceRoutes(
       res.json({ unchanged: true, revision, groups: [], tasks: [] });
       return;
     }
-    const model = new TaskReadModel(storage, sessions, snapshots);
     const allSessions = model.sessions;
     // Server-owned one-shot feature logs are not Agent work. Do not filter by employee,
     // sessionSource=automation or generic automation IDs: those also carry dispatch,
@@ -743,7 +744,8 @@ export function registerWorkspaceRoutes(
     const summarize = (
       session: SessionSnapshot,
       names: { taskName?: string; workspaceName?: string } = {},
-    ) => workspaceSessionSummary(session, names, undefined, teamMarkersFor(teamMarkers, session.id));
+    ) => ({ ...workspaceSessionSummary(session, names, undefined, teamMarkersFor(teamMarkers, session.id)),
+      source: model.sessionSources.get(session.id) ?? "unknown" });
     // 目录自定义名（工作区名称）：没有项目实体的合成目录也按这个名字显示。
     const directoryNames = storage.listSessionDirectoryNames();
     const customNameForCwd = (cwd: string): string | undefined => {

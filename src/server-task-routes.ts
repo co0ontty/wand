@@ -197,6 +197,10 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
   if (!task) return null;
   const workspace = task.workspaceId ? (model ? model.workspaces.get(task.workspaceId) : storage.getWorkspace(task.workspaceId)) : null;
   const sessionIds = model ? model.taskSessions(task).map(session => session.id) : storage.listWandTaskSessionIds(task.id);
+  const taskSessions = sessionIds.flatMap(id => {
+    const session = model ? model.sessionsById.get(id) : sessions?.getSlim(id) ?? storage.getSessionSlim(id);
+    return session ? [{ session, source: model ? model.sessionSources.get(id) ?? "unknown" : sessions ? sessions.ownerOf(id) ?? "unknown" : "storage" }] : [];
+  });
   const milestone = model ? model.milestone(task.milestoneId) : resolvedMilestoneFields(storage, task.milestoneId);
   const assignee = model ? model.assignee(task) : task.executionSubject?.type === "employee" ? storage.getSiliconEmployee(task.executionSubject.id)
     : task.executionSubject?.type === "team" ? storage.getAiTeam(task.executionSubject.id) : null;
@@ -208,17 +212,11 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
     ...(task.status === "done" ? { legacyReview: true } : {}),
     commentCount: model ? model.commentCounts.get(task.id) ?? 0 : storage.countWandTaskComments(task.id),
     queuedCommentCount: model ? model.queuedCommentCounts.get(task.id) ?? 0 : storage.countQueuedTaskCommentDispatchesForTask(task.id),
-    ...(model ? model.execution(task) : taskExecutionProjection(sessionIds.flatMap(id => {
-      const session = sessions?.getSlim(id) ?? storage.getSessionSlim(id);
-      return session ? [session] : [];
-    }), storage.countQueuedTaskCommentDispatchesForTask(task.id))),
+    ...(model ? model.execution(task) : taskExecutionProjection(taskSessions.map(({ session }) => session), storage.countQueuedTaskCommentDispatchesForTask(task.id))),
     assignedExecutor: assignee ? { id: assignee.id, name: assignee.name, avatar: "avatar" in assignee ? compactTransportAvatar(assignee.avatar) : "" } : null,
     canArchive: model ? model.canArchive(task) : canArchiveTask(storage, sessions, task.id),
     sessionIds,
-    sessions: sessionIds.flatMap((id) => {
-      const session = model ? model.sessionsById.get(id) : sessions?.getSlim(id) ?? storage.getSessionSlim(id);
-      return session ? [taskSessionSummary(session)] : [];
-    }),
+    sessions: taskSessions.map(({ session, source }) => taskSessionSummary(session, source)),
     workspace: workspace
       ? { id: workspace.id, name: workspace.name, cwd: workspace.cwd }
       : null,
@@ -229,8 +227,12 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
   };
 }
 
-function taskSessionSummary(session: SessionSnapshot) {
+function taskSessionSummary(session: SessionSnapshot, source = "unknown") {
+  const eventTime = (value: unknown): string | null => typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
   return {
+    source,
+    lastActivityAt: eventTime(session.sessionKind === "pty" ? session.ptyLastActivityAt : session.structuredState?.lastActivityAt),
+    turnStartedAt: eventTime(session.sessionKind === "pty" ? session.ptyTurnStartedAt : session.structuredState?.turnStartedAt),
     id: session.id,
     provider: session.provider ?? "",
     sessionKind: session.sessionKind ?? "",
@@ -765,7 +767,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies, au
         if (result.comment.dispatch) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: dispatchStatus });
         res.status(202).json({ ok: true, taskId: task.id, subject: { type: "employee", id: employee.id }, comment: result.comment,
           queued: result.comment.dispatch?.state === "queued",
-          session: session ? { ...taskSessionSummary(session), employeeCandidateIndex: session.employeeCandidateIndex } : null });
+          session: session ? { ...taskSessionSummary(session, sessions ? sessions.ownerOf(session.id) ?? "unknown" : "storage"), employeeCandidateIndex: session.employeeCandidateIndex } : null });
         return;
       }
       const { session, cwd, workspaceId } = await dispatchAgentForTask(

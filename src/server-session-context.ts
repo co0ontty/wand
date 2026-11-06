@@ -53,6 +53,7 @@ export function createSessionRouteContext(deps: SessionRouteDeps): SessionRouteC
       config.cardDefaults ?? {},
     );
     return toSessionDetailDTO(snapshot, {
+      messageProjection: "projected",
       messages: windowed.messages,
       messageOffset: windowed.messageOffset,
       messageTotal: windowed.messageTotal,

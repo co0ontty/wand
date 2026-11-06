@@ -10,12 +10,10 @@ import { canArchiveBoardTask } from "./task-board-repository";
 import { WandButton } from "../ui";
 import { Alert, Avatar, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
-import { taskAcceptanceLabel, taskSessionIsRunning, taskSessionSummary } from "./task-delivery-state";
-import { taskAiVerified, taskCompleted, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
+import { resolveTaskDelivery, taskSessionActivity, taskSessionIsRunning, taskSessionSummary } from "./task-delivery-state";
+import { taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { DEFAULT_ITERATION_NAME } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
-import { normalizeProviderId } from "../../provider-identity";
-import { sidebarSessionState } from "../workspaces/sidebar-session-state";
 import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
 import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
 import { classNames } from "../ui/class-names";
@@ -49,7 +47,6 @@ import {
   issueLabelName,
   issueLabelTone,
   issuePriorityLabel,
-  issueSessionRunning,
   issueStatusLabel,
   issueTaskStatusLabel,
   listIssueAgents,
@@ -142,13 +139,14 @@ export function TaskBoardProcessingRow({
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement | null {
   if (task.status !== "doing") return null;
-  const running = task.executionStatus === "running" || task.sessions.some(taskSessionIsRunning);
-  const queued = task.queuedExecutionCount ?? task.queuedCommentCount ?? 0;
+  const running = task.sessions.some(taskSessionIsRunning);
+  const queued = (task.queuedCommentCount ?? 0) + task.sessions.reduce((count, session) =>
+    count + (taskSessionActivity(session) === "排队中" ? Math.max(1, session.queuedMessageCount ?? 0) : 0), 0);
   return <Flex align="center" gap="small" className={classNames("task-board-processing", running && "is-running")}>
     {running ? <TaskBoardProcessingGlyph/> : null}
     <span className="task-board-processing-label">{running ? "正在处理..." : queued > 0
       ? queued === 1 ? "排队中 · 等待执行" : `排队中 · ${queued} 条等待执行`
-      : taskHumanAccepted(task) ? "人工已确认 · 已完成" : task.acceptance?.blocker ? `待处理：${task.acceptance.blocker}`
+      : resolveTaskDelivery(task).blocker ? `待处理：${resolveTaskDelivery(task).blocker}`
       : task.sessions.length > 0 ? taskSessionSummary(task.sessions) + " · 尚待验收" : "等待派发"}</span>
     <span style={{ flex: 1 }} aria-hidden="true"/>
     {onOpenSession && <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>}
@@ -278,11 +276,7 @@ export function TaskBoardArchiveFolder({
 
 /** Keep assigned-session vocabulary aligned with sidebar state. */
 function sessionStatusLabel(session: IssueSessionSummary): string {
-  return session.archived ? "已归档" : sidebarSessionState({
-    ...session,
-    provider: normalizeProviderId(session.provider) ?? undefined,
-    engine: session.engine === "sdk" ? "core" : session.engine,
-  }).label;
+  return taskSessionActivity(session);
 }
 
 function TaskBoardListRow({
@@ -302,7 +296,8 @@ function TaskBoardListRow({
   onOpenSession?: (sessionId: string) => void;
   onOpenComments?(id: string): void;
 }): React.ReactElement {
-  const description = task.description.trim();
+  const description = task.description;
+  const delivery = resolveTaskDelivery(task, allTasks);
   // 整行都是进入详情的入口；行内的按钮/链接各自处理自己的点击。
   return <Card
     hoverable
@@ -322,13 +317,14 @@ function TaskBoardListRow({
         <small>{task.identifier}{parentLabel ? ` ↳ ${parentLabel}` : ""}</small>
         <strong>{task.title}</strong>
       </WandButton>
-      {description ? <p className="task-board-list-description">{description}</p> : null}
+      <Typography.Text type={delivery.tone}>{delivery.label}</Typography.Text>
+      {delivery.detail && <Typography.Paragraph type="warning">{delivery.detail}</Typography.Paragraph>}
+      <Typography.Paragraph type="secondary">下一步：{delivery.next} · {delivery.source}</Typography.Paragraph>
+      {description ? <p className="task-board-list-description">任务描述 / 历史记录：{description}</p> : null}
     </div>
     <Flex wrap align="center" gap={4} className="task-board-list-meta">
       {/* 列表已按阶段分组，只有「排队中」这类组名表达不了的状态才单独标出。 */}
       {issueTaskStatusLabel(task) !== issueStatusLabel(task.status) && <Tag className="task-board-chip task-detail-stage" data-stage={taskWorkflowStage(task.status)}>{issueTaskStatusLabel(task)}</Tag>}
-      {["review", "ready", "archived"].includes(task.status) || task.acceptance?.blocker?.trim()
-        ? <Typography.Text type={taskCompleted(task) ? "success" : task.acceptance?.blocker?.trim() ? "warning" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text> : null}
       <TaskBoardPriorityChip priority={task.priority}/>
       {task.milestone && task.milestone.name !== DEFAULT_ITERATION_NAME ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
@@ -336,7 +332,7 @@ function TaskBoardListRow({
       <span>{workspaceLabel}</span>
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
       {(task.commentCount ?? 0) > 0 && <TaskBoardCommentCountButton task={task} onOpen={() => onOpenComments?.(task.id)}/>}
-      <time dateTime={task.updatedAt} title={`更新于 ${formatIssueStamp(task.updatedAt)}`}>{formatIssueStamp(task.updatedAt)}</time>
+      <time dateTime={task.updatedAt} title={`任务更新时间：${formatIssueStamp(task.updatedAt)}`}>{formatIssueStamp(task.updatedAt)}</time>
     </Flex>
     <TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/>
   </Card>;
@@ -427,28 +423,29 @@ export function TaskBoardListView({
   </Flex>;
 }
 
-export function TaskBoardDashboard({ tasks, projectName, onOpen, onOpenAcceptance, onStage }: {
+export function TaskBoardDashboard({ tasks, allTasks = tasks, projectName, onOpen, onOpenAcceptance, onStage }: {
   allTasks?: WandTaskListed[]; projectName: string; tasks: WandTaskListed[];
   onOpen(id: string): void; onOpenAcceptance?(id: string): void; onOpenSession?: (sessionId: string) => void;
   onStage?(status: WandTaskStatus): void; actionHub?: React.ReactNode;
 }): React.ReactElement {
-  const goals = tasks.filter(task => !task.parentTaskId), stats = issueBoardStats(goals);
+  const goals = tasks, baseStats = issueBoardStats(goals);
+  const stats = { ...baseStats, accepted: goals.filter(task => resolveTaskDelivery(task, allTasks).completed).length };
   const active = goals.filter(task => task.status !== "archived");
-  const ready = active.filter(task => task.status === "ready" && taskAiVerified(task));
+  const ready = active.filter(task => task.status === "ready" && resolveTaskDelivery(task, allTasks).verified && !resolveTaskDelivery(task, allTasks).gaps.length);
   const review = active.filter(task => taskWorkflowStage(task.status) === "review");
-  const running = active.filter(task => task.executionStatus === "running" || task.sessions.some(taskSessionIsRunning));
-  const gaps = active.filter(task => task.acceptance?.blocker.trim());
+  const running = active.filter(task => task.sessions.some(taskSessionIsRunning));
+  const gaps = goals.filter(task => resolveTaskDelivery(task, allTasks).tone === "warning");
   const due = [...active].filter(task => task.dueDate).sort((a, b) => a.dueDate!.localeCompare(b.dueDate!)).slice(0, 5);
   const count = (status: WandTaskStatus): number => status === "backlog" ? stats.backlog : status === "todo" ? stats.todo : status === "doing" ? stats.doing : status === "review" ? stats.review : stats.ready;
   const completion = stats.total ? Math.round(stats.accepted / stats.total * 100) : 0;
   // 「需要你处理」只放必须由人决定的事：等你确认的交付，以及有阻塞的任务。
   const attention = [
     ...ready.map(task => ({ task, reason: "AI 已通过 · 等你确认", tone: "success" as const, action: () => (onOpenAcceptance ?? onOpen)(task.id), label: "查看交付" })),
-    ...gaps.filter(task => !ready.includes(task)).map(task => ({ task, reason: task.acceptance!.blocker.trim(), tone: "warning" as const, action: () => onOpen(task.id), label: "处理阻塞" })),
+    ...gaps.filter(task => !ready.includes(task)).map(task => ({ task, reason: resolveTaskDelivery(task, allTasks).label, tone: "warning" as const, action: () => onOpen(task.id), label: "处理阻塞" })),
   ];
   const owners = [...new Set(goals.map(task => task.assignedExecutor?.id).filter(Boolean))].map(id => {
     const owned = goals.filter(task => task.assignedExecutor?.id === id);
-    return { id: id!, name: owned[0]!.assignedExecutor!.name, active: owned.filter(task => task.status !== "archived").length, waiting: owned.filter(task => task.status === "ready").length, accepted: owned.filter(taskCompleted).length };
+    return { id: id!, name: owned[0]!.assignedExecutor!.name, active: owned.filter(task => task.status !== "archived").length, waiting: owned.filter(task => task.status === "ready").length, accepted: owned.filter(task => resolveTaskDelivery(task, allTasks).completed).length };
   }).sort((a, b) => b.active - a.active).slice(0, 6);
   const list = (items: WandTaskListed[], caption: (task: WandTaskListed) => string, empty: string): React.ReactElement => items.length
     ? <div className="task-dash-list">{items.slice(0, 5).map(task => <TaskSummaryRow key={task.id} task={task} caption={caption(task)} onOpen={onOpen}/>)}</div>
@@ -476,9 +473,9 @@ export function TaskBoardDashboard({ tasks, projectName, onOpen, onOpenAcceptanc
     </section>
     <div className="task-dash-grid">
       <section className="task-dash-section" aria-labelledby="task-dash-running"><header><h3 id="task-dash-running">正在执行</h3><span>{running.length || ""}</span></header>
-        {list(running, task => `${task.identifier} · ${task.assignedExecutor?.name || "未指派"}`, "当前没有正在运行的任务。")}</section>
+        {list(running, task => `${task.identifier} · ${task.assignedExecutor?.name || "负责人未记录"}`, "暂无已确认运行的任务。")}</section>
       <section className="task-dash-section" aria-labelledby="task-dash-review"><header><h3 id="task-dash-review">AI 验收中</h3><span>{review.length || ""}</span></header>
-        {list(review, task => `${task.identifier} · ${task.legacyReview ? "历史交付待核对" : task.executionStatus === "running" ? "正在核验" : task.executionStatus === "queued" ? "验收排队中" : "交付已提交"}`, "暂无待 AI 验收的任务。")}</section>
+        {list(review, task => `${task.identifier} · ${task.legacyReview ? "历史交付待核对" : task.sessions.some(taskSessionIsRunning) ? "正在核验" : (task.queuedCommentCount ?? 0) > 0 || task.sessions.some(session => taskSessionActivity(session) === "排队中") ? "验收排队中" : "交付已提交"}`, "暂无待 AI 验收的任务。")}</section>
       <section className="task-dash-section" aria-labelledby="task-dash-due"><header><h3 id="task-dash-due">近期到期</h3><span>{due.length || ""}</span></header>
         {list(due, task => `${task.identifier} · ${issueDueStamp(task.dueDate!)} · ${issueStatusLabel(task.status)}`, "没有设置截止日期的任务。")}</section>
       <section className="task-dash-section" aria-labelledby="task-dash-owners"><header><h3 id="task-dash-owners">负责人</h3><span>{owners.length || ""}</span></header>
@@ -771,7 +768,7 @@ export function TaskBoardAgentSessionList({ sessions, assigned, subject, assigne
     {executors.map(person => <section key={person.key} className="task-board-agent-group">
       <header className="task-board-agent-group-head"><strong>{person.name}</strong></header>
       {person.sessions.map(session => <WandButton key={session.id} kind="ghost" type="button" className="task-board-agent-session" onClick={() => onOpenSession?.(session.id)}>
-        <span className={classNames("task-board-agent-session-status", issueSessionRunning(session.status) && "is-running")}/>
+        <span className={classNames("task-board-agent-session-status", taskSessionIsRunning(session) && "is-running")}/>
         <strong>{session.title || person.name}</strong>
         <small>{[issueAgentLabel(session.provider, session.engine), wandModelDisplayName(catalog ?? null, session.provider, session.model), issueAgentEffortLabel(session.thinkingEffort), issueAgentModeLabel(session.mode), sessionStatusLabel(session)].join(" · ")}</small>
       </WandButton>)}

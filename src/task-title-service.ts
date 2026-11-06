@@ -2,7 +2,7 @@ import type { WandStorage } from "./storage.js";
 import type { WandConfig, ProcessEvent } from "./types.js";
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
-import { isAutoNameableBoardTask, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
+import { taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { getErrorMessage } from "./error-utils.js";
 
@@ -50,7 +50,8 @@ export class TaskTitleService {
     this.configure(options);
     for (const card of this.storage.listWandTasks()) {
       const descriptionUpdated = descriptionIds.has(card.id);
-      if (!descriptionUpdated && !isAutoNameableBoardTask(card)) continue;
+      // Description edits never transfer ownership of an explicitly user-owned title.
+      if (card.titleSource !== "auto") continue;
       const source = taskAutoNameSourceText(this.storage, card);
       if (!source) continue;
       // An explicit prompt edit refreshes only that task, including before its first execution.

@@ -14,7 +14,7 @@ import { preserveDisclosurePosition } from "../chat/disclosure-position";
 import { taskBoardRepository } from "./task-board-repository";
 import { ChatMessage } from "../chat/message";
 import { statusLabels } from "../../../task-comment-status.js";
-import { taskReviewLabel, taskWorkLabel } from "./task-delivery-state";
+import { resolveTaskDelivery } from "./task-delivery-state";
 import { TaskPersonAvatar } from "./task-person-avatar.js";
 
 function RowDisclosure({ id, summary, children, expanded, onExpanded, rowRef }: { id: string; summary: React.ReactNode; children: React.ReactNode; expanded?: boolean; onExpanded?(value: boolean): void; rowRef?: React.Ref<HTMLDivElement> }): React.ReactElement {
@@ -191,21 +191,22 @@ export const TaskCommentDispatchStreamRow = React.forwardRef<HTMLDivElement, {
   return <TaskCommentDispatchStreamRowContent {...props} rowRef={ref}/>;
 });
 
-export function TaskChildStreamRow({ task, onOpen, onOpenSession }: {
-  task: WandTaskListed; onOpen(id: string): void; onOpenSession?: (id: string) => void;
+export function TaskChildStreamRow({ task, displayTasks = [], onOpen, onOpenSession }: {
+  task: WandTaskListed; displayTasks?: readonly WandTaskListed[]; onOpen(id: string): void; onOpenSession?: (id: string) => void;
 }): React.ReactElement {
+  const delivery = resolveTaskDelivery(task, displayTasks);
   return <RowDisclosure id={`child-${task.id}`} summary={<Flex vertical gap={4} className="task-stream-row-line">
     <Flex align="baseline" gap="small"><Typography.Text type="secondary" style={{ flexShrink: 0 }}>{task.identifier}</Typography.Text><Typography.Text strong ellipsis={{ tooltip: task.title }} style={{ minWidth: 0, flex: 1 }}>{task.title}</Typography.Text></Flex>
     <Flex align="center" gap="small" wrap aria-label={`${task.identifier} 的工作与验收状态`}>
-      <Typography.Text>工作：{taskWorkLabel(task)}</Typography.Text>
-      <Typography.Text type={task.acceptance?.acceptedAt ? "success" : "secondary"}>验收：{taskReviewLabel(task)}</Typography.Text>
+      <Typography.Text type={delivery.tone}>{delivery.label}</Typography.Text>
+      <Typography.Text type="secondary">下一步：{delivery.next} · {delivery.source}</Typography.Text>
       <Typography.Text type="secondary">{task.assignedExecutor?.name || task.sessions.find(session => session.employeeName)?.employeeName || "未指定负责人"}</Typography.Text>
       {task.status === "archived" && <Tag>已归档</Tag>}
     </Flex>
   </Flex>}>
-    {task.description && <DeferredMarkdownPreview content={task.description} variant="inline" wrap/>}
-    {task.acceptance?.evidence && <Typography.Paragraph type="secondary">交付证据：{task.acceptance.evidence}</Typography.Paragraph>}
-    {task.acceptance?.blocker && <Typography.Text type="warning">阻塞：{task.acceptance.blocker}</Typography.Text>}
+    {task.description && <><Typography.Text type="secondary">任务描述 / 历史记录</Typography.Text><DeferredMarkdownPreview content={task.description} variant="inline" wrap/></>}
+    {delivery.records.map((record, index) => <Typography.Paragraph key={index} type="secondary">{record.label}：{record.evidence} · {record.source}</Typography.Paragraph>)}
+    {delivery.gaps.map(gap => <Typography.Paragraph key={gap.task.id} type="warning">{gap.task.identifier}：{gap.blocker}</Typography.Paragraph>)}
     <Flex wrap gap="small" className="task-stream-row-actions">
       <WandButton kind="ghost" size="small" onClick={() => onOpen(task.id)}>打开子任务与验收</WandButton>
       {task.sessions.map(session => <WandButton key={session.id} kind="ghost" size="small" onClick={() => onOpenSession?.(session.id)}>打开 {session.title || "子任务会话"}</WandButton>)}

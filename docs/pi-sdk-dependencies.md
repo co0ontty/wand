@@ -31,14 +31,18 @@ Pi CLI 官方内部也使用 Pi 的共享实现；隔离的是 **Wand 对其内�
 
 ## 验证
 
-```bash
-```
+### 当前持续检查
 
-- `pi-cli-isolation`：真实服务器在 SDK 入口被阻断时启动，CLI 创建/设置/资源发现正常；显式 SDK 返回错误，不留下半个会话。另一新进程证明只有显式 SDK 选择才首次导入它，且无全局预热也能创建 SDK 会话。
-- `pi-resource-selection`：真实 CLI 子进程阻断公共 SDK 入口，仍完成选定 Skills/MCP 和 CodeMode 的本地 fixture 模型请求；未选服务器连初始化都不发生。
-- `openrouter-free-cli`：源文件与编译文件的真实 CLI provider、工具续轮、resume 与价格边界回归，使用本地 fixture，不调用真实付费模型。
-- `pi-sdk-dependencies`：发布 SDK 依赖闭包/锁/嵌套版本与新进程真实导入。
+[CI 工作流](../.github/workflows/ci.yml) 当前配置为：安装项目依赖（`npm ci --prefer-offline`），执行 `npm run build`，分别对 browser 与 React 执行 `npx --no-install tsc --noEmit -p tsconfig.browser.json` / `tsconfig.react.json`，以及 `node scripts/stage-render-binaries.js --all --strict --check`。其中 [构建脚本](../scripts/build-body.js) 生成 Web 资产、编译服务端与声明文件并执行 bundle 预算门禁；Render 检查使用工作流检出的固定 `render-bin` 产物。这些是配置中的检查步骤，不代表某次运行已通过，也不覆盖 Pi CLI/SDK 的运行隔离或发布包干净安装验证。
 
-CI 在 `$RUNNER_TEMP/wand-ci-pi` 独立安装已验证的 Pi CLI 1.2.0，并把它的真实 npm bin 目录加入 PATH；测试不调用真实付费模型。这个安装不属于 Wand 的 SDK 依赖闭包，不能以 Wand `node_modules/.bin/pi` 冒充独立 CLI，也不修改机器上的全局 Pi。升级 CI CLI 时单独复验资源、加载隔离与拒绝/降级协议契约，不能把 CLI 版本机械跟随 SDK pin。
+本地代码改动的验证入口为 [package.json](../package.json) 中的 `npm run check`、`npm run build`；只做三套 TypeScript 检查、不生成资产时可用 `npm run typecheck`。按 [当前验证策略](testing-policy.md) 核对受影响流程，不恢复整包测试；纯文档改动只核对引用、约束及 `git diff --check`。
 
-改动后跑完整 check/test/build，核对 npm tarball 的干净生产安装。最终验收用已安装服务；更新必须走现有部署锁/Core 排空流程，不重启或强杀 daemon，不修改全局 Pi CLI。
+### 历史说明与证据边界
+
+基线 `78d2d14ae72895eb6fbf8788cbac5384617962b2` 的旧说明曾列出 `pi-cli-isolation`、`pi-resource-selection`、`openrouter-free-cli`、`pi-sdk-dependencies`，并声称 CI 独立安装 Pi CLI 1.2.0。这仅是旧文档记录，不是本次核实过的一次性验证结果：未提供对应运行记录，不能据此声称已验证。2026-10-30 起 `tests/` 套件已移除，当前 `package.json` 没有 `test` 脚本，CI 也没有上述测试或独立安装 Pi CLI 的步骤；它们不属于当前持续检查。
+
+### 后续发布验证建议（非现有 CI 承诺）
+
+涉及 Pi CLI/SDK 或发布依赖变更时，建议在相应任务授权范围内核对 npm tarball 的干净生产安装、SDK 依赖闭包与真实导入，以及独立 CLI 的资源选择、加载隔离和拒绝/降级契约。独立 CLI 不能用 Wand `node_modules/.bin/pi` 冒充，验证版本应单独记录，不机械跟随 SDK pin；未执行的项目应明确标注，不以历史说明代替证据，也不隐式调用真实付费模型。
+
+涉及运行功能的最终验收使用已安装服务；如需更新，遵守现有部署锁/Core 排空流程，不重启或强杀 daemon，不修改全局 Pi CLI。本节本身不授权安装、部署或运行验证。

@@ -340,19 +340,30 @@ export class PiTmuxHost implements StructuredExecHost {
     const previous = this.terminations.get(job.incarnationId);
     if (previous) return previous;
     const stopping = (async () => {
+      const current = this.job(job.runId);
+      if (!current || current.incarnationId !== job.incarnationId || current.tmux !== job.tmux
+        || current.pane !== job.pane || current.state !== job.state) {
+        throw new Error("Pi tmux 执行身份已改变，拒绝停止。");
+      }
+      const original = this.state(job);
+      if (original.status === "exited") return;
       let tag: string;
       try {
         const panes = (await this.tmux(["list-panes", "-t", `=${job.tmux}`, "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}"])).trim().split("\n");
-        const identity = job.pane ? panes.find(line => line.split("\t")[1] === job.pane) : panes[0];
+        const identity = job.pane ? panes.find(line => line.split("\t")[1] === job.pane) : undefined;
         if (!identity || identity.split("\t")[0] !== job.tmux) throw new Error("Pi tmux 精确目标不匹配，拒绝停止。");
-        const workerPid = this.state(job).workerPid;
-        if (workerPid && Number(identity.split("\t")[2]) !== workerPid) throw new Error("Pi tmux pane generation changed");
+        const workerPid = original.workerPid;
+        if (!workerPid || Number(identity.split("\t")[2]) !== workerPid) throw new Error("Pi tmux pane generation changed");
         tag = (await this.tmux(["show-options", "-v", "-t", job.tmux, "@wand-native-owner"])).trim();
       } catch (error) {
         if (this.state(job).status === "exited") return;
         throw error;
       }
       if (tag !== job.runId) throw new Error("Pi tmux 所有权不匹配，拒绝停止。");
+      const latest = this.state(job);
+      if (latest.status === "exited") return;
+      if (this.job(job.runId)?.incarnationId !== job.incarnationId || latest.pid !== original.pid
+        || latest.workerPid !== original.workerPid) throw new Error("Pi tmux 进程身份已改变，拒绝停止。");
       await this.tmux(["kill-session", "-t", `=${job.tmux}`]);
     })();
     this.terminations.set(job.incarnationId, stopping);

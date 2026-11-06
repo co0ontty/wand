@@ -109,11 +109,16 @@ function normalizePaths(value: unknown): RecentPath[] {
 
 export class HttpWorkspacesRepository implements WorkspacesRepository {
   private readonly startupGroups = createStartupPreload(() => this.readTaskGroups());
-  private taskListFlight: { key: string; promise: Promise<TaskListPage> } | null = null;
-  private retainedFormalTasks: unknown[] = [];
-  private formalTasksKnown = false;
+  private taskListFlight: { key: string; generation: number; promise: Promise<TaskListPage> } | null = null;
+  private taskListSnapshot: TaskListPage | null = null;
+  private taskListGeneration = 0;
+  private taskListRequest = 0;
   preloadTaskGroups(): void { this.startupGroups.preload(); }
-  clearPreload(): void { this.startupGroups.clear(); }
+  clearPreload(): void {
+    this.startupGroups.clear();
+    this.taskListGeneration += 1;
+    this.taskListSnapshot = null;
+  }
 
   constructor(private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init)) {}
 
@@ -137,39 +142,43 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
 
   private readTaskGroups(revision?: string): Promise<TaskListPage> {
     const key = revision ?? "";
-    if (this.taskListFlight?.key === key) return this.taskListFlight.promise;
-    const promise = this.fetchTaskGroups(key).finally(() => {
+    const generation = this.taskListGeneration;
+    if (this.taskListFlight?.key === key && this.taskListFlight.generation === generation) return this.taskListFlight.promise;
+    const promise = this.fetchTaskGroups(key, generation, ++this.taskListRequest).finally(() => {
       if (this.taskListFlight?.promise === promise) this.taskListFlight = null;
     });
-    this.taskListFlight = { key, promise };
+    this.taskListFlight = { key, generation, promise };
     return promise;
   }
 
-  private async fetchTaskGroups(revision: string): Promise<TaskListPage> {
-    // An empty revision opts into the envelope on the first read; an omitted query returns legacy arrays.
-    // Fetch both tiers once; groupSessionsByArchive keeps archived sessions out of active views.
-    // The person submenu and the archive folds otherwise cannot represent the server\'s archived tier.
-    const query = `?revision=${encodeURIComponent(revision)}&includeArchived=1`;
-    const body = await parseJsonResponse<unknown>(await this.fetchImpl(`/api/tasks${query}`, { credentials: "same-origin" }));
-    if (Array.isArray(body)) {
-      return { groups: body as TaskDirectoryGroup[], tasks: [], unchanged: false, formalTasksIncluded: false };
+  private async fetchTaskGroups(revision: string, generation: number, request: number): Promise<TaskListPage> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const requestedRevision = attempt === 0 ? revision : "";
+      const query = `?revision=${encodeURIComponent(requestedRevision)}&includeArchived=1`;
+      const body = await parseJsonResponse<unknown>(await this.fetchImpl(`/api/tasks${query}`, { credentials: "same-origin" }));
+      // Guard both the cache write and the snapshot returned to every consumer.
+      if (generation !== this.taskListGeneration || request !== this.taskListRequest) throw new Error("任务快照已失效，请等待最新读取；保留原列表。");
+      const result = body && typeof body === "object" && !Array.isArray(body) ? body as {
+        groups?: TaskDirectoryGroup[]; tasks?: unknown; revision?: string; unchanged?: boolean;
+      } : {};
+      // Only an initial, explicit legacy payload may use the separate formal-task fallback.
+      // A recovery read must still prove a complete new-protocol snapshot.
+      if (attempt === 0 && (Array.isArray(body) || Array.isArray(result.groups) && !("tasks" in result) && (result.unchanged === undefined || result.unchanged === false))) {
+        this.taskListSnapshot = null;
+        return { groups: Array.isArray(body) ? body : result.groups!, tasks: [], revision: typeof result.revision === "string" ? result.revision : undefined, unchanged: false, formalTasksIncluded: false };
+      }
+      if (result.unchanged === true) {
+        if (requestedRevision && result.revision === requestedRevision && this.taskListSnapshot?.revision === requestedRevision) {
+          // Return the complete paired snapshot, not unchanged groups from a different consumer.
+          return this.taskListSnapshot;
+        }
+      } else if (Array.isArray(result.groups) && Array.isArray(result.tasks) && typeof result.revision === "string" && result.revision) {
+        const snapshot: TaskListPage = { groups: result.groups, tasks: result.tasks, revision: result.revision, unchanged: false, formalTasksIncluded: true };
+        this.taskListSnapshot = snapshot;
+        return snapshot;
+      }
     }
-    const record = body && typeof body === "object" ? body as {
-      groups?: TaskDirectoryGroup[]; tasks?: unknown; revision?: string; unchanged?: boolean;
-    } : {};
-    const unchanged = record.unchanged === true;
-    const formalTasks = Array.isArray(record.tasks) ? record.tasks : null;
-    if (!unchanged && formalTasks) {
-      this.retainedFormalTasks = formalTasks;
-      this.formalTasksKnown = true;
-    }
-    return {
-      groups: Array.isArray(record.groups) ? record.groups : [],
-      tasks: unchanged && this.formalTasksKnown ? this.retainedFormalTasks : (formalTasks ?? []),
-      revision: typeof record.revision === "string" ? record.revision : undefined,
-      unchanged,
-      formalTasksIncluded: formalTasks !== null || (unchanged && this.formalTasksKnown),
-    };
+    throw new Error("任务快照不完整，完整读取仍未确认；保留原列表。");
   }
 
   async get(id: string): Promise<WorkspaceDetail> {

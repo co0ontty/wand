@@ -1,3 +1,5 @@
+import { taskSessionActivity, taskSessionIsRunning } from "./task-delivery-state";
+import type { IssueSessionSummary } from "./task-board-repository";
 import type {
   WandTask,
   WandTaskAgent,
@@ -131,7 +133,7 @@ export const ISSUE_COLUMNS: ReadonlyArray<{
   empty: string;
 }> = [
   { status: "backlog", label: "待立项", empty: "还没有待立项的任务" },
-  { status: "todo", label: "等待认领", empty: "还没有等待认领的任务" },
+  { status: "todo", label: "待执行", empty: "还没有待执行的任务" },
   { status: "doing", label: "执行中", empty: "暂无执行中的任务" },
   { status: "review", label: ISSUE_REVIEW_LABEL, empty: `还没有${ISSUE_REVIEW_LABEL}的任务` },
   { status: "ready", label: ISSUE_READY_LABEL, empty: `还没有${ISSUE_READY_LABEL}的任务` },
@@ -143,10 +145,14 @@ export function issueStatusLabel(status: WandTaskStatus): string {
     ?? (status === "archived" ? ISSUE_ARCHIVE_COLUMN.label : status);
 }
 
-export function issueTaskStatusLabel(task: { status: WandTaskStatus; executionStatus?: string | null; queuedCommentCount?: number; sessions?: readonly { status: string }[] }): string {
-  const queued = task.executionStatus === "queued" || (task.executionStatus == null
-    && (task.queuedCommentCount ?? 0) > 0 && !task.sessions?.some(session => issueSessionRunning(session.status)));
-  return task.status === "doing" && queued ? "排队中" : issueStatusLabel(task.status);
+export function issueTaskStatusLabel(task: { status: WandTaskStatus; executionStatus?: string | null; queuedCommentCount?: number; sessions?: readonly IssueSessionSummary[] }): string {
+  if (task.status === "archived") return issueStatusLabel(task.status);
+  const sessions = task.sessions ?? [];
+  if (sessions.some(taskSessionIsRunning)) return `${issueStatusLabel(task.status)} · 运行中`;
+  const queued = (task.queuedCommentCount ?? 0) > 0 || sessions.some(session => taskSessionActivity(session) === "排队中");
+  if (queued) return `${issueStatusLabel(task.status)} · 排队中`;
+  if (task.status === "doing") return `${issueStatusLabel(task.status)} · ${sessions.length ? [...new Set(sessions.map(taskSessionActivity))].join(" / ") : "暂无已确认活动"}`;
+  return issueStatusLabel(task.status);
 }
 
 /** 过滤开关用的整句：把状态名框起来，避免和「隐藏已完成」这类历史说法混用。 */

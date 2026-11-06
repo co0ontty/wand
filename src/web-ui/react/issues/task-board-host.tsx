@@ -2,7 +2,7 @@ import { buildTaskDispatchPrompt, taskDispatchConfiguration } from "./task-dispa
 import { TaskAcceptanceEditor, submitTaskWorkflow, taskAcceptanceDraft, taskCanConfirmArchive } from "./task-acceptance";
 import { TaskActions } from "./task-actions";
 import { TaskSessionSummary } from "./task-session-summary";
-import { taskAcceptanceLabel } from "./task-delivery-state";
+import { resolveTaskDelivery, taskAcceptanceLabel } from "./task-delivery-state";
 import { taskGoalProjection } from "../../../task-hierarchy";
 import { boardTaskArchiveBlockReason, boardTaskArchiveFeedback, canArchiveBoardTask } from "./task-board-repository";
 import "./library-layout";
@@ -18,7 +18,7 @@ import { draggedSessionId, isSessionDrag } from "../workspaces/session-drag";
 import { workspacesStore } from "../workspaces/controller";
 import { TaskOrganizeButton } from "../workspaces/task-organization";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
-import { DEFAULT_ITERATION_NAME, taskCompleted, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
+import { DEFAULT_ITERATION_NAME, taskHumanAccepted, taskWorkflowStage, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import {
   WandButton,
@@ -639,7 +639,7 @@ export function TaskBoardHost({
   const inWorkspace = (task: WandTaskListed): boolean => !filterWorkspaceId || task.workspaceId === filterWorkspaceId
     || (!task.workspaceId && inferredWorkspaces.get(task.id)?.id === filterWorkspaceId);
   const matches = filterIssues(tasks, query, "", filters, archiveOpen || view === "gantt").filter(inWorkspace);
-  const visible = sortTaskBoardTasks((executionQueue || view === "gantt" ? matches : taskGoalProjection(tasks, matches)).filter(task => view === "archive" ? task.status === "archived" : view === "gantt" || task.status !== "archived"), sort);
+  const visible = sortTaskBoardTasks((executionQueue || view === "gantt" ? matches : taskGoalProjection(view === "archive" ? tasks : tasks.filter(task => task.status !== "archived"), matches)).filter(task => view === "archive" ? task.status === "archived" : view === "gantt" || task.status !== "archived"), sort);
   if (view === "gantt" && sort === "manual") visible.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   const grouped = groupIssuesByStatus(visible);
   // 进入详情时保留列表顺序，避免轮询更新排序或子任务切到主任务后改变相邻项。
@@ -658,7 +658,7 @@ export function TaskBoardHost({
   const nextTask = detailIndex >= 0 ? detailSequence[detailIndex + 1] : undefined;
 
   const matchedTasks = filterIssues(tasks, query, "", filters, true).filter(inWorkspace);
-  const counted = executionQueue ? matchedTasks : taskGoalProjection(tasks, matchedTasks);
+  const counted = executionQueue ? matchedTasks : [...taskGoalProjection(tasks.filter(task => task.status !== "archived"), matchedTasks.filter(task => task.status !== "archived")), ...taskGoalProjection(tasks, matchedTasks.filter(task => task.status === "archived")).filter(task => task.status === "archived")];
   const activeCount = counted.filter((task) => task.status !== "archived").length;
   const archiveCount = counted.length - activeCount;
   // 「清空归档」删的是当前项目范围内全部归档卡片，不受搜索和筛选影响，确认框按这个数量说话。
@@ -779,6 +779,7 @@ export function TaskBoardHost({
     const assigned = task.agent;
     const busy = busyId === task.id;
     const parent = task.parentTaskId ? taskById.get(task.parentTaskId) : undefined;
+    const delivery = resolveTaskDelivery(task, tasks);
     const childCount = childCounts.get(task.id) ?? 0;
     const inferredWorkspace = task.workspaceId ? undefined : inferredWorkspaces.get(task.id);
     const showWorkspace = !filterWorkspaceId || (task.workspaceId ?? inferredWorkspace?.id) !== filterWorkspaceId;
@@ -866,13 +867,14 @@ export function TaskBoardHost({
         onClick={() => setSelectedId(task.id)}
       ><Typography.Text strong className="task-board-card-title" id={`task-${task.id}-title`}>{task.title || "未命名任务"}</Typography.Text></WandButton>
       </Flex>
-      {display.body && <p className="task-board-card-body">{task.description || "尚未填写说明"}</p>}
+      <Typography.Text className="task-board-card-acceptance" type={delivery.tone}>{delivery.label}</Typography.Text>
+      {delivery.detail && <Typography.Text type="warning">{delivery.detail}</Typography.Text>}
+      <Typography.Text type="secondary">下一步：{delivery.next} · {delivery.source}</Typography.Text>
+      {display.body && <p className="task-board-card-body">任务描述 / 历史记录：{task.description || "尚未填写说明"}</p>}
       {/* 状态行按阶段取舍：执行中看进度，交付后看验收；还没开工的卡片不显示「未验收」这类空话。 */}
       {task.status === "doing"
         ? <div className="task-board-card-status"><TaskBoardProcessingRow task={task}/></div>
-        : ["review", "ready", "archived"].includes(task.status) || task.acceptance?.blocker?.trim()
-          ? <div className="task-board-card-status"><Typography.Text className="task-board-card-acceptance" type={taskCompleted(task) ? "success" : task.acceptance?.blocker?.trim() ? "warning" : "secondary"}>{taskAcceptanceLabel(task.acceptance, task)}</Typography.Text></div>
-          : null}
+        : null}
       <Flex gap={4} align="center" className="task-board-card-meta" aria-label="任务属性">
         {parent && <Tag className="task-board-chip is-parent" title={`归属 ${parent.identifier} · ${parent.title}`}>↳ {parent.identifier}</Tag>}
         {showWorkspace && <TaskBoardProjectChip name={task.workspace ? task.workspace.name : inferredWorkspace?.name ?? "未归属工作区"} inferred={!task.workspace && !!inferredWorkspace}/>}
@@ -1167,6 +1169,7 @@ export function TaskBoardHost({
       inferredWorkspace={inferredWorkspaces.get(selected.id) ?? null}
       parent={tasks.find((task) => task.id === selected.parentTaskId) ?? null}
       children={selectedChildren}
+      displayTasks={tasks}
       parentOptions={issueParentOptions(tasks, selected.workspaceId, selected.id, selected.parentTaskId)}
       onOpenTask={setSelectedId}
       onCreateChild={() => openCreate("backlog", selected)}
@@ -1318,6 +1321,7 @@ function IssueDetail({
   inferredWorkspace,
   parent,
   children,
+  displayTasks,
   parentOptions,
   onOpenTask,
   onCreateChild,
@@ -1346,6 +1350,7 @@ function IssueDetail({
   inferredWorkspace: IssueWorkspace | null;
   parent: WandTaskListed | null;
   children: WandTaskListed[];
+  displayTasks: readonly WandTaskListed[];
   parentOptions: ReturnType<typeof issueParentOptions>;
   onOpenTask(id: string): void;
   onCreateChild(): void;
@@ -1423,8 +1428,8 @@ function IssueDetail({
   const mention = (): void => setCommentReplyRequest({ taskId: task.id, commentId: null, body: "", revision: Date.now() });
   const openCompose = (): void => { onEmployeeChange(""); setComposeOpen(true); };
   const acceptanceBlock = (
-    <div ref={acceptanceRef} className="task-detail-delivery"><Collapse key={task.id} ghost activeKey={acceptanceOpen ? ["acceptance"] : []} onChange={keys => setAcceptanceOpen(keys.includes("acceptance"))} className="task-detail-section is-secondary task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>{children.length ? "整体验收记录" : "交付记录"} · {taskAcceptanceLabel(task.acceptance, task)}</Typography.Text>,
-            children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })} onWorkflow={onWorkflow}/> }]}/></div>
+    <div ref={acceptanceRef} className="task-detail-delivery"><Collapse key={task.id} ghost activeKey={acceptanceOpen ? ["acceptance"] : []} onChange={keys => setAcceptanceOpen(keys.includes("acceptance"))} className="task-detail-section is-secondary task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>{children.length ? "整体验收记录" : "交付记录"} · {taskAcceptanceLabel(task.acceptance, task, displayTasks)}</Typography.Text>,
+            children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} displayTasks={displayTasks} busy={busy} onSave={acceptance => onPatch({ acceptance })} onWorkflow={onWorkflow}/> }]}/></div>
   );
 
   return <div className="task-board-detail" aria-label="任务详情">
@@ -1455,17 +1460,18 @@ function IssueDetail({
             {task.dueDate ? <TaskBoardDueChip date={task.dueDate} status={task.status}/> : null}
             <TaskBoardAgentChips compact sessions={task.sessions} assigned={task.agent} subject={task.executionSubject} assignee={task.assignedExecutor}/>
           </div>
-          <TaskWorkflowProgress task={task}/>
+          <TaskWorkflowProgress task={task} displayTasks={displayTasks}/>
           {inferredWorkspace && <Alert type="info" showIcon className="task-detail-inferred" title={`此任务没有绑定项目，但会话运行在「${inferredWorkspace.name}」`}
             action={<WandButton size="small" disabled={busy} onClick={() => void onPatch({ workspaceId: inferredWorkspace.id })}>归入 {inferredWorkspace.name}</WandButton>}/>}
-          <TaskNextStep task={task} children={children} reviewerName={reviewerName}
+          <TaskNextStep task={task} children={children} displayTasks={displayTasks} reviewerName={reviewerName}
             onHandleBlocker={(commentId, body) => setCommentReplyRequest({ taskId: task.id, commentId, body, revision: Date.now() })}
             onMention={mention} onOpenSession={onOpenSession} onEditDelivery={() => openDelivery("evidence")} onReturn={() => openDelivery("blocker")}/>
           {acceptanceBlock}
         </div>
         <div className="task-board-detail-body">
+          <Typography.Text type="secondary">任务描述 / 历史记录（不代表当前结论）</Typography.Text>
           <TaskDescription key={task.id} description={task.description} busy={busy} onSave={value => onPatch({ description: value })}/>
-          {children.length > 0 && <TaskReferenceableTasks key={`references-${task.id}`} children={children} onOpenTask={onOpenTask} onOpenSession={onOpenSession}
+          {children.length > 0 && <TaskReferenceableTasks key={`references-${task.id}`} children={children} displayTasks={displayTasks} onOpenTask={onOpenTask} onOpenSession={onOpenSession}
             onCreateChild={!task.parentTaskId && task.status !== "archived" ? onCreateChild : undefined}/>}
           <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt} replyRequest={commentReplyRequest?.taskId === task.id ? commentReplyRequest : null} dispatchPurpose={task.status === "review" || task.status === "done" ? "review" : "execution"} employees={employees}
             childTasks={children} sessions={task.sessions} onOpenSession={onOpenSession} onOpenTask={onOpenTask}/>

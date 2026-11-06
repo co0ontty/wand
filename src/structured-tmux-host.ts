@@ -443,13 +443,27 @@ export class StructuredTmuxHost implements StructuredExecHost {
       if (!Number.isSafeInteger(state.pid) || state.pid <= 0) {
         throw new Error("Structured tmux process identity is unavailable; refusing termination");
       }
-      const panes = (await this.tmux(job, ["list-panes", "-t", `=${job.tmux}`, "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}"])).trim().split("\n");
-      const identity = job.pane ? panes.find(line => line.split("\t")[1] === job.pane) : panes[0];
-      if (!identity || identity.split("\t")[0] !== job.tmux) throw new Error("Structured tmux exact target mismatch; refusing termination");
-      const owner = (await this.tmux(job, ["show-options", "-v", "-t", job.tmux, "@wand-structured-owner"])).trim();
-      if (owner !== job.runId) throw new Error("Structured tmux owner mismatch; refusing termination");
-      const pane = Number(identity.split("\t")[2]);
-      if (!state.workerPid || pane !== state.workerPid) throw new Error("Structured tmux pane generation mismatch");
+      const verifyOwner = async (): Promise<boolean> => {
+        const current = this.job(job.runId);
+        if (!current || current.incarnationId !== job.incarnationId || current.tmux !== job.tmux
+          || current.pane !== job.pane || current.state !== job.state || current.socket !== job.socket) {
+          throw new Error("Structured tmux execution changed; refusing termination");
+        }
+        const panes = (await this.tmux(job, ["list-panes", "-t", `=${job.tmux}`, "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}"])).trim().split("\n");
+        const identity = job.pane ? panes.find(line => line.split("\t")[1] === job.pane) : undefined;
+        if (!identity || identity.split("\t")[0] !== job.tmux) throw new Error("Structured tmux exact target mismatch; refusing termination");
+        const owner = (await this.tmux(job, ["show-options", "-v", "-t", job.tmux, "@wand-structured-owner"])).trim();
+        if (owner !== job.runId) throw new Error("Structured tmux owner mismatch; refusing termination");
+        const latest = this.state(job);
+        if (latest.status === "exited") return false;
+        if (this.job(job.runId)?.incarnationId !== job.incarnationId || latest.pid !== state.pid
+          || latest.workerPid !== state.workerPid || latest.supervisorPid !== state.supervisorPid
+          || !state.workerPid || Number(identity.split("\t")[2]) !== state.workerPid) {
+          throw new Error("Structured tmux process generation changed; refusing termination");
+        }
+        return true;
+      };
+      if (!await verifyOwner()) return;
       const requested = signal ?? "SIGTERM";
       if (requested === "SIGKILL") {
         try { process.kill(-(state.pid), "SIGKILL"); } catch (error) {
@@ -466,6 +480,8 @@ export class StructuredTmuxHost implements StructuredExecHost {
         await delay(25);
       }
       if (requested !== "SIGKILL") {
+        // TERM receipt is not ownership evidence for a later escalation.
+        if (!await verifyOwner()) return;
         try { process.kill(-(state.pid), "SIGKILL"); } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
         }

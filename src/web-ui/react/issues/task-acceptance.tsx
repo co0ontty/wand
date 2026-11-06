@@ -3,7 +3,8 @@ import { Alert, Flex, Typography } from "antd";
 import { TaskTextArea } from "./task-form";
 import { WandButton } from "../ui";
 import type { WandTaskListed, TaskWorkflowAction } from "./task-board-repository";
-import { taskAiVerified, taskCompleted, taskHumanAccepted, taskWorkflowStage, type TaskAcceptance } from "../../../task-types";
+import { taskAiVerified, taskWorkflowStage, type TaskAcceptance } from "../../../task-types";
+import { resolveTaskDelivery } from "./task-delivery-state";
 
 const drafts = new Map<string, { evidence: string; blocker: string }>();
 const workflowRequests = new Map<string, string>();
@@ -32,8 +33,8 @@ export async function submitTaskWorkflow(task: WandTaskListed, action: TaskWorkf
   return accepted;
 }
 
-export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow }: {
-  task: WandTaskListed; children: WandTaskListed[]; busy: boolean;
+export function TaskAcceptanceEditor({ task, children, displayTasks = children, busy, onSave, onWorkflow }: {
+  task: WandTaskListed; children: WandTaskListed[]; displayTasks?: readonly WandTaskListed[]; busy: boolean;
   onSave(value: TaskAcceptance): Promise<boolean>;
   onWorkflow(action: TaskWorkflowAction, value: { evidence: string; blocker: string; requestId: string; expectedUpdatedAt: string }): Promise<boolean>;
 }): React.ReactElement {
@@ -77,6 +78,7 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
     return ({ progress: "进展已记录", save: "交付已保存", submit: "已提交 AI 验收", pass: "已完成并归档", fail: "已退回执行", accept: "已确认并归档", return: "已退回执行" })[action];
   };
   const status = taskWorkflowStage(task.status), gaps = children.filter(child => !taskAiVerified(child));
+  const delivery = resolveTaskDelivery(task, displayTasks);
   const proof = Boolean(draft.evidence.trim()), blocked = Boolean(draft.blocker.trim());
   const actions: { action: TaskWorkflowAction; label: string; enabled: boolean }[] = [
     { action: "submit", label: "提交 AI 验收", enabled: status === "doing" && proof && !blocked },
@@ -99,8 +101,8 @@ export function TaskAcceptanceEditor({ task, children, busy, onSave, onWorkflow 
       {actions.filter(entry => entry.enabled || saving === entry.action || receipt?.action === entry.action).map(entry => <WandButton key={entry.action} kind={entry.action === "accept" || entry.action === "submit" || entry.action === "pass" ? "primary" : "secondary"} disabled={busy || Boolean(saving) || !entry.enabled} loading={saving === entry.action} onClick={() => void act(entry.action)}>{buttonTitle(entry.action, entry.label)}</WandButton>)}
     </Flex>
     {task.legacyReview && <Alert type="warning" showIcon title="历史验收记录待核对" description="旧状态没有可信 AI 通过记录；原证据与历史保留，请针对当前交付重新核验。"/>}
-    {gaps.length > 0 && <Alert type="warning" showIcon title={`${gaps.length} 个子任务尚未通过当前交付验收`} description={gaps.map(child => child.identifier).join("、")}/>}
-    {status === "archived" && <Alert type={taskCompleted(task) ? "success" : "info"} title={taskHumanAccepted(task) ? "人工已确认 · 已归档" : taskCompleted(task) ? "独立验收通过 · 已自动完成" : "历史归档 · 不代表本轮验收通过"}/>}
+    <Alert type={delivery.tone === "secondary" ? "info" : delivery.tone} title={delivery.label} description={`下一步：${delivery.next} · ${delivery.source}`}/>
+    {delivery.gaps.length > 0 && <Alert type="warning" showIcon title={`${delivery.gaps.length} 项后代缺口`} description={delivery.gaps.map(gap => `${gap.task.identifier}：${gap.blocker}`).join("；")}/>}
     <Typography.Text type="secondary" role="status">{feedback || "工作流按真实回执流转；版本冲突与未知结果不会自动重试。"}</Typography.Text>
   </Flex>;
 }
