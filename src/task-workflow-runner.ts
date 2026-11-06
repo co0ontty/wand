@@ -1,14 +1,29 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { shellQuote } from "./shell-quote.js";
+import { DEFAULT_EMPLOYEE_ID } from "./employee-types.js";
 import type { WandStorage } from "./storage.js";
 import type { StructuredRunnerAdapter, StructuredRunnerContext, StructuredRunnerExecution, StructuredRunnerObserver } from "./structured-runner.js";
+
+/** The default employee owns implementation even outside a task-board dispatch.
+ * This is a per-turn instruction, not a retry loop or an authorization grant.
+ * Keep it out of the saved role so existing sessions receive it without replacing user edits.
+ */
+export const DEFAULT_EMPLOYEE_COMPLETION_CONTRACT = [
+  "主执行责任：用户要求你实施、修复或完成工作时，你负责从需求到验证的完整闭环。先按本轮有效需求确定可核查的完成标准，再自行实现、检查、定位失败、修复和复验；纯咨询或明确只读审查仍遵守原范围。",
+  "逐项区分已验证通过、自测失败、尚未验证、明确外部阻塞和用户暂缓的工作。自测失败、已有部分提交、阶段报告或一轮对话结束都不代表任务完成。只要还有当前授权内可安全推进的目标，就继续处理；一个步骤受阻不能替代对其余独立步骤的检查。普通技术困难应调整诊断或方案，不重复空转、不降低标准，也不把原目标的缺口另拆给别人。",
+  "独立审查用于复核，不转移主执行责任。交给审查前先完成自己的全部适用自测；收到具体缺口后仍由你核实、修复并重新验证，不反复以“验收不通过”作为执行结论，不把让别人继续验收或返工作为完成。自己的自测不冒充独立验收或用户确认，最新用户决定替代旧标准。",
+  "沿用原任务或本轮指定的项目记录持久保存完成标准、已做修改、逐项证据、未完成项及下一步。恢复时先读取并核对实际状态，再接续未完成项，不重新实现已确认完成的部分，不把 idle、报告已写或工具退出码当作业务成功。未知送达先核实，不自动重放。",
+  "只有当前授权和条件下无法自行解除的外部阻塞、必要用户决定或权限缺口才暂停受影响步骤；说明已尝试的办法、具体条件、最小所需帮助及解除后的恢复步骤，并继续其他不依赖它的工作。用户要求暂停或停止时立即遵守。不得绕过拒绝、扩大权限、擅自部署、切换模型或另派员工；本约定不增加任何操作授权。全部适用标准确有证据通过后再提交交付，未完成就明确保留未完成，不承诺提示词或重试必然解决问题。",
+].join("\n\n");
 
 /** Runtime-only exact-task grant, independent of owner login and knowledge authorization. */
 export function startTaskWorkflowRunner(storage: WandStorage, runner: StructuredRunnerAdapter, context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
   const env = { ...context.env };
   delete env.WAND_TASK_DB; delete env.WAND_TASK_TOKEN;
   if (context.session.automationId?.startsWith("dingtalk:")) return runner.start({ ...context, env }, observer);
+  if (context.session.employeeId === DEFAULT_EMPLOYEE_ID) context = { ...context, session: { ...context.session,
+    runtimeSystemPrompt: [context.session.runtimeSystemPrompt, DEFAULT_EMPLOYEE_COMPLETION_CONTRACT].filter(Boolean).join("\n\n") } };
   const scope = storage.knowledgeSessionScope(context.session.id);
   const grant = (context.session.employeeId ?? null) === (scope?.employeeId ?? null) ? storage.issueTaskWorkflowAccess(context.session.id) : null;
   if (!grant) return runner.start({ ...context, env }, observer);
